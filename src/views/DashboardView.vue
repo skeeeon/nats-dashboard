@@ -6,18 +6,21 @@
         <h1 class="dashboard-name">
           {{ dashboardStore.activeDashboard?.name || 'Dashboard' }}
         </h1>
+        
+        <!-- Connection Status -->
         <div v-if="natsStore.isConnected" class="connection-status connected">
           <div class="status-dot"></div>
-          <span>Connected</span>
+          <span class="status-label">Connected</span>
           <span v-if="natsStore.rtt" class="rtt">{{ natsStore.rtt }}ms</span>
         </div>
         <div v-else class="connection-status disconnected">
           <div class="status-dot"></div>
-          <span>Disconnected</span>
+          <span class="status-label">Disconnected</span>
         </div>
       </div>
       
       <div class="toolbar-right">
+        <!-- Theme Toggle -->
         <button 
           class="btn-icon" 
           :title="`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`"
@@ -25,11 +28,17 @@
         >
           {{ theme === 'dark' ? '☀️' : '🌙' }}
         </button>
-        <button class="btn-primary" @click="showAddWidget = true">
-          + Add Widget
+        
+        <!-- Add Widget -->
+        <button class="btn-primary" @click="showAddWidget = true" title="Add Widget">
+          <span class="btn-text">+ Add Widget</span>
+          <span class="btn-icon-only">+</span>
         </button>
-        <button class="btn-secondary" @click="$router.push('/settings')">
-          ⚙️ Settings
+        
+        <!-- Settings -->
+        <button class="btn-secondary" @click="$router.push('/settings')" title="Settings">
+          <span class="btn-text">⚙️ Settings</span>
+          <span class="btn-icon-only">⚙️</span>
         </button>
       </div>
     </div>
@@ -171,9 +180,6 @@
               <div v-if="validationErrors.buttonLabel" class="error-text">
                 {{ validationErrors.buttonLabel }}
               </div>
-              <div v-else class="help-text">
-                Text displayed on the button
-              </div>
             </div>
             
             <div class="form-group">
@@ -188,9 +194,6 @@
               <div v-if="validationErrors.subject" class="error-text">
                 {{ validationErrors.subject }}
               </div>
-              <div v-else class="help-text">
-                NATS subject to publish to when clicked
-              </div>
             </div>
             
             <div class="form-group">
@@ -204,9 +207,6 @@
               />
               <div v-if="validationErrors.buttonPayload" class="error-text">
                 {{ validationErrors.buttonPayload }}
-              </div>
-              <div v-else class="help-text">
-                Data to send (JSON, string, number, boolean, etc.)
               </div>
             </div>
           </template>
@@ -225,9 +225,6 @@
               <div v-if="validationErrors.kvBucket" class="error-text">
                 {{ validationErrors.kvBucket }}
               </div>
-              <div v-else class="help-text">
-                Name of the KV bucket (e.g., "config", "twin")
-              </div>
             </div>
             
             <div class="form-group">
@@ -242,8 +239,22 @@
               <div v-if="validationErrors.kvKey" class="error-text">
                 {{ validationErrors.kvKey }}
               </div>
+            </div>
+
+            <div class="form-group">
+              <label>JSONPath Filter (optional)</label>
+              <input 
+                v-model="configForm.jsonPath" 
+                type="text" 
+                class="form-input"
+                :class="{ 'has-error': validationErrors.jsonPath }"
+                placeholder="$.data.value"
+              />
+              <div v-if="validationErrors.jsonPath" class="error-text">
+                {{ validationErrors.jsonPath }}
+              </div>
               <div v-else class="help-text">
-                Key within the bucket (e.g., "app.version", "location.bldg-home.test")
+                Extract specific data from JSON values
               </div>
             </div>
           </template>
@@ -268,7 +279,6 @@
           <button class="close-btn" title="Exit full screen (Esc)" @click="exitFullScreen">✕</button>
         </div>
         <div class="fullscreen-body">
-          <!-- Render the widget component directly -->
           <component
             v-if="fullScreenWidget.type === 'text'"
             :is="TextWidget"
@@ -296,13 +306,12 @@
       </div>
     </div>
     
-    <!-- Debug Panel (Performance Monitoring) -->
+    <!-- Debug Panel -->
     <DebugPanel />
   </div>
 </template>
 
 <script setup lang="ts">
-// ... (script content remains largely the same, just imports updated components)
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNatsStore } from '@/stores/nats'
@@ -321,7 +330,6 @@ import KvWidget from '@/components/widgets/KvWidget.vue'
 import { createDefaultWidget } from '@/types/dashboard'
 import type { WidgetConfig } from '@/types/dashboard'
 
-// ... (rest of script is identical to previous version)
 const router = useRouter()
 const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
@@ -341,8 +349,6 @@ const fullScreenWidget = computed(() => {
   return dashboardStore.getWidget(fullScreenWidgetId.value)
 })
 
-const selectedWidgetId = ref<string | null>(null)
-
 const configWidgetType = computed(() => {
   if (!configWidgetId.value) return null
   const widget = dashboardStore.getWidget(configWidgetId.value)
@@ -360,7 +366,6 @@ const configForm = ref({
   buttonPayload: '',
 })
 
-// All the handler functions remain the same...
 function subscribeWidget(widgetId: string) {
   const widget = dashboardStore.getWidget(widgetId)
   if (!widget) return
@@ -369,12 +374,7 @@ function subscribeWidget(widgetId: string) {
   
   if (widget.dataSource.type === 'subscription') {
     const subject = widget.dataSource.subject
-    if (!subject) {
-      console.warn(`Widget ${widgetId} has no subject configured`)
-      return
-    }
-    
-    console.log(`[Dashboard] Subscribing widget ${widgetId} to ${subject}`)
+    if (!subject) return
     subManager.subscribe(widgetId, subject, widget.jsonPath)
   }
 }
@@ -383,29 +383,18 @@ function unsubscribeWidget(widgetId: string) {
   const widget = dashboardStore.getWidget(widgetId)
   if (!widget) return
   
-  if (widget.dataSource.type === 'subscription') {
-    const subject = widget.dataSource.subject
-    if (subject) {
-      console.log(`[Dashboard] Unsubscribing widget ${widgetId} from ${subject}`)
-      subManager.unsubscribe(widgetId, subject)
-    }
+  if (widget.dataSource.type === 'subscription' && widget.dataSource.subject) {
+    subManager.unsubscribe(widgetId, widget.dataSource.subject)
   }
-  
   dataStore.removeBuffer(widgetId)
 }
 
 function subscribeAllWidgets() {
-  console.log(`[Dashboard] Subscribing ${dashboardStore.activeWidgets.length} widgets`)
-  dashboardStore.activeWidgets.forEach(widget => {
-    subscribeWidget(widget.id)
-  })
+  dashboardStore.activeWidgets.forEach(widget => subscribeWidget(widget.id))
 }
 
 function unsubscribeAllWidgets() {
-  console.log(`[Dashboard] Unsubscribing ${dashboardStore.activeWidgets.length} widgets`)
-  dashboardStore.activeWidgets.forEach(widget => {
-    unsubscribeWidget(widget.id)
-  })
+  dashboardStore.activeWidgets.forEach(widget => unsubscribeWidget(widget.id))
 }
 
 function handleDeleteWidget(widgetId: string) {
@@ -428,8 +417,6 @@ function handleDuplicateWidget(widgetId: string) {
   if (copy.type !== 'button' && copy.type !== 'kv') {
     subscribeWidget(copy.id)
   }
-  
-  console.log(`[Dashboard] Duplicated widget ${widgetId} → ${copy.id}`)
 }
 
 function handleConfigureWidget(widgetId: string) {
@@ -437,9 +424,20 @@ function handleConfigureWidget(widgetId: string) {
   if (!widget) return
   
   configWidgetId.value = widgetId
+  
+  // FIX: Determine subject based on widget type
+  // Text/Chart use dataSource.subject
+  // Buttons use buttonConfig.publishSubject
+  let currentSubject = ''
+  if (widget.type === 'button') {
+    currentSubject = widget.buttonConfig?.publishSubject || ''
+  } else {
+    currentSubject = widget.dataSource.subject || ''
+  }
+
   configForm.value = {
     title: widget.title,
-    subject: widget.dataSource.subject || '',
+    subject: currentSubject,
     jsonPath: widget.jsonPath || '',
     bufferSize: widget.buffer.maxCount,
     kvBucket: widget.dataSource.kvBucket || '',
@@ -447,91 +445,64 @@ function handleConfigureWidget(widgetId: string) {
     buttonLabel: widget.buttonConfig?.label || '',
     buttonPayload: widget.buttonConfig?.payload || '',
   }
-  
   showConfigWidget.value = true
 }
 
 function saveWidgetConfig() {
   if (!configWidgetId.value) return
-  
   const widget = dashboardStore.getWidget(configWidgetId.value)
   if (!widget) return
   
   validationErrors.value = {}
   
+  // Validation Logic
   const titleResult = validator.validateWidgetTitle(configForm.value.title)
-  if (!titleResult.valid) {
-    validationErrors.value.title = titleResult.error!
-  }
+  if (!titleResult.valid) validationErrors.value.title = titleResult.error!
   
   if (widget.type === 'text' || widget.type === 'chart') {
     const subjectResult = validator.validateSubject(configForm.value.subject)
-    if (!subjectResult.valid) {
-      validationErrors.value.subject = subjectResult.error!
-    }
+    if (!subjectResult.valid) validationErrors.value.subject = subjectResult.error!
     
     if (configForm.value.jsonPath) {
-      const jsonPathResult = validator.validateJsonPath(configForm.value.jsonPath)
-      if (!jsonPathResult.valid) {
-        validationErrors.value.jsonPath = jsonPathResult.error!
-      }
+      const jsonResult = validator.validateJsonPath(configForm.value.jsonPath)
+      if (!jsonResult.valid) validationErrors.value.jsonPath = jsonResult.error!
     }
     
     const bufferResult = validator.validateBufferSize(configForm.value.bufferSize)
-    if (!bufferResult.valid) {
-      validationErrors.value.bufferSize = bufferResult.error!
-    }
-    
+    if (!bufferResult.valid) validationErrors.value.bufferSize = bufferResult.error!
   } else if (widget.type === 'button') {
     const subjectResult = validator.validateSubject(configForm.value.subject)
-    if (!subjectResult.valid) {
-      validationErrors.value.subject = subjectResult.error!
-    }
-    
-    if (!configForm.value.buttonLabel.trim()) {
-      validationErrors.value.buttonLabel = 'Button label cannot be empty'
-    }
-    
+    if (!subjectResult.valid) validationErrors.value.subject = subjectResult.error!
+    if (!configForm.value.buttonLabel.trim()) validationErrors.value.buttonLabel = 'Label required'
     if (configForm.value.buttonPayload) {
       const jsonResult = validator.validateJson(configForm.value.buttonPayload)
-      if (!jsonResult.valid) {
-        validationErrors.value.buttonPayload = jsonResult.error!
-      }
+      if (!jsonResult.valid) validationErrors.value.buttonPayload = jsonResult.error!
     }
-    
   } else if (widget.type === 'kv') {
     const bucketResult = validator.validateKvBucket(configForm.value.kvBucket)
-    if (!bucketResult.valid) {
-      validationErrors.value.kvBucket = bucketResult.error!
-    }
-    
+    if (!bucketResult.valid) validationErrors.value.kvBucket = bucketResult.error!
     const keyResult = validator.validateKvKey(configForm.value.kvKey)
-    if (!keyResult.valid) {
-      validationErrors.value.kvKey = keyResult.error!
+    if (!keyResult.valid) validationErrors.value.kvKey = keyResult.error!
+    
+    // Validate JSON Path if present for KV
+    if (configForm.value.jsonPath) {
+      const jsonResult = validator.validateJsonPath(configForm.value.jsonPath)
+      if (!jsonResult.valid) validationErrors.value.jsonPath = jsonResult.error!
     }
   }
   
-  if (Object.keys(validationErrors.value).length > 0) {
-    console.log('[Dashboard] Validation errors:', validationErrors.value)
-    return
-  }
+  if (Object.keys(validationErrors.value).length > 0) return
   
-  const updates: any = {
-    title: configForm.value.title.trim(),
-  }
+  // Apply Updates
+  const updates: any = { title: configForm.value.title.trim() }
   
   if (widget.type === 'text' || widget.type === 'chart') {
-    updates.dataSource = {
-      ...widget.dataSource,
-      subject: configForm.value.subject.trim(),
-    }
+    updates.dataSource = { ...widget.dataSource, subject: configForm.value.subject.trim() }
     updates.jsonPath = configForm.value.jsonPath.trim() || undefined
-    updates.buffer = {
-      maxCount: configForm.value.bufferSize,
-    }
+    updates.buffer = { maxCount: configForm.value.bufferSize }
   } else if (widget.type === 'button') {
     updates.buttonConfig = {
-      label: configForm.value.buttonLabel.trim() || 'Send',
+      label: configForm.value.buttonLabel.trim(),
       publishSubject: configForm.value.subject.trim(),
       payload: configForm.value.buttonPayload.trim() || '{}',
     }
@@ -541,10 +512,13 @@ function saveWidgetConfig() {
       kvBucket: configForm.value.kvBucket.trim(),
       kvKey: configForm.value.kvKey.trim(),
     }
+    // Save JSON Path for KV
+    updates.jsonPath = configForm.value.jsonPath.trim() || undefined
   }
   
   dashboardStore.updateWidget(configWidgetId.value, updates)
   
+  // Re-subscribe if needed
   if (widget.type === 'text' || widget.type === 'chart') {
     unsubscribeWidget(configWidgetId.value)
     subscribeWidget(configWidgetId.value)
@@ -556,215 +530,81 @@ function saveWidgetConfig() {
 }
 
 function addTestWidget(type: 'text' | 'chart' | 'button' | 'kv' = 'text') {
-  const sizes = {
-    text: { w: 3, h: 2 },
-    chart: { w: 6, h: 4 },
-    button: { w: 2, h: 1 },
-    kv: { w: 4, h: 3 },
-  }
-  
-  const size = sizes[type]
-  const position = findNextAvailablePosition(size)
+  const sizes = { text: { w: 3, h: 2 }, chart: { w: 6, h: 4 }, button: { w: 2, h: 1 }, kv: { w: 4, h: 3 } }
+  const position = { x: 0, y: 100 } // Grid layout auto-places items
   const widget = createDefaultWidget(type, position)
   
+  // Set Type Specific Defaults
   switch (type) {
     case 'text':
       widget.title = 'Text Widget'
-      widget.dataSource = {
-        type: 'subscription',
-        subject: 'test.subject'
-      }
+      widget.dataSource = { type: 'subscription', subject: 'test.subject' }
       widget.jsonPath = '$.value'
       break
-      
     case 'chart':
       widget.title = 'Chart Widget'
-      widget.dataSource = {
-        type: 'subscription',
-        subject: 'test.subject'
-      }
+      widget.dataSource = { type: 'subscription', subject: 'test.subject' }
       widget.jsonPath = '$.value'
-      widget.chartConfig = {
-        chartType: 'line',
-      }
+      widget.chartConfig = { chartType: 'line' }
       break
-      
     case 'button':
       widget.title = 'Button Widget'
-      widget.buttonConfig = {
-        label: 'Send Message',
-        publishSubject: 'button.clicked',
-        payload: '{"action": "clicked", "timestamp": "' + new Date().toISOString() + '"}',
-      }
+      widget.buttonConfig = { label: 'Send', publishSubject: 'button.clicked', payload: '{"val": 1}' }
       break
-      
     case 'kv':
       widget.title = 'KV Widget'
-      widget.dataSource = {
-        type: 'kv',
-        kvBucket: 'my-bucket',
-        kvKey: 'my-key',
-      }
-      widget.kvConfig = {
-        displayFormat: 'json',
-      }
+      widget.dataSource = { type: 'kv', kvBucket: 'my-bucket', kvKey: 'my-key' }
       break
   }
   
   dashboardStore.addWidget(widget)
-  
-  if (type !== 'button' && type !== 'kv') {
-    subscribeWidget(widget.id)
-  }
-  
+  if (type !== 'button' && type !== 'kv') subscribeWidget(widget.id)
   showAddWidget.value = false
 }
 
-function findNextAvailablePosition(size: { w: number; h: number }): { x: number; y: number } {
-  const widgets = dashboardStore.activeWidgets
-  
-  if (widgets.length === 0) {
-    return { x: 0, y: 0 }
-  }
-  
-  let maxY = 0
-  let maxYWidget: WidgetConfig | null = null
-  
-  for (const widget of widgets) {
-    const bottomY = widget.y + widget.h
-    if (bottomY > maxY) {
-      maxY = bottomY
-      maxYWidget = widget
-    }
-  }
-  
-  return { x: 0, y: maxY }
-}
-
 function toggleFullScreen(widgetId: string) {
-  if (fullScreenWidgetId.value === widgetId) {
-    fullScreenWidgetId.value = null
-  } else {
-    fullScreenWidgetId.value = widgetId
-  }
+  fullScreenWidgetId.value = fullScreenWidgetId.value === widgetId ? null : widgetId
 }
 
 function exitFullScreen() {
   fullScreenWidgetId.value = null
 }
 
+// Shortcuts
 useKeyboardShortcuts([
-  {
-    key: 's',
-    ctrl: true,
-    description: 'Save dashboard',
-    handler: () => {
-      dashboardStore.saveToStorage()
-      console.log('[Shortcuts] Dashboard saved')
-    }
-  },
-  {
-    key: 'n',
-    ctrl: true,
-    description: 'Add new widget',
-    handler: () => {
-      showAddWidget.value = true
-    }
-  },
-  {
-    key: 'Delete',
-    description: 'Delete selected widget',
-    handler: () => {
-      if (selectedWidgetId.value) {
-        handleDeleteWidget(selectedWidgetId.value)
-        selectedWidgetId.value = null
-      }
-    }
-  },
-  {
-    key: 'Backspace',
-    description: 'Delete selected widget',
-    handler: () => {
-      if (selectedWidgetId.value) {
-        handleDeleteWidget(selectedWidgetId.value)
-        selectedWidgetId.value = null
-      }
-    }
-  },
-  {
-    key: 'Escape',
-    description: 'Close modal / Exit full screen',
-    handler: () => {
-      if (fullScreenWidgetId.value) {
-        exitFullScreen()
-      } else if (showConfigWidget.value) {
-        showConfigWidget.value = false
-      } else if (showAddWidget.value) {
-        showAddWidget.value = false
-      }
-    }
-  },
-  {
-    key: 'd',
-    ctrl: true,
-    description: 'Duplicate selected widget',
-    handler: (e) => {
-      if (selectedWidgetId.value) {
-        handleDuplicateWidget(selectedWidgetId.value)
-      }
-    }
-  },
-  {
-    key: 'f',
-    description: 'Toggle full screen on selected widget',
-    handler: () => {
-      if (selectedWidgetId.value) {
-        toggleFullScreen(selectedWidgetId.value)
-      }
-    }
-  },
+  { key: 's', ctrl: true, description: 'Save', handler: () => dashboardStore.saveToStorage() },
+  { key: 'n', ctrl: true, description: 'New widget', handler: () => showAddWidget.value = true },
+  { key: 'Escape', description: 'Close/Exit', handler: () => {
+    if (fullScreenWidgetId.value) exitFullScreen()
+    else showConfigWidget.value = false
+    showAddWidget.value = false
+  }}
 ])
 
-onMounted(async () => {
-  console.log('[Dashboard] Mounted')
-  
+onMounted(() => {
   dashboardStore.loadFromStorage()
-  
   if (!natsStore.isConnected && !natsStore.autoConnect) {
     const hasSettings = natsStore.serverUrls.length > 0 || natsStore.getStoredCreds() !== null
-    
-    if (!hasSettings) {
-      console.log('[Dashboard] No saved settings found, redirecting to settings')
-      router.push('/settings')
-      return
-    }
+    if (!hasSettings) router.push('/settings')
   }
-  
-  if (natsStore.isConnected) {
-    subscribeAllWidgets()
-  }
+  if (natsStore.isConnected) subscribeAllWidgets()
 })
 
 onUnmounted(() => {
-  console.log('[Dashboard] Unmounted')
   unsubscribeAllWidgets()
 })
 
 watch(() => natsStore.isConnected, (connected) => {
-  if (connected) {
-    subscribeAllWidgets()
-  } else {
+  if (connected) subscribeAllWidgets()
+  else {
     unsubscribeAllWidgets()
     dataStore.clearAllBuffers()
   }
 })
 
 watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
-  if (!natsStore.isConnected) return
-  
-  if (newCount > oldCount) {
-    const newWidget = dashboardStore.activeWidgets[newCount - 1]
-    subscribeWidget(newWidget.id)
+  if (natsStore.isConnected && newCount > oldCount) {
+    subscribeWidget(dashboardStore.activeWidgets[newCount - 1].id)
   }
 })
 </script>
@@ -778,7 +618,7 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   color: var(--text);
 }
 
-/* Toolbar - uses design tokens! */
+/* Toolbar - Responsive Layout */
 .dashboard-toolbar {
   display: flex;
   justify-content: space-between;
@@ -787,17 +627,21 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  gap: 12px;
+  flex-wrap: wrap; /* Allows wrapping on tablet/mobile */
 }
 
 .toolbar-left {
   display: flex;
   align-items: center;
   gap: 20px;
+  flex-wrap: wrap;
 }
 
 .toolbar-right {
   display: flex;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .dashboard-name {
@@ -805,9 +649,10 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   font-size: 20px;
   font-weight: 600;
   color: var(--text);
+  white-space: nowrap;
 }
 
-/* Connection status - uses design tokens! */
+/* Connection Status */
 .connection-status {
   display: flex;
   align-items: center;
@@ -817,6 +662,7 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   font-size: 13px;
   font-weight: 500;
   border: 2px solid;
+  white-space: nowrap;
 }
 
 .connection-status.connected {
@@ -844,7 +690,7 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   font-size: 11px;
 }
 
-/* Buttons - uses design tokens! */
+/* Buttons */
 .btn-primary,
 .btn-secondary,
 .btn-icon {
@@ -855,6 +701,11 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   cursor: pointer;
   transition: all 0.2s;
   border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
 }
 
 .btn-icon {
@@ -891,15 +742,75 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
 
-/* Modal - uses design tokens! */
+/* --- Responsive Media Queries --- */
+
+/* Text vs Icon visibility logic */
+.btn-text {
+  display: inline;
+}
+.btn-icon-only {
+  display: none;
+}
+
+/* Tablet / Small Laptop: < 900px */
+@media (max-width: 900px) {
+  .dashboard-toolbar {
+    padding: 12px 16px;
+  }
+}
+
+/* Mobile: < 600px */
+@media (max-width: 600px) {
+  .dashboard-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 12px;
+  }
+
+  .toolbar-left {
+    justify-content: space-between;
+    width: 100%;
+    margin-bottom: 8px;
+  }
+
+  .toolbar-right {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .btn-primary, .btn-secondary, .btn-icon {
+    flex: 1; /* Make buttons distribute space evenly */
+  }
+}
+
+/* Very Small Mobile: < 400px */
+@media (max-width: 400px) {
+  /* Hide text labels, show icons only to save space */
+  .btn-text {
+    display: none;
+  }
+  .btn-icon-only {
+    display: inline;
+    font-size: 16px;
+    font-weight: bold;
+  }
+  
+  .rtt {
+    display: none; /* Hide RTT stats on tiny screens */
+  }
+  
+  .status-label {
+    font-size: 12px;
+  }
+}
+
+/* Modal Styling */
 .modal-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0, 0, 0, 0.7);
   display: flex;
   align-items: center;
@@ -927,246 +838,47 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   border-bottom: 1px solid var(--border);
 }
 
-.modal-header h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-}
+.modal-header h3 { margin: 0; font-size: 18px; }
 
 .close-btn {
-  background: none;
-  border: none;
-  color: var(--muted);
-  font-size: 24px;
-  cursor: pointer;
-  padding: 0;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
+  background: none; border: none; color: var(--muted);
+  font-size: 24px; cursor: pointer;
 }
 
-.close-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text);
-}
+.modal-body { padding: 20px; overflow-y: auto; }
 
-.modal-body {
-  padding: 20px;
-  overflow-y: auto;
+.form-group { margin-bottom: 20px; }
+.form-group label { display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500; color: var(--text); }
+.form-input, .form-textarea {
+  width: 100%; padding: 10px 12px;
+  background: var(--input-bg); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-family: var(--mono);
 }
+.help-text { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.error-text { font-size: 12px; color: var(--color-error); margin-top: 4px; }
+.modal-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
 
-/* Form Styling - uses design tokens! */
-.form-group {
-  margin-bottom: 20px;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text);
-}
-
-.form-input {
-  width: 100%;
-  padding: 10px 12px;
-  background: var(--input-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-size: 14px;
-  font-family: var(--mono);
-  transition: all 0.2s;
-}
-
-.form-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-info-bg);
-}
-
-.form-input.has-error {
-  border-color: var(--color-error);
-}
-
-.form-input.has-error:focus {
-  box-shadow: 0 0 0 3px var(--color-error-bg);
-}
-
-.help-text {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.4;
-}
-
-.error-text {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--color-error);
-  line-height: 1.4;
-  font-weight: 500;
-}
-
-.form-textarea {
-  width: 100%;
-  padding: 10px 12px;
-  background: var(--input-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-size: 13px;
-  font-family: var(--mono);
-  transition: all 0.2s;
-  resize: vertical;
-  line-height: 1.5;
-}
-
-.form-textarea:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-info-bg);
-}
-
-.form-textarea.has-error {
-  border-color: var(--color-error);
-}
-
-.form-textarea.has-error:focus {
-  box-shadow: 0 0 0 3px var(--color-error-bg);
-}
-
-.modal-actions {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-  margin-top: 24px;
-  padding-top: 20px;
-  border-top: 1px solid var(--border);
-}
-
-/* Widget Type Selection - uses design tokens! */
 .widget-type-buttons {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 12px;
-  margin-top: 16px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-top: 16px;
 }
 
 .widget-type-btn {
-  background: var(--panel);
-  border: 2px solid var(--border);
-  border-radius: 8px;
-  padding: 20px 16px;
-  cursor: pointer;
-  transition: all 0.2s;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
+  background: var(--panel); border: 2px solid var(--border);
+  border-radius: 8px; padding: 20px 10px; cursor: pointer;
+  text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px;
 }
+.widget-type-btn:hover { border-color: var(--color-accent); background: var(--color-info-bg); }
+.widget-type-icon { font-size: 32px; }
 
-.widget-type-btn:hover {
-  border-color: var(--color-accent);
-  background: var(--color-info-bg);
-  transform: translateY(-2px);
-}
-
-.widget-type-icon {
-  font-size: 32px;
-  margin-bottom: 4px;
-}
-
-.widget-type-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.widget-type-desc {
-  font-size: 11px;
-  color: var(--muted);
-  line-height: 1.3;
-}
-
-/* Full-screen Modal - uses design tokens! */
+/* Fullscreen Modal */
 .fullscreen-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: var(--bg);
-  z-index: 2000;
-  display: flex;
-  flex-direction: column;
-  animation: fadeIn 0.2s ease-out;
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--bg); z-index: 2000; display: flex; flex-direction: column;
 }
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-.fullscreen-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-}
-
 .fullscreen-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20px 32px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
+  display: flex; justify-content: space-between; padding: 20px 32px;
+  background: var(--panel); border-bottom: 1px solid var(--border);
 }
-
-.fullscreen-title {
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.fullscreen-body {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 32px;
-}
-
-.fullscreen-hint {
-  padding: 12px 32px;
-  text-align: center;
-  font-size: 13px;
-  color: var(--muted);
-  background: var(--panel);
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.fullscreen-hint kbd {
-  display: inline-block;
-  padding: 3px 8px;
-  font-size: 12px;
-  line-height: 1;
-  color: var(--text);
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-family: var(--mono);
-  margin: 0 4px;
-}
+.fullscreen-body { flex: 1; padding: 32px; overflow: auto; }
+.fullscreen-hint { padding: 12px; text-align: center; color: var(--muted); background: var(--panel); border-top: 1px solid var(--border); }
 </style>

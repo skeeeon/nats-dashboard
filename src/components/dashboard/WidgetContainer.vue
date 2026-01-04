@@ -2,7 +2,7 @@
   <div class="widget-container">
     <!-- Header with title and actions -->
     <div class="widget-header">
-      <div class="widget-title">{{ config.title }}</div>
+      <div class="widget-title" :title="config.title">{{ config.title }}</div>
       <div class="widget-actions">
         <button 
           class="icon-btn" 
@@ -58,20 +58,6 @@ import ChartWidget from '@/components/widgets/ChartWidget.vue'
 import ButtonWidget from '@/components/widgets/ButtonWidget.vue'
 import KvWidget from '@/components/widgets/KvWidget.vue'
 
-/**
- * Widget Container
- * 
- * Grug say: Container is box that holds widget.
- * Box same for all widgets. Provides:
- * - Title bar
- * - Duplicate button
- * - Configure button
- * - Delete button
- * - Error handling
- * 
- * NEW: Now uses design tokens for all colors!
- */
-
 const props = defineProps<{
   config: WidgetConfig
 }>()
@@ -89,32 +75,26 @@ const error = ref<string | null>(null)
 // Map widget type to component
 const widgetComponent = computed(() => {
   switch (props.config.type) {
-    case 'text':
-      return TextWidget
-    case 'chart':
-      return ChartWidget
-    case 'button':
-      return ButtonWidget
-    case 'kv':
-      return KvWidget
+    case 'text': return TextWidget
+    case 'chart': return ChartWidget
+    case 'button': return ButtonWidget
+    case 'kv': return KvWidget
     default:
-      error.value = `Unknown widget type: ${props.config.type}`
+      error.value = `Unknown type: ${props.config.type}`
       return null
   }
 })
 
-// Handle delete with confirmation
 function handleDelete() {
   if (confirm(`Delete widget "${props.config.title}"?`)) {
     emit('delete')
   }
 }
 
-// Error boundary - catch errors from child components
 onErrorCaptured((err) => {
   console.error(`Widget error (${props.config.id}):`, err)
   error.value = err.message || 'Widget error'
-  return false // Stop error propagation
+  return false
 })
 </script>
 
@@ -139,10 +119,12 @@ onErrorCaptured((err) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 12px;
+  padding: 8px 10px;
   background: var(--widget-header-bg);
   border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
+  flex-shrink: 0; /* Prevent header from squashing */
+  gap: 8px;
+  height: 40px;
 }
 
 .widget-title {
@@ -151,14 +133,19 @@ onErrorCaptured((err) => {
   color: var(--text);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  
+  /* Flex magic for truncation */
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 1;
+  min-width: 0; /* Critical for flex item truncation */
 }
 
 .widget-actions {
   display: flex;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .icon-btn {
@@ -166,10 +153,17 @@ onErrorCaptured((err) => {
   border: none;
   color: var(--muted);
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 4px;
   border-radius: 4px;
   font-size: 14px;
   transition: all 0.2s;
+  
+  /* Touch target improvement */
+  min-width: 28px;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .icon-btn:hover {
@@ -187,9 +181,11 @@ onErrorCaptured((err) => {
   min-height: 0;
   overflow: hidden;
   position: relative;
+  /* Ensure touch actions propagate in the body (e.g., charts) */
+  touch-action: auto;
 }
 
-/* Error state styling - uses design tokens! */
+/* Error state styling */
 .widget-error {
   height: 100%;
   display: flex;

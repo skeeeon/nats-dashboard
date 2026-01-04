@@ -9,6 +9,10 @@
       :vertical-compact="true"
       :margin="[16, 16]"
       :use-css-transforms="true"
+      :responsive="true"
+      :breakpoints="breakpoints"
+      :cols="cols"
+      @breakpoint-changed="handleBreakpointChange"
       @layout-updated="handleLayoutUpdate"
     >
       <GridItem
@@ -38,20 +42,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, watch } from 'vue'
 import { GridLayout, GridItem } from 'grid-layout-plus'
 import WidgetContainer from './WidgetContainer.vue'
 import { useDashboardStore } from '@/stores/dashboard'
 import type { WidgetConfig } from '@/types/dashboard'
-
-/**
- * Dashboard Grid - Using grid-layout-plus
- * 
- * Grug say: Use correct API this time! v-bind="item" is key.
- * Now we get drag-drop AND resize. Much better!
- * 
- * NEW: Uses design tokens for styling!
- */
 
 const props = defineProps<{
   widgets: WidgetConfig[]
@@ -66,75 +61,106 @@ const emit = defineEmits<{
 
 const dashboardStore = useDashboardStore()
 
-/**
- * Convert widgets to grid-layout-plus format
- * Key difference: Use 'i' (string) not 'id'
- */
-const layoutItems = computed({
-  get: () => {
-    return props.widgets.map(w => ({
-      i: w.id,      // grid-layout-plus uses 'i' for ID
-      x: w.x,
-      y: w.y,
-      w: w.w,
-      h: w.h,
-    }))
-  },
-  set: () => {
-    // Required by v-model but handled via @layout-updated
-  }
-})
+const currentBreakpoint = ref('lg')
+
+// Standard Bootstrap-like breakpoints
+const breakpoints = { lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }
+// Column counts for each breakpoint
+const cols = { lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }
 
 /**
- * Get widget config by ID
- * Needed because GridItem only knows about layout, not widget config
+ * Helper to map store widgets to grid layout items
+ * 
+ * FIX IMPLEMENTED:
+ * We sort the widgets by their Y (row) and then X (col) position.
+ * This ensures the DOM order matches the Visual order.
+ * When the grid switches to mobile (stacking), it stacks based on DOM order,
+ * so this ensures Top-Left widgets appear first on mobile.
  */
-function getWidgetConfig(id: string): WidgetConfig | undefined {
-  return props.widgets.find(w => w.id === id)
+function mapWidgetsToLayout(widgets: WidgetConfig[]) {
+  // 1. Create a shallow copy to sort
+  const sortedWidgets = [...widgets].sort((a, b) => {
+    // Primary sort: Vertical Position (Y)
+    if (a.y !== b.y) {
+      return a.y - b.y
+    }
+    // Secondary sort: Horizontal Position (X)
+    return a.x - b.x
+  })
+
+  // 2. Map to layout items
+  return sortedWidgets.map(w => ({
+    i: w.id,
+    x: w.x,
+    y: w.y,
+    w: w.w,
+    h: w.h,
+  }))
+}
+
+// Local state for the layout (mutable)
+const layoutItems = ref(mapWidgetsToLayout(props.widgets))
+
+/**
+ * Sync from store to local state
+ */
+watch(() => props.widgets, (newWidgets) => {
+  if (currentBreakpoint.value === 'lg') {
+    layoutItems.value = mapWidgetsToLayout(newWidgets)
+  }
+}, { deep: true })
+
+/**
+ * Handle Breakpoint Changes
+ */
+function handleBreakpointChange(breakpoint: string, newLayout: any[]) {
+  console.log(`[Grid] Breakpoint changed: ${currentBreakpoint.value} -> ${breakpoint}`)
+  currentBreakpoint.value = breakpoint
+
+  if (breakpoint === 'lg') {
+    // Restore Master Layout from store (Desktop)
+    layoutItems.value = mapWidgetsToLayout(props.widgets)
+  } else {
+    // Accept Mobile Layout (temporary visual reflow)
+    layoutItems.value = newLayout
+  }
 }
 
 /**
  * Handle layout changes (drag/resize)
- * Grid-layout-plus emits updated layout with new positions
  */
 function handleLayoutUpdate(newLayout: Array<{ i: string; x: number; y: number; w: number; h: number }>) {
-  // Update each widget's position in store
-  newLayout.forEach(item => {
-    dashboardStore.updateWidgetLayout(item.i, {
-      x: item.x,
-      y: item.y,
-      w: item.w,
-      h: item.h,
+  layoutItems.value = newLayout
+
+  if (currentBreakpoint.value === 'lg') {
+    // Save to Store
+    newLayout.forEach(item => {
+      dashboardStore.updateWidgetLayout(item.i, {
+        x: item.x,
+        y: item.y,
+        w: item.w,
+        h: item.h,
+      })
     })
-  })
+  }
 }
 
-/**
- * Handle widget deletion
- */
+function getWidgetConfig(id: string): WidgetConfig | undefined {
+  return props.widgets.find(w => w.id === id)
+}
+
 function handleWidgetDelete(widgetId: string) {
   emit('deleteWidget', widgetId)
 }
 
-/**
- * Handle widget configuration
- */
 function handleWidgetConfigure(widgetId: string) {
   emit('configureWidget', widgetId)
 }
 
-/**
- * Handle widget duplication
- * Grug say: New feature! Copy widget.
- */
 function handleWidgetDuplicate(widgetId: string) {
   emit('duplicateWidget', widgetId)
 }
 
-/**
- * Handle widget full screen
- * Grug say: Make widget big!
- */
 function handleWidgetFullscreen(widgetId: string) {
   emit('fullscreenWidget', widgetId)
 }
@@ -145,12 +171,13 @@ function handleWidgetFullscreen(widgetId: string) {
   height: 100%;
   width: 100%;
   position: relative;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 16px;
   background: var(--bg);
 }
 
-/* Empty state styling - uses design tokens! */
+/* Empty state styling */
 .empty-state {
   position: absolute;
   top: 50%;
@@ -183,9 +210,15 @@ function handleWidgetFullscreen(widgetId: string) {
 :deep(.vue-grid-item) {
   transition: all 0.2s ease;
   background: transparent;
+  touch-action: none;
 }
 
-/* Dragging placeholder - uses design tokens! */
+/* Allow scrolling inside widget content */
+:deep(.vue-grid-item .widget-body) {
+  touch-action: auto;
+}
+
+/* Dragging placeholder */
 :deep(.vue-grid-item.vue-grid-placeholder) {
   background: var(--color-info-bg);
   border: 2px dashed var(--color-accent);
@@ -193,7 +226,7 @@ function handleWidgetFullscreen(widgetId: string) {
   transition: all 0.2s;
 }
 
-/* Resize handle styling - uses design tokens! */
+/* Resize handle styling */
 :deep(.vue-resizable-handle) {
   opacity: 0;
   transition: opacity 0.2s;
@@ -209,7 +242,6 @@ function handleWidgetFullscreen(widgetId: string) {
   opacity: 1 !important;
 }
 
-/* Dragging state - make it clear what's being dragged */
 :deep(.vue-grid-item.vue-dragging) {
   opacity: 0.8;
   z-index: 1000;

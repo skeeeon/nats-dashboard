@@ -3,19 +3,29 @@
     <button 
       class="widget-button"
       :style="buttonStyle"
-      :disabled="!natsStore.isConnected"
+      :class="{ 'success-state': showSuccess, 'error-state': showError }"
+      :disabled="!natsStore.isConnected || showSuccess"
       @click="handleClick"
     >
-      <span class="button-icon">{{ buttonIcon }}</span>
-      <span class="button-label">{{ buttonLabel }}</span>
+      <div class="button-content">
+        <!-- Icon -->
+        <span class="button-icon" v-if="currentIcon">
+          {{ currentIcon }}
+        </span>
+        
+        <!-- Label -->
+        <span class="button-label">
+          {{ currentLabel }}
+        </span>
+      </div>
+      
+      <!-- Loading / Progress bar effect (optional, simple animation) -->
+      <div v-if="showSuccess" class="success-ripple"></div>
     </button>
     
-    <div v-if="lastPublished" class="last-published">
-      Last published: {{ lastPublished }}
-    </div>
-    
-    <div v-if="!natsStore.isConnected" class="disconnected-warning">
-      ⚠️ Not connected to NATS
+    <!-- Disconnected Overlay -->
+    <div v-if="!natsStore.isConnected" class="disconnected-overlay" title="Not connected to NATS">
+      <span class="disconnect-icon">⚠️</span>
     </div>
   </div>
 </template>
@@ -26,71 +36,64 @@ import { useNatsStore } from '@/stores/nats'
 import { useDesignTokens } from '@/composables/useDesignTokens'
 import type { WidgetConfig } from '@/types/dashboard'
 
-/**
- * Button Widget
- * 
- * Grug say: Button push, message go. Simple.
- * Click button → publish message to NATS.
- * Good for triggering actions, sending commands, testing.
- * 
- * NEW: Now uses design tokens for colors and proper hover states!
- */
-
 const props = defineProps<{
   config: WidgetConfig
 }>()
 
 const natsStore = useNatsStore()
-const { semanticColors, getToken } = useDesignTokens()
-const lastPublished = ref<string | null>(null)
+const { semanticColors } = useDesignTokens()
 
-// Get button configuration with defaults
-const buttonLabel = computed(() => 
-  props.config.buttonConfig?.label || 'Publish'
-)
+// State for visual feedback
+const showSuccess = ref(false)
+const showError = ref(false)
 
-const buttonIcon = computed(() => {
-  // Optional: can configure icon per button
-  return '📤'
+// Defaults
+const defaultLabel = computed(() => props.config.buttonConfig?.label || 'Publish')
+const buttonColor = computed(() => props.config.buttonConfig?.color || semanticColors.value.primary)
+
+// Dynamic content based on state
+const currentLabel = computed(() => {
+  if (!natsStore.isConnected) return 'Disconnected'
+  if (showSuccess.value) return 'Sent!'
+  if (showError.value) return 'Error'
+  return defaultLabel.value
 })
 
-// Get button color - use primary if not specified
-const buttonColor = computed(() => {
-  if (props.config.buttonConfig?.color) {
-    return props.config.buttonConfig.color
+const currentIcon = computed(() => {
+  if (!natsStore.isConnected) return ''
+  if (showSuccess.value) return '✓'
+  if (showError.value) return '✕'
+  return '📤' // Default icon
+})
+
+// Dynamic styling
+const buttonStyle = computed(() => {
+  if (showSuccess.value) {
+    return {
+      backgroundColor: semanticColors.value.success,
+      borderColor: semanticColors.value.success,
+      color: 'white'
+    }
   }
-  // Default to primary color
-  return semanticColors.value.primary
-})
-
-// Calculate hover color (slightly darker)
-const buttonHoverColor = computed(() => {
-  if (props.config.buttonConfig?.color) {
-    // If custom color, darken it slightly
-    // This is a simple approach - could be more sophisticated
-    return props.config.buttonConfig.color
+  if (showError.value) {
+    return {
+      backgroundColor: semanticColors.value.error,
+      borderColor: semanticColors.value.error,
+      color: 'white'
+    }
   }
-  // Use token hover color
-  return semanticColors.value.primaryHover
+  
+  return {
+    backgroundColor: buttonColor.value,
+    borderColor: buttonColor.value,
+    // CSS variable for hover effect in style tag
+    '--hover-bg': adjustColorOpacity(buttonColor.value, 0.8)
+  }
 })
 
-const buttonStyle = computed(() => ({
-  backgroundColor: buttonColor.value,
-  borderColor: buttonColor.value,
-  '--hover-bg': buttonHoverColor.value,
-}))
+const publishSubject = computed(() => props.config.buttonConfig?.publishSubject || 'button.clicked')
+const publishPayload = computed(() => props.config.buttonConfig?.payload || '{}')
 
-const publishSubject = computed(() => 
-  props.config.buttonConfig?.publishSubject || 'button.clicked'
-)
-
-const publishPayload = computed(() => 
-  props.config.buttonConfig?.payload || '{}'
-)
-
-/**
- * Handle button click - publish message to NATS
- */
 function handleClick() {
   if (!natsStore.nc) return
   
@@ -100,99 +103,132 @@ function handleClick() {
     
     natsStore.nc.publish(publishSubject.value, payload)
     
-    // Update last published timestamp
-    lastPublished.value = new Date().toLocaleTimeString()
-    
-    // Clear after 3 seconds
+    // Trigger success feedback
+    showSuccess.value = true
     setTimeout(() => {
-      lastPublished.value = null
-    }, 3000)
+      showSuccess.value = false
+    }, 1500)
     
-    console.log(`[Button] Published to ${publishSubject.value}:`, publishPayload.value)
+    console.log(`[Button] Published to ${publishSubject.value}`)
   } catch (err) {
     console.error('[Button] Publish error:', err)
+    // Trigger error feedback
+    showError.value = true
+    setTimeout(() => {
+      showError.value = false
+    }, 1500)
   }
+}
+
+// Helper to darken/lighten color for hover (simple approximation)
+function adjustColorOpacity(hex: string, opacity: number) {
+  // If it's already an rgba/var, just return it (fallback)
+  if (!hex.startsWith('#')) return hex
+  
+  // Convert hex to rgb
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`
 }
 </script>
 
 <style scoped>
 .button-widget {
   height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
+  width: 100%;
+  padding: 8px; /* Small gutter so button doesn't touch edges */
   background: var(--widget-bg);
-  border-radius: 8px;
-  gap: 12px;
+  position: relative;
+  display: flex;
 }
 
 .widget-button {
+  flex: 1; /* Fill container */
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 16px 32px;
-  font-size: 16px;
-  font-weight: 600;
-  border-radius: 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
   cursor: pointer;
-  transition: all 0.2s;
-  border: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   color: white;
-  min-width: 150px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  /* backgroundColor and borderColor from style binding */
+  font-weight: 600;
+  font-size: 14px;
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.widget-button:hover:not(:disabled) {
-  background: var(--hover-bg);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+.widget-button:hover:not(:disabled):not(.success-state) {
+  background-color: var(--hover-bg) !important; /* Fallback provided by inline style */
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
 }
 
 .widget-button:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .widget-button:disabled {
-  opacity: 0.5;
+  opacity: 0.6;
   cursor: not-allowed;
+  filter: grayscale(0.5);
+}
+
+/* Button Content */
+.button-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 2;
 }
 
 .button-icon {
-  font-size: 20px;
+  font-size: 1.2em;
+  line-height: 1;
 }
 
 .button-label {
-  font-size: 14px;
   letter-spacing: 0.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
-.last-published {
-  font-size: 11px;
-  color: var(--muted);
-  animation: fadeIn 0.3s ease-out;
+/* Disconnected Overlay */
+.disconnected-overlay {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  pointer-events: none;
+  z-index: 10;
 }
 
-.disconnected-warning {
-  font-size: 11px;
-  color: var(--color-error);
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.disconnect-icon {
+  font-size: 16px;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+/* Success Animation */
+@keyframes ripple {
+  0% { transform: scale(0); opacity: 0.5; }
+  100% { transform: scale(4); opacity: 0; }
+}
+
+.success-ripple {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  animation: ripple 0.6s ease-out;
 }
 </style>
