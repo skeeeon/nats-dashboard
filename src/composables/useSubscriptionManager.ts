@@ -40,6 +40,8 @@ interface SubscriptionRef {
  * 5. When message arrives: Extract data for each widget, send to buffer
  * 6. When widget destroyed: Remove from listener list
  * 7. If listener list empty: Unsubscribe from NATS
+ * 
+ * UPDATED: Less noisy console logging
  */
 export function useSubscriptionManager() {
   const natsStore = useNatsStore()
@@ -66,20 +68,26 @@ export function useSubscriptionManager() {
       return
     }
     
-    console.log(`[SubMgr] Widget ${widgetId} subscribing to ${subject}`)
+    if (import.meta.env.DEV) {
+      console.log(`[SubMgr] Widget ${widgetId} subscribing to ${subject}`)
+    }
     
     // Check if subscription already exists
     let subRef = subscriptions.get(subject)
     
     if (subRef) {
       // Subscription exists - just add this widget to listeners
-      console.log(`[SubMgr] Reusing existing subscription to ${subject}`)
+      if (import.meta.env.DEV) {
+        console.log(`[SubMgr] Reusing existing subscription to ${subject}`)
+      }
       subRef.listeners.set(widgetId, { widgetId, jsonPath })
       return
     }
     
     // Subscription doesn't exist - create new one
-    console.log(`[SubMgr] Creating new subscription to ${subject}`)
+    if (import.meta.env.DEV) {
+      console.log(`[SubMgr] Creating new subscription to ${subject}`)
+    }
     
     try {
       const natsSub = natsStore.nc.subscribe(subject)
@@ -104,13 +112,14 @@ export function useSubscriptionManager() {
   /**
    * Unsubscribe widget from subject
    * Grug say: Widget calls this when destroyed or changed
+   * 
+   * UPDATED: Less noisy - don't warn if subscription doesn't exist
    */
   function unsubscribe(widgetId: string, subject: string) {
-    console.log(`[SubMgr] Widget ${widgetId} unsubscribing from ${subject}`)
-    
     const subRef = subscriptions.get(subject)
     if (!subRef) {
-      console.warn(`[SubMgr] No subscription found for ${subject}`)
+      // Silently return - this happens during initial page load
+      // when we unsubscribe before any subscriptions exist
       return
     }
     
@@ -119,11 +128,11 @@ export function useSubscriptionManager() {
     
     // If no more listeners, clean up NATS subscription
     if (subRef.listeners.size === 0) {
-      console.log(`[SubMgr] No more listeners for ${subject}, cleaning up subscription`)
+      if (import.meta.env.DEV) {
+        console.log(`[SubMgr] No more listeners for ${subject}, cleaning up subscription`)
+      }
       cleanup(subRef)
       subscriptions.delete(subject)
-    } else {
-      console.log(`[SubMgr] ${subRef.listeners.size} listeners remaining for ${subject}`)
     }
   }
   
@@ -191,7 +200,9 @@ export function useSubscriptionManager() {
    * Grug say: Call this when disconnecting from NATS
    */
   function cleanupAll() {
-    console.log(`[SubMgr] Cleaning up ${subscriptions.size} subscriptions`)
+    if (import.meta.env.DEV) {
+      console.log(`[SubMgr] Cleaning up ${subscriptions.size} subscriptions`)
+    }
     
     for (const subRef of subscriptions.values()) {
       cleanup(subRef)

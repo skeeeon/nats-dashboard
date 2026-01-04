@@ -71,6 +71,14 @@ import { useDesignTokens } from '@/composables/useDesignTokens'
 import { useThresholds } from '@/composables/useThresholds'
 import type { WidgetConfig } from '@/types/dashboard'
 
+/**
+ * KV Widget Component
+ * 
+ * Grug say: Watch key-value store. Show value. Update when change.
+ * 
+ * FIXED: Now watches for NATS connection and loads when connected
+ */
+
 const props = defineProps<{
   config: WidgetConfig
 }>()
@@ -139,7 +147,10 @@ const valueColor = computed(() => {
   return color || baseColors.value.text
 })
 
-// --- Load Logic (Same as before) ---
+/**
+ * Load KV value from NATS
+ * Grug say: Get value from bucket, watch for changes
+ */
 async function loadKvValue() {
   const bucket = props.config.dataSource.kvBucket
   const key = props.config.dataSource.kvKey
@@ -150,7 +161,7 @@ async function loadKvValue() {
     return
   }
   
-  if (!natsStore.nc) {
+  if (!natsStore.nc || !natsStore.isConnected) {
     error.value = 'Not connected to NATS'
     loading.value = false
     return
@@ -159,9 +170,11 @@ async function loadKvValue() {
   try {
     loading.value = true
     error.value = null
+    
     const kvm = new Kvm(natsStore.nc)
     const kv = await kvm.open(bucket)
     const entry = await kv.get(key)
+    
     if (entry) {
       const decoder = new TextDecoder()
       kvValue.value = decoder.decode(entry.value)
@@ -170,8 +183,11 @@ async function loadKvValue() {
     } else {
       kvValue.value = null
     }
+    
+    // Watch for changes
     const iter = await kv.watch({ key })
     watcher = iter
+    
     ;(async () => {
       try {
         for await (const e of iter) {
@@ -192,6 +208,7 @@ async function loadKvValue() {
         console.error('[KV Widget] Watch error:', err)
       }
     })()
+    
     loading.value = false
   } catch (err: any) {
     console.error('[KV Widget] Load error:', err)
@@ -204,18 +221,54 @@ async function loadKvValue() {
   }
 }
 
+/**
+ * Cleanup watcher
+ * Grug say: Stop watching when widget destroyed
+ */
 function cleanup() {
   if (watcher) {
-    try { watcher.stop() } catch {}
+    try { 
+      watcher.stop() 
+    } catch {}
     watcher = null
   }
 }
 
-onMounted(() => loadKvValue())
-onUnmounted(() => cleanup())
+// Initial load
+onMounted(() => {
+  if (natsStore.isConnected) {
+    loadKvValue()
+  }
+})
+
+// Cleanup on unmount
+onUnmounted(() => {
+  cleanup()
+})
+
+// Watch for config changes (bucket, key, jsonPath)
 watch(
   () => [props.config.dataSource.kvBucket, props.config.dataSource.kvKey, props.config.jsonPath],
-  () => { cleanup(); loadKvValue() }
+  () => { 
+    cleanup()
+    loadKvValue()
+  }
+)
+
+// FIXED: Watch for NATS connection status
+// Grug say: When NATS connect, load KV value. Simple.
+watch(
+  () => natsStore.isConnected,
+  (isConnected) => {
+    if (isConnected) {
+      console.log('[KvWidget] NATS connected, loading KV value')
+      loadKvValue()
+    } else {
+      cleanup()
+      error.value = 'Not connected to NATS'
+      loading.value = false
+    }
+  }
 )
 </script>
 

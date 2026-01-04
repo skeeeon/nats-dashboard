@@ -11,6 +11,17 @@ import { createDefaultDashboard } from '@/types/dashboard'
 type StorageErrorType = 'quota_exceeded' | 'security_error' | 'unknown'
 
 /**
+ * Dashboard Export File Format
+ * Grug say: Multiple dashboards in one file
+ */
+interface DashboardExportFile {
+  version: string
+  exportDate: number
+  appVersion: string
+  dashboards: Dashboard[]
+}
+
+/**
  * Dashboard Store
  * 
  * Grug say: This store hold blueprints for dashboards and widgets.
@@ -20,7 +31,7 @@ type StorageErrorType = 'quota_exceeded' | 'security_error' | 'unknown'
  * - This store = Recipe book (instructions)
  * - Widget data store = Kitchen (actual food)
  * 
- * NEW: Now with robust localStorage error handling!
+ * NEW: Now with multi-dashboard support!
  */
 export const useDashboardStore = defineStore('dashboard', () => {
   // ============================================================================
@@ -35,6 +46,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
   
   // Storage error state
   const storageError = ref<string | null>(null)
+  
+  // Maximum dashboards allowed
+  const MAX_DASHBOARDS = 25
   
   // ============================================================================
   // COMPUTED
@@ -54,6 +68,25 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const activeWidgets = computed<WidgetConfig[]>(() => {
     return activeDashboard.value?.widgets || []
   })
+  
+  /**
+   * Check if at dashboard limit
+   */
+  const isAtLimit = computed(() => {
+    return dashboards.value.length >= MAX_DASHBOARDS
+  })
+  
+  /**
+   * Check if approaching limit (90% full)
+   */
+  const isApproachingLimit = computed(() => {
+    return dashboards.value.length >= Math.floor(MAX_DASHBOARDS * 0.8)
+  })
+  
+  /**
+   * Dashboard count
+   */
+  const dashboardCount = computed(() => dashboards.value.length)
   
   // ============================================================================
   // PERSISTENCE (localStorage) with Error Handling
@@ -94,6 +127,8 @@ export const useDashboardStore = defineStore('dashboard', () => {
   /**
    * Handle localStorage errors gracefully
    * Grug say: When storage breaks, don't crash. Help user fix it.
+   * 
+   * UPDATED: Now prompts user before deleting dashboards
    */
   function handleStorageError(error: any, operation: 'save' | 'load'): void {
     const errorType = detectStorageErrorType(error)
@@ -104,32 +139,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
       case 'quota_exceeded':
         storageError.value = 
           'Storage quota exceeded. Dashboard may not be saved. ' +
-          'Try deleting old dashboards or clearing browser data.'
-        
-        // If saving failed, try to free up space by removing oldest dashboard
-        if (operation === 'save' && dashboards.value.length > 1) {
-          console.warn('[Dashboard] Attempting to free space by removing oldest dashboard')
-          const oldest = dashboards.value.reduce((prev, curr) => 
-            prev.modified < curr.modified ? prev : curr
-          )
-          const index = dashboards.value.indexOf(oldest)
-          if (index > -1) {
-            dashboards.value.splice(index, 1)
-            // Try saving again without the oldest dashboard
-            try {
-              const data = {
-                dashboards: dashboards.value,
-                activeDashboardId: activeDashboardId.value,
-              }
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
-              storageError.value = 
-                'Storage quota exceeded. Removed oldest dashboard to free space.'
-            } catch (retryError) {
-              // Still failed - give up
-              console.error('[Dashboard] Failed to save even after cleanup:', retryError)
-            }
-          }
-        }
+          'Please delete old dashboards or export them to free space.'
         break
         
       case 'security_error':
@@ -255,8 +265,14 @@ export const useDashboardStore = defineStore('dashboard', () => {
   
   /**
    * Create new dashboard
+   * NEW: Now checks dashboard limit
    */
-  function createDashboard(name: string): Dashboard {
+  function createDashboard(name: string): Dashboard | null {
+    if (isAtLimit.value) {
+      storageError.value = `Cannot create dashboard: Limit of ${MAX_DASHBOARDS} reached. Please delete old dashboards first.`
+      return null
+    }
+    
     const dashboard = createDefaultDashboard(name)
     dashboards.value.push(dashboard)
     activeDashboardId.value = dashboard.id
@@ -266,10 +282,17 @@ export const useDashboardStore = defineStore('dashboard', () => {
   
   /**
    * Delete dashboard
+   * NEW: Prevents deleting last dashboard
    */
-  function deleteDashboard(id: string) {
+  function deleteDashboard(id: string): boolean {
     const index = dashboards.value.findIndex(d => d.id === id)
-    if (index === -1) return
+    if (index === -1) return false
+    
+    // Don't allow deleting the last dashboard
+    if (dashboards.value.length === 1) {
+      storageError.value = 'Cannot delete the last dashboard'
+      return false
+    }
     
     dashboards.value.splice(index, 1)
     
@@ -279,6 +302,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     }
     
     saveToStorage()
+    return true
   }
   
   /**
@@ -291,6 +315,59 @@ export const useDashboardStore = defineStore('dashboard', () => {
     Object.assign(dashboard, updates)
     dashboard.modified = Date.now()
     saveToStorage()
+  }
+  
+  /**
+   * Rename dashboard
+   * NEW: Dedicated rename method
+   */
+  function renameDashboard(id: string, newName: string): boolean {
+    if (!newName.trim()) {
+      return false
+    }
+    
+    const dashboard = dashboards.value.find(d => d.id === id)
+    if (!dashboard) return false
+    
+    dashboard.name = newName.trim()
+    dashboard.modified = Date.now()
+    saveToStorage()
+    return true
+  }
+  
+  /**
+   * Duplicate dashboard
+   * NEW: Clone entire dashboard with new ID
+   */
+  function duplicateDashboard(id: string): Dashboard | null {
+    if (isAtLimit.value) {
+      storageError.value = `Cannot duplicate dashboard: Limit of ${MAX_DASHBOARDS} reached.`
+      return null
+    }
+    
+    const original = dashboards.value.find(d => d.id === id)
+    if (!original) return null
+    
+    // Deep clone the dashboard
+    const clone = JSON.parse(JSON.stringify(original)) as Dashboard
+    
+    // Generate new IDs
+    const now = Date.now()
+    clone.id = `dashboard_${now}_${Math.random().toString(36).substr(2, 9)}`
+    clone.name = `${original.name} (Copy)`
+    clone.created = now
+    clone.modified = now
+    
+    // Generate new widget IDs to avoid conflicts
+    clone.widgets = clone.widgets.map(w => ({
+      ...w,
+      id: `widget_${now}_${Math.random().toString(36).substr(2, 9)}`
+    }))
+    
+    dashboards.value.push(clone)
+    saveToStorage()
+    
+    return clone
   }
   
   /**
@@ -381,7 +458,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
   // ============================================================================
   
   /**
-   * Export dashboard as JSON
+   * Export single dashboard as JSON
    */
   function exportDashboard(id: string): string | null {
     const dashboard = dashboards.value.find(d => d.id === id)
@@ -391,7 +468,35 @@ export const useDashboardStore = defineStore('dashboard', () => {
   }
   
   /**
-   * Import dashboard from JSON
+   * Export multiple dashboards as single file
+   * NEW: Bulk export functionality
+   */
+  function exportDashboards(ids: string[]): string {
+    const selectedDashboards = ids
+      .map(id => dashboards.value.find(d => d.id === id))
+      .filter(Boolean) as Dashboard[]
+    
+    const exportData: DashboardExportFile = {
+      version: '1.0',
+      exportDate: Date.now(),
+      appVersion: '0.1.0',
+      dashboards: selectedDashboards
+    }
+    
+    return JSON.stringify(exportData, null, 2)
+  }
+  
+  /**
+   * Export all dashboards
+   * NEW: Convenience method
+   */
+  function exportAllDashboards(): string {
+    const ids = dashboards.value.map(d => d.id)
+    return exportDashboards(ids)
+  }
+  
+  /**
+   * Import dashboard from JSON (single dashboard)
    */
   function importDashboard(json: string): Dashboard | null {
     try {
@@ -416,6 +521,108 @@ export const useDashboardStore = defineStore('dashboard', () => {
     }
   }
   
+  /**
+   * Import multiple dashboards from file
+   * NEW: Bulk import with merge strategy
+   * 
+   * @param json - JSON string to import
+   * @param strategy - 'merge' adds to existing, 'replace' clears first
+   * @returns Results object with success/error counts
+   */
+  function importDashboards(
+    json: string, 
+    strategy: 'merge' | 'replace' = 'merge'
+  ): { success: number; skipped: number; errors: string[] } {
+    const results = {
+      success: 0,
+      skipped: 0,
+      errors: [] as string[]
+    }
+    
+    try {
+      const data = JSON.parse(json) as DashboardExportFile
+      
+      // Validate export file structure
+      if (!data.version || !Array.isArray(data.dashboards)) {
+        throw new Error('Invalid export file format')
+      }
+      
+      // Check if import would exceed limit
+      const finalCount = strategy === 'replace' 
+        ? data.dashboards.length 
+        : dashboards.value.length + data.dashboards.length
+      
+      if (finalCount > MAX_DASHBOARDS) {
+        results.errors.push(
+          `Import would exceed dashboard limit (${MAX_DASHBOARDS}). ` +
+          `Can only import ${MAX_DASHBOARDS - dashboards.value.length} more dashboards.`
+        )
+        return results
+      }
+      
+      // Replace strategy: clear existing dashboards
+      if (strategy === 'replace') {
+        dashboards.value = []
+        activeDashboardId.value = null
+      }
+      
+      // Import each dashboard
+      for (const dashboard of data.dashboards) {
+        try {
+          // Validate dashboard structure
+          if (!dashboard.name || !Array.isArray(dashboard.widgets)) {
+            results.errors.push(`Skipped invalid dashboard: ${dashboard.name || 'unnamed'}`)
+            results.skipped++
+            continue
+          }
+          
+          // Check for name conflicts
+          const existingNames = dashboards.value.map(d => d.name)
+          let finalName = dashboard.name
+          let counter = 2
+          
+          while (existingNames.includes(finalName)) {
+            finalName = `${dashboard.name} (${counter})`
+            counter++
+          }
+          
+          // Generate new IDs
+          const now = Date.now() + results.success // Ensure unique timestamps
+          const newDashboard: Dashboard = {
+            ...dashboard,
+            id: `dashboard_${now}_${Math.random().toString(36).substr(2, 9)}`,
+            name: finalName,
+            modified: now,
+            // Regenerate widget IDs
+            widgets: dashboard.widgets.map(w => ({
+              ...w,
+              id: `widget_${now}_${Math.random().toString(36).substr(2, 9)}`
+            }))
+          }
+          
+          dashboards.value.push(newDashboard)
+          results.success++
+          
+          // Set as active if first dashboard
+          if (dashboards.value.length === 1) {
+            activeDashboardId.value = newDashboard.id
+          }
+          
+        } catch (err: any) {
+          results.errors.push(`Failed to import "${dashboard.name}": ${err.message}`)
+          results.skipped++
+        }
+      }
+      
+      saveToStorage()
+      
+    } catch (err: any) {
+      results.errors.push(`Failed to parse import file: ${err.message}`)
+    }
+    
+    return results
+  }
+  
   // ============================================================================
   // RETURN PUBLIC API
   // ============================================================================
@@ -427,6 +634,10 @@ export const useDashboardStore = defineStore('dashboard', () => {
     activeDashboard,
     activeWidgets,
     storageError,
+    dashboardCount,
+    isAtLimit,
+    isApproachingLimit,
+    MAX_DASHBOARDS,
     
     // Persistence
     loadFromStorage,
@@ -438,6 +649,8 @@ export const useDashboardStore = defineStore('dashboard', () => {
     createDashboard,
     deleteDashboard,
     updateDashboard,
+    renameDashboard,
+    duplicateDashboard,
     setActiveDashboard,
     
     // Widget CRUD
@@ -449,6 +662,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
     
     // Import/Export
     exportDashboard,
+    exportDashboards,
+    exportAllDashboards,
     importDashboard,
+    importDashboards,
   }
 })

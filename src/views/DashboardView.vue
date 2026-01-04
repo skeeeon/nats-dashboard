@@ -1,57 +1,78 @@
 <template>
   <div class="dashboard-view">
-    <!-- Top toolbar -->
-    <div class="dashboard-toolbar">
-      <div class="toolbar-left">
-        <h1 class="dashboard-name">
-          {{ dashboardStore.activeDashboard?.name || 'Dashboard' }}
-        </h1>
-        
-        <!-- Connection Status -->
-        <div v-if="natsStore.isConnected" class="connection-status connected">
-          <div class="status-dot"></div>
-          <span class="status-label">Connected</span>
-          <span v-if="natsStore.rtt" class="rtt">{{ natsStore.rtt }}ms</span>
+    <!-- Dashboard Sidebar -->
+    <DashboardSidebar ref="sidebarRef" />
+    
+    <!-- Main content area -->
+    <div class="dashboard-main">
+      <!-- Top toolbar -->
+      <div class="dashboard-toolbar">
+        <div class="toolbar-left">
+          <!-- Hamburger menu (always visible) -->
+          <button 
+            class="hamburger-btn"
+            @click="toggleSidebar"
+            title="Toggle sidebar (Ctrl+B)"
+          >
+            ☰
+          </button>
+          
+          <h1 class="dashboard-name">
+            {{ dashboardStore.activeDashboard?.name || 'Dashboard' }}
+          </h1>
+          
+          <!-- Connection Status -->
+          <div v-if="natsStore.isConnected" class="connection-status connected">
+            <div class="status-dot"></div>
+            <span class="status-label">Connected</span>
+            <span v-if="natsStore.rtt" class="rtt">{{ natsStore.rtt }}ms</span>
+          </div>
+          <div v-else class="connection-status disconnected">
+            <div class="status-dot"></div>
+            <span class="status-label">Disconnected</span>
+          </div>
         </div>
-        <div v-else class="connection-status disconnected">
-          <div class="status-dot"></div>
-          <span class="status-label">Disconnected</span>
+        
+        <div class="toolbar-right">
+          <!-- Theme Toggle -->
+          <button 
+            class="btn-icon" 
+            :title="`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`"
+            @click="toggleTheme"
+          >
+            {{ theme === 'dark' ? '☀️' : '🌙' }}
+          </button>
+          
+          <!-- Add Widget -->
+          <button class="btn-primary" @click="showAddWidget = true" title="Add Widget">
+            <span class="btn-text">+ Add Widget</span>
+            <span class="btn-icon-only">+</span>
+          </button>
+          
+          <!-- Settings -->
+          <button class="btn-secondary" @click="$router.push('/settings')" title="Settings">
+            <span class="btn-text">⚙️ Settings</span>
+            <span class="btn-icon-only">⚙️</span>
+          </button>
         </div>
       </div>
       
-      <div class="toolbar-right">
-        <!-- Theme Toggle -->
-        <button 
-          class="btn-icon" 
-          :title="`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`"
-          @click="toggleTheme"
-        >
-          {{ theme === 'dark' ? '☀️' : '🌙' }}
-        </button>
-        
-        <!-- Add Widget -->
-        <button class="btn-primary" @click="showAddWidget = true" title="Add Widget">
-          <span class="btn-text">+ Add Widget</span>
-          <span class="btn-icon-only">+</span>
-        </button>
-        
-        <!-- Settings -->
-        <button class="btn-secondary" @click="$router.push('/settings')" title="Settings">
-          <span class="btn-text">⚙️ Settings</span>
-          <span class="btn-icon-only">⚙️</span>
-        </button>
+      <!-- Grid with widgets -->
+      <div class="dashboard-content">
+        <DashboardGrid
+          v-if="dashboardStore.activeWidgets.length > 0"
+          :widgets="dashboardStore.activeWidgets"
+          @delete-widget="handleDeleteWidget"
+          @configure-widget="handleConfigureWidget"
+          @duplicate-widget="handleDuplicateWidget"
+          @fullscreen-widget="toggleFullScreen"
+        />
+        <div v-else class="no-widgets-state">
+          <div class="no-widgets-icon">📊</div>
+          <div class="no-widgets-text">No widgets in this dashboard</div>
+          <div class="no-widgets-hint">Click "+ Add Widget" to get started</div>
+        </div>
       </div>
-    </div>
-    
-    <!-- Grid with widgets -->
-    <div class="dashboard-content">
-      <DashboardGrid
-        :widgets="dashboardStore.activeWidgets"
-        @delete-widget="handleDeleteWidget"
-        @configure-widget="handleConfigureWidget"
-        @duplicate-widget="handleDuplicateWidget"
-        @fullscreen-widget="toggleFullScreen"
-      />
     </div>
     
     <!-- Add Widget Modal -->
@@ -324,7 +345,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNatsStore } from '@/stores/nats'
 import { useDashboardStore } from '@/stores/dashboard'
@@ -333,6 +354,7 @@ import { getSubscriptionManager } from '@/composables/useSubscriptionManager'
 import { useValidation } from '@/composables/useValidation'
 import { useTheme } from '@/composables/useTheme'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
+import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import DashboardGrid from '@/components/dashboard/DashboardGrid.vue'
 import DebugPanel from '@/components/common/DebugPanel.vue'
 import ThresholdEditor from '@/components/dashboard/ThresholdEditor.vue'
@@ -343,6 +365,14 @@ import KvWidget from '@/components/widgets/KvWidget.vue'
 import { createDefaultWidget } from '@/types/dashboard'
 import type { WidgetConfig, ThresholdRule } from '@/types/dashboard'
 
+/**
+ * Dashboard View
+ * 
+ * Main dashboard page with sidebar for managing multiple dashboards.
+ * 
+ * NEW: Now includes multi-dashboard sidebar!
+ */
+
 const router = useRouter()
 const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
@@ -350,6 +380,8 @@ const dataStore = useWidgetDataStore()
 const subManager = getSubscriptionManager()
 const validator = useValidation()
 const { theme, toggleTheme } = useTheme()
+
+const sidebarRef = ref<InstanceType<typeof DashboardSidebar> | null>(null)
 
 const showAddWidget = ref(false)
 const showConfigWidget = ref(false)
@@ -391,6 +423,15 @@ const configForm = ref<ConfigFormState>({
   buttonPayload: '',
   thresholds: [],
 })
+
+/**
+ * Toggle sidebar (for hamburger menu)
+ */
+function toggleSidebar() {
+  if (sidebarRef.value) {
+    sidebarRef.value.toggleSidebar()
+  }
+}
 
 function subscribeWidget(widgetId: string) {
   const widget = dashboardStore.getWidget(widgetId)
@@ -529,7 +570,6 @@ function saveWidgetConfig() {
     updates.dataSource = { ...widget.dataSource, subject: configForm.value.subject.trim() }
     updates.jsonPath = configForm.value.jsonPath.trim() || undefined
     updates.buffer = { maxCount: configForm.value.bufferSize }
-    // Save thresholds for Text
     updates.textConfig = { 
       ...widget.textConfig,
       thresholds: [...configForm.value.thresholds]
@@ -551,7 +591,6 @@ function saveWidgetConfig() {
       kvKey: configForm.value.kvKey.trim(),
     }
     updates.jsonPath = configForm.value.jsonPath.trim() || undefined
-    // Save thresholds for KV
     updates.kvConfig = {
       ...widget.kvConfig,
       thresholds: [...configForm.value.thresholds]
@@ -571,7 +610,6 @@ function saveWidgetConfig() {
 }
 
 function addTestWidget(type: 'text' | 'chart' | 'button' | 'kv' = 'text') {
-  const sizes = { text: { w: 3, h: 2 }, chart: { w: 6, h: 4 }, button: { w: 2, h: 1 }, kv: { w: 4, h: 3 } }
   const position = { x: 0, y: 100 } 
   const widget = createDefaultWidget(type, position)
   
@@ -613,6 +651,11 @@ function exitFullScreen() {
 useKeyboardShortcuts([
   { key: 's', ctrl: true, description: 'Save', handler: () => dashboardStore.saveToStorage() },
   { key: 'n', ctrl: true, description: 'New widget', handler: () => showAddWidget.value = true },
+  { key: 't', ctrl: true, description: 'New dashboard', handler: () => {
+    const name = prompt('Dashboard name:', 'New Dashboard')
+    if (name) dashboardStore.createDashboard(name)
+  }},
+  { key: 'b', ctrl: true, description: 'Toggle sidebar', handler: toggleSidebar },
   { key: 'Escape', description: 'Close/Exit', handler: () => {
     if (fullScreenWidgetId.value) exitFullScreen()
     else showConfigWidget.value = false
@@ -633,6 +676,7 @@ onUnmounted(() => {
   unsubscribeAllWidgets()
 })
 
+// Watch for connection changes
 watch(() => natsStore.isConnected, (connected) => {
   if (connected) subscribeAllWidgets()
   else {
@@ -641,6 +685,20 @@ watch(() => natsStore.isConnected, (connected) => {
   }
 })
 
+// Watch for dashboard switches - unsubscribe old, subscribe new
+watch(() => dashboardStore.activeDashboardId, async () => {
+  unsubscribeAllWidgets()
+  
+  // Wait for Vue to finish updating the DOM before subscribing
+  // Grug say: Let Vue finish work first, then we do our work
+  await nextTick()
+  
+  if (natsStore.isConnected) {
+    subscribeAllWidgets()
+  }
+})
+
+// Watch for new widgets being added
 watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   if (natsStore.isConnected && newCount > oldCount) {
     subscribeWidget(dashboardStore.activeWidgets[newCount - 1].id)
@@ -652,12 +710,21 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 .dashboard-view {
   height: 100vh;
   display: flex;
-  flex-direction: column;
   background: var(--bg);
   color: var(--text);
+  overflow: hidden;
 }
 
-/* Toolbar - Responsive Layout */
+/* Main content area (flexes to fill space after sidebar) */
+.dashboard-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* Allow flex shrinking */
+  overflow: hidden;
+}
+
+/* Toolbar */
 .dashboard-toolbar {
   display: flex;
   justify-content: space-between;
@@ -667,7 +734,7 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   gap: 12px;
-  flex-wrap: wrap; /* Allows wrapping on tablet/mobile */
+  flex-wrap: wrap;
 }
 
 .toolbar-left {
@@ -681,6 +748,28 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+/* Hamburger menu (always visible) */
+.hamburger-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.hamburger-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: var(--color-accent);
 }
 
 .dashboard-name {
@@ -782,6 +871,34 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   min-height: 0;
   overflow: hidden;
   position: relative;
+}
+
+/* No widgets state */
+.no-widgets-state {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  padding: 40px;
+}
+
+.no-widgets-icon {
+  font-size: 64px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.no-widgets-text {
+  font-size: 18px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.no-widgets-hint {
+  font-size: 14px;
 }
 
 /* --- Responsive Media Queries --- */
@@ -893,12 +1010,11 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-top: 16px;
 }
 
-/* Widget Type Button Styling Updates */
 .widget-type-btn {
   background: var(--panel); border: 2px solid var(--border);
   border-radius: 8px; padding: 20px 10px; cursor: pointer;
   text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px;
-  color: var(--text); /* Explicit text color for dark mode */
+  color: var(--text);
 }
 .widget-type-btn:hover { border-color: var(--color-accent); background: var(--color-info-bg); }
 .widget-type-icon { font-size: 32px; }

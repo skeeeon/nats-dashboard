@@ -1,52 +1,60 @@
 <template>
   <div class="widget-container">
-    <!-- Header with title and actions -->
-    <div class="widget-header">
-      <div class="widget-title" :title="config.title">{{ config.title }}</div>
-      <div class="widget-actions">
-        <button 
-          class="icon-btn" 
-          title="Full Screen (F)"
-          @click="$emit('fullscreen')"
-        >
-          ⛶
-        </button>
-        <button 
-          class="icon-btn" 
-          title="Duplicate Widget"
-          @click="$emit('duplicate')"
-        >
-          📋
-        </button>
-        <button 
-          class="icon-btn" 
-          title="Configure Widget"
-          @click="$emit('configure')"
-        >
-          ⚙️
-        </button>
-        <button 
-          class="icon-btn danger" 
-          title="Delete Widget"
-          @click="handleDelete"
-        >
-          ✕
-        </button>
-      </div>
+    <!-- Safety check: render nothing if config is undefined -->
+    <div v-if="!config" class="widget-error">
+      <div class="error-icon">⚠️</div>
+      <div class="error-message">Widget configuration missing</div>
     </div>
     
-    <!-- Widget body with error boundary -->
-    <div class="widget-body">
-      <div v-if="error" class="widget-error">
-        <div class="error-icon">⚠️</div>
-        <div class="error-message">{{ error }}</div>
+    <template v-else>
+      <!-- Header with title and actions -->
+      <div class="widget-header">
+        <div class="widget-title" :title="config.title">{{ config.title }}</div>
+        <div class="widget-actions">
+          <button 
+            class="icon-btn" 
+            title="Full Screen (F)"
+            @click="$emit('fullscreen')"
+          >
+            ⛶
+          </button>
+          <button 
+            class="icon-btn" 
+            title="Duplicate Widget"
+            @click="$emit('duplicate')"
+          >
+            📋
+          </button>
+          <button 
+            class="icon-btn" 
+            title="Configure Widget"
+            @click="$emit('configure')"
+          >
+            ⚙️
+          </button>
+          <button 
+            class="icon-btn danger" 
+            title="Delete Widget"
+            @click="handleDelete"
+          >
+            ✕
+          </button>
+        </div>
       </div>
-      <component 
-        v-else
-        :is="widgetComponent" 
-        :config="config"
-      />
-    </div>
+      
+      <!-- Widget body with error boundary -->
+      <div class="widget-body">
+        <div v-if="error" class="widget-error">
+          <div class="error-icon">⚠️</div>
+          <div class="error-message">{{ error }}</div>
+        </div>
+        <component 
+          v-else
+          :is="widgetComponent" 
+          :config="config"
+        />
+      </div>
+    </template>
   </div>
 </template>
 
@@ -58,8 +66,16 @@ import ChartWidget from '@/components/widgets/ChartWidget.vue'
 import ButtonWidget from '@/components/widgets/ButtonWidget.vue'
 import KvWidget from '@/components/widgets/KvWidget.vue'
 
+/**
+ * Widget Container Component
+ * 
+ * Grug say: Box around widget. Has title and buttons.
+ * 
+ * FIXED: Now handles undefined config gracefully
+ */
+
 const props = defineProps<{
-  config: WidgetConfig
+  config?: WidgetConfig // Made optional to handle undefined during transitions
 }>()
 
 const emit = defineEmits<{
@@ -74,6 +90,8 @@ const error = ref<string | null>(null)
 
 // Map widget type to component
 const widgetComponent = computed(() => {
+  if (!props.config) return null
+  
   switch (props.config.type) {
     case 'text': return TextWidget
     case 'chart': return ChartWidget
@@ -86,13 +104,15 @@ const widgetComponent = computed(() => {
 })
 
 function handleDelete() {
+  if (!props.config) return
+  
   if (confirm(`Delete widget "${props.config.title}"?`)) {
     emit('delete')
   }
 }
 
 onErrorCaptured((err) => {
-  console.error(`Widget error (${props.config.id}):`, err)
+  console.error(`Widget error (${props.config?.id}):`, err)
   error.value = err.message || 'Widget error'
   return false
 })
