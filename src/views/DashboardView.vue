@@ -76,258 +76,17 @@
     </div>
     
     <!-- Add Widget Modal -->
-    <div v-if="showAddWidget" class="modal-overlay" @click.self="showAddWidget = false">
-      <div class="modal">
-        <div class="modal-header">
-          <h3>Add Widget</h3>
-          <button class="close-btn" @click="showAddWidget = false">✕</button>
-        </div>
-        <div class="modal-body">
-          <p>Select widget type to add:</p>
-          <div class="widget-type-buttons">
-            <!-- Visualization Widgets -->
-            <button class="widget-type-btn" @click="createWidget('text')">
-              <div class="widget-type-icon">📝</div>
-              <div class="widget-type-name">Text Widget</div>
-              <div class="widget-type-desc">Display latest value</div>
-            </button>
-            <button class="widget-type-btn" @click="createWidget('chart')">
-              <div class="widget-type-icon">📈</div>
-              <div class="widget-type-name">Chart Widget</div>
-              <div class="widget-type-desc">Line chart over time</div>
-            </button>
-            <button class="widget-type-btn" @click="createWidget('stat')">
-              <div class="widget-type-icon">📊</div>
-              <div class="widget-type-name">Stat Card</div>
-              <div class="widget-type-desc">KPI with trend</div>
-            </button>
-            <button class="widget-type-btn" @click="createWidget('gauge')">
-              <div class="widget-type-icon">⏲️</div>
-              <div class="widget-type-name">Gauge Widget</div>
-              <div class="widget-type-desc">Circular meter</div>
-            </button>
-            
-            <!-- Control Widgets -->
-            <button class="widget-type-btn" @click="createWidget('button')">
-              <div class="widget-type-icon">📤</div>
-              <div class="widget-type-name">Button Widget</div>
-              <div class="widget-type-desc">Publish messages</div>
-            </button>
-            <button class="widget-type-btn" @click="createWidget('switch')">
-              <div class="widget-type-icon">🔄</div>
-              <div class="widget-type-name">Switch Widget</div>
-              <div class="widget-type-desc">Toggle control</div>
-            </button>
-            <button class="widget-type-btn" @click="createWidget('slider')">
-              <div class="widget-type-icon">🎚️</div>
-              <div class="widget-type-name">Slider Widget</div>
-              <div class="widget-type-desc">Range control</div>
-            </button>
-            
-            <!-- Data Widgets -->
-            <button class="widget-type-btn" @click="createWidget('kv')">
-              <div class="widget-type-icon">🗄️</div>
-              <div class="widget-type-name">KV Widget</div>
-              <div class="widget-type-desc">Display KV values</div>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <AddWidgetModal
+      v-model="showAddWidget"
+      @select="handleCreateWidget"
+    />
     
     <!-- Configure Widget Modal -->
-    <div v-if="showConfigWidget" class="modal-overlay" @click.self="showConfigWidget = false">
-      <div class="modal">
-        <div class="modal-header">
-          <h3>Configure Widget</h3>
-          <button class="close-btn" @click="showConfigWidget = false">✕</button>
-        </div>
-        <div class="modal-body">
-          <div class="form-group">
-            <label>Widget Title</label>
-            <input 
-              v-model="configForm.title" 
-              type="text" 
-              class="form-input"
-              :class="{ 'has-error': validationErrors.title }"
-              placeholder="My Widget"
-            />
-            <div v-if="validationErrors.title" class="error-text">
-              {{ validationErrors.title }}
-            </div>
-          </div>
-          
-          <!-- Text & Chart Widget Config -->
-          <template v-if="configWidgetType === 'text' || configWidgetType === 'chart'">
-            <div class="form-group">
-              <label>NATS Subject</label>
-              <input 
-                v-model="configForm.subject" 
-                type="text" 
-                class="form-input"
-                :class="{ 'has-error': validationErrors.subject }"
-                placeholder="sensors.temperature"
-              />
-              <div v-if="validationErrors.subject" class="error-text">
-                {{ validationErrors.subject }}
-              </div>
-              <div v-else class="help-text">
-                NATS subject pattern to subscribe to
-              </div>
-            </div>
-            
-            <div class="form-group">
-              <label>JSONPath (optional)</label>
-              <input 
-                v-model="configForm.jsonPath" 
-                type="text" 
-                class="form-input"
-                :class="{ 'has-error': validationErrors.jsonPath }"
-                placeholder="$.value or $.sensors[0].temp"
-              />
-              <div v-if="validationErrors.jsonPath" class="error-text">
-                {{ validationErrors.jsonPath }}
-              </div>
-              <div v-else class="help-text">
-                Extract specific data from messages. Leave empty to show full message.
-              </div>
-            </div>
-            
-            <div class="form-group">
-              <label>Buffer Size</label>
-              <input 
-                v-model.number="configForm.bufferSize" 
-                type="number" 
-                class="form-input"
-                :class="{ 'has-error': validationErrors.bufferSize }"
-                min="10"
-                max="1000"
-              />
-              <div v-if="validationErrors.bufferSize" class="error-text">
-                {{ validationErrors.bufferSize }}
-              </div>
-              <div v-else class="help-text">
-                Number of messages to keep in history (10-1000)
-              </div>
-            </div>
-
-            <!-- Conditional Formatting for Text Widget -->
-            <div v-if="configWidgetType === 'text'" class="form-group">
-              <label>Conditional Formatting</label>
-              <ThresholdEditor v-model="configForm.thresholds" />
-            </div>
-          </template>
-          
-          <!-- Button Widget Config -->
-          <template v-if="configWidgetType === 'button'">
-            <div class="form-group">
-              <label>Button Label</label>
-              <input 
-                v-model="configForm.buttonLabel" 
-                type="text" 
-                class="form-input"
-                :class="{ 'has-error': validationErrors.buttonLabel }"
-                placeholder="Send Message"
-              />
-              <div v-if="validationErrors.buttonLabel" class="error-text">
-                {{ validationErrors.buttonLabel }}
-              </div>
-            </div>
-            
-            <div class="form-group">
-              <label>Publish Subject</label>
-              <input 
-                v-model="configForm.subject" 
-                type="text" 
-                class="form-input"
-                :class="{ 'has-error': validationErrors.subject }"
-                placeholder="button.clicked"
-              />
-              <div v-if="validationErrors.subject" class="error-text">
-                {{ validationErrors.subject }}
-              </div>
-            </div>
-            
-            <div class="form-group">
-              <label>Message Payload</label>
-              <textarea 
-                v-model="configForm.buttonPayload" 
-                class="form-textarea"
-                :class="{ 'has-error': validationErrors.buttonPayload }"
-                rows="6"
-                placeholder='{"action": "clicked"}'
-              />
-              <div v-if="validationErrors.buttonPayload" class="error-text">
-                {{ validationErrors.buttonPayload }}
-              </div>
-            </div>
-          </template>
-          
-          <!-- KV Widget Config -->
-          <template v-if="configWidgetType === 'kv'">
-            <div class="form-group">
-              <label>KV Bucket Name</label>
-              <input 
-                v-model="configForm.kvBucket" 
-                type="text" 
-                class="form-input"
-                :class="{ 'has-error': validationErrors.kvBucket }"
-                placeholder="my-bucket"
-              />
-              <div v-if="validationErrors.kvBucket" class="error-text">
-                {{ validationErrors.kvBucket }}
-              </div>
-            </div>
-            
-            <div class="form-group">
-              <label>KV Key</label>
-              <input 
-                v-model="configForm.kvKey" 
-                type="text" 
-                class="form-input"
-                :class="{ 'has-error': validationErrors.kvKey }"
-                placeholder="app.version"
-              />
-              <div v-if="validationErrors.kvKey" class="error-text">
-                {{ validationErrors.kvKey }}
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label>JSONPath Filter (optional)</label>
-              <input 
-                v-model="configForm.jsonPath" 
-                type="text" 
-                class="form-input"
-                :class="{ 'has-error': validationErrors.jsonPath }"
-                placeholder="$.data.value"
-              />
-              <div v-if="validationErrors.jsonPath" class="error-text">
-                {{ validationErrors.jsonPath }}
-              </div>
-              <div v-else class="help-text">
-                Extract specific data from JSON values
-              </div>
-            </div>
-
-            <!-- Conditional Formatting for KV Widget -->
-            <div class="form-group">
-              <label>Conditional Formatting (Single Value Mode)</label>
-              <ThresholdEditor v-model="configForm.thresholds" />
-            </div>
-          </template>
-          
-          <div class="modal-actions">
-            <button class="btn-secondary" @click="showConfigWidget = false">
-              Cancel
-            </button>
-            <button class="btn-primary" @click="saveWidgetConfig">
-              Save Changes
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <ConfigureWidgetModal
+      v-model="showConfigWidget"
+      :widget-id="configWidgetId"
+      @saved="handleWidgetConfigSaved"
+    />
     
     <!-- Full-Screen Widget Modal -->
     <div v-if="fullScreenWidgetId && fullScreenWidget" class="fullscreen-modal" @click.self="exitFullScreen">
@@ -395,14 +154,14 @@ import { useRouter } from 'vue-router'
 import { useNatsStore } from '@/stores/nats'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useWidgetDataStore } from '@/stores/widgetData'
-import { getSubscriptionManager } from '@/composables/useSubscriptionManager'
-import { useValidation } from '@/composables/useValidation'
 import { useTheme } from '@/composables/useTheme'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
+import { useWidgetOperations } from '@/composables/useWidgetOperations'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import DashboardGrid from '@/components/dashboard/DashboardGrid.vue'
+import AddWidgetModal from '@/components/dashboard/AddWidgetModal.vue'
+import ConfigureWidgetModal from '@/components/dashboard/ConfigureWidgetModal.vue'
 import DebugPanel from '@/components/common/DebugPanel.vue'
-import ThresholdEditor from '@/components/dashboard/ThresholdEditor.vue'
 import TextWidget from '@/components/widgets/TextWidget.vue'
 import ChartWidget from '@/components/widgets/ChartWidget.vue'
 import ButtonWidget from '@/components/widgets/ButtonWidget.vue'
@@ -411,67 +170,51 @@ import SwitchWidget from '@/components/widgets/SwitchWidget.vue'
 import SliderWidget from '@/components/widgets/SliderWidget.vue'
 import StatCardWidget from '@/components/widgets/StatCardWidget.vue'
 import GaugeWidget from '@/components/widgets/GaugeWidget.vue'
-import { createDefaultWidget } from '@/types/dashboard'
-import type { ThresholdRule } from '@/types/dashboard'
+import type { WidgetType } from '@/types/dashboard'
 
 /**
- * Dashboard View
+ * Dashboard View (Refactored)
  * 
- * Main dashboard page with sidebar for managing multiple dashboards.
+ * Grug say: Much cleaner now! Extracted modals and operations to separate files.
+ * This component just orchestrates everything, doesn't do heavy lifting.
  * 
- * NEW: Now includes multi-dashboard sidebar!
- * NEW: Added Switch, Slider, Stat, and Gauge widgets!
+ * REFACTORED:
+ * - Widget operations moved to useWidgetOperations composable
+ * - Add widget modal extracted to AddWidgetModal component
+ * - Configure modal extracted to ConfigureWidgetModal component
+ * - Result: ~400 lines shorter, much easier to read and maintain!
  */
 
 const router = useRouter()
 const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
 const dataStore = useWidgetDataStore()
-const subManager = getSubscriptionManager()
-const validator = useValidation()
 const { theme, toggleTheme } = useTheme()
+
+// Widget operations composable
+const {
+  subscribeWidget,
+  unsubscribeWidget,
+  subscribeAllWidgets,
+  unsubscribeAllWidgets,
+  createWidget,
+  deleteWidget,
+  duplicateWidget,
+  resubscribeWidget,
+} = useWidgetOperations()
 
 const sidebarRef = ref<InstanceType<typeof DashboardSidebar> | null>(null)
 
+// Modal states
 const showAddWidget = ref(false)
 const showConfigWidget = ref(false)
 const configWidgetId = ref<string | null>(null)
-const validationErrors = ref<Record<string, string>>({})
 
+// Fullscreen state
 const fullScreenWidgetId = ref<string | null>(null)
 const fullScreenWidget = computed(() => {
   if (!fullScreenWidgetId.value) return null
   return dashboardStore.getWidget(fullScreenWidgetId.value)
-})
-
-const configWidgetType = computed(() => {
-  if (!configWidgetId.value) return null
-  const widget = dashboardStore.getWidget(configWidgetId.value)
-  return widget?.type || null
-})
-
-interface ConfigFormState {
-  title: string
-  subject: string
-  jsonPath: string
-  bufferSize: number
-  kvBucket: string
-  kvKey: string
-  buttonLabel: string
-  buttonPayload: string
-  thresholds: ThresholdRule[]
-}
-
-const configForm = ref<ConfigFormState>({
-  title: '',
-  subject: '',
-  jsonPath: '',
-  bufferSize: 100,
-  kvBucket: '',
-  kvKey: '',
-  buttonLabel: '',
-  buttonPayload: '',
-  thresholds: [],
 })
 
 /**
@@ -483,250 +226,62 @@ function toggleSidebar() {
   }
 }
 
-function subscribeWidget(widgetId: string) {
-  const widget = dashboardStore.getWidget(widgetId)
-  if (!widget) return
-  
-  dataStore.initializeBuffer(widgetId, widget.buffer.maxCount, widget.buffer.maxAge)
-  
-  if (widget.dataSource.type === 'subscription') {
-    const subject = widget.dataSource.subject
-    if (!subject) return
-    subManager.subscribe(widgetId, subject, widget.jsonPath)
-  }
-}
-
-function unsubscribeWidget(widgetId: string) {
-  const widget = dashboardStore.getWidget(widgetId)
-  if (!widget) return
-  
-  if (widget.dataSource.type === 'subscription' && widget.dataSource.subject) {
-    subManager.unsubscribe(widgetId, widget.dataSource.subject)
-  }
-  dataStore.removeBuffer(widgetId)
-}
-
-function subscribeAllWidgets() {
-  dashboardStore.activeWidgets.forEach(widget => subscribeWidget(widget.id))
-}
-
-function unsubscribeAllWidgets() {
-  dashboardStore.activeWidgets.forEach(widget => unsubscribeWidget(widget.id))
-}
-
-function handleDeleteWidget(widgetId: string) {
-  unsubscribeWidget(widgetId)
-  dashboardStore.removeWidget(widgetId)
-}
-
-function handleDuplicateWidget(widgetId: string) {
-  const original = dashboardStore.getWidget(widgetId)
-  if (!original) return
-  
-  const copy = JSON.parse(JSON.stringify(original))
-  copy.id = `widget_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-  copy.title = `${original.title} (Copy)`
-  copy.y = original.y + original.h + 1
-  copy.x = original.x
-  
-  dashboardStore.addWidget(copy)
-  
-  // Only subscribe if it's a data widget (not control widgets)
-  if (copy.type !== 'button' && copy.type !== 'kv' && copy.type !== 'switch' && copy.type !== 'slider') {
-    subscribeWidget(copy.id)
-  }
-}
-
-function handleConfigureWidget(widgetId: string) {
-  const widget = dashboardStore.getWidget(widgetId)
-  if (!widget) return
-  
-  configWidgetId.value = widgetId
-  
-  let currentSubject = ''
-  if (widget.type === 'button') {
-    currentSubject = widget.buttonConfig?.publishSubject || ''
-  } else {
-    currentSubject = widget.dataSource.subject || ''
-  }
-
-  // Load thresholds based on type
-  let currentThresholds: ThresholdRule[] = []
-  if (widget.type === 'text') {
-    currentThresholds = widget.textConfig?.thresholds ? [...widget.textConfig.thresholds] : []
-  } else if (widget.type === 'kv') {
-    currentThresholds = widget.kvConfig?.thresholds ? [...widget.kvConfig.thresholds] : []
-  }
-
-  configForm.value = {
-    title: widget.title,
-    subject: currentSubject,
-    jsonPath: widget.jsonPath || '',
-    bufferSize: widget.buffer.maxCount,
-    kvBucket: widget.dataSource.kvBucket || '',
-    kvKey: widget.dataSource.kvKey || '',
-    buttonLabel: widget.buttonConfig?.label || '',
-    buttonPayload: widget.buttonConfig?.payload || '',
-    thresholds: currentThresholds
-  }
-  showConfigWidget.value = true
-}
-
-function saveWidgetConfig() {
-  if (!configWidgetId.value) return
-  const widget = dashboardStore.getWidget(configWidgetId.value)
-  if (!widget) return
-  
-  validationErrors.value = {}
-  
-  const titleResult = validator.validateWidgetTitle(configForm.value.title)
-  if (!titleResult.valid) validationErrors.value.title = titleResult.error!
-  
-  if (widget.type === 'text' || widget.type === 'chart') {
-    const subjectResult = validator.validateSubject(configForm.value.subject)
-    if (!subjectResult.valid) validationErrors.value.subject = subjectResult.error!
-    
-    if (configForm.value.jsonPath) {
-      const jsonResult = validator.validateJsonPath(configForm.value.jsonPath)
-      if (!jsonResult.valid) validationErrors.value.jsonPath = jsonResult.error!
-    }
-    const bufferResult = validator.validateBufferSize(configForm.value.bufferSize)
-    if (!bufferResult.valid) validationErrors.value.bufferSize = bufferResult.error!
-
-  } else if (widget.type === 'button') {
-    const subjectResult = validator.validateSubject(configForm.value.subject)
-    if (!subjectResult.valid) validationErrors.value.subject = subjectResult.error!
-    if (!configForm.value.buttonLabel.trim()) validationErrors.value.buttonLabel = 'Label required'
-    if (configForm.value.buttonPayload) {
-      const jsonResult = validator.validateJson(configForm.value.buttonPayload)
-      if (!jsonResult.valid) validationErrors.value.buttonPayload = jsonResult.error!
-    }
-
-  } else if (widget.type === 'kv') {
-    const bucketResult = validator.validateKvBucket(configForm.value.kvBucket)
-    if (!bucketResult.valid) validationErrors.value.kvBucket = bucketResult.error!
-    const keyResult = validator.validateKvKey(configForm.value.kvKey)
-    if (!keyResult.valid) validationErrors.value.kvKey = keyResult.error!
-    if (configForm.value.jsonPath) {
-      const jsonResult = validator.validateJsonPath(configForm.value.jsonPath)
-      if (!jsonResult.valid) validationErrors.value.jsonPath = jsonResult.error!
-    }
-  }
-  
-  if (Object.keys(validationErrors.value).length > 0) return
-  
-  const updates: any = { title: configForm.value.title.trim() }
-  
-  if (widget.type === 'text') {
-    updates.dataSource = { ...widget.dataSource, subject: configForm.value.subject.trim() }
-    updates.jsonPath = configForm.value.jsonPath.trim() || undefined
-    updates.buffer = { maxCount: configForm.value.bufferSize }
-    updates.textConfig = { 
-      ...widget.textConfig,
-      thresholds: [...configForm.value.thresholds]
-    }
-  } else if (widget.type === 'chart') {
-    updates.dataSource = { ...widget.dataSource, subject: configForm.value.subject.trim() }
-    updates.jsonPath = configForm.value.jsonPath.trim() || undefined
-    updates.buffer = { maxCount: configForm.value.bufferSize }
-  } else if (widget.type === 'button') {
-    updates.buttonConfig = {
-      label: configForm.value.buttonLabel.trim(),
-      publishSubject: configForm.value.subject.trim(),
-      payload: configForm.value.buttonPayload.trim() || '{}',
-    }
-  } else if (widget.type === 'kv') {
-    updates.dataSource = {
-      type: 'kv',
-      kvBucket: configForm.value.kvBucket.trim(),
-      kvKey: configForm.value.kvKey.trim(),
-    }
-    updates.jsonPath = configForm.value.jsonPath.trim() || undefined
-    updates.kvConfig = {
-      ...widget.kvConfig,
-      thresholds: [...configForm.value.thresholds]
-    }
-  }
-  
-  dashboardStore.updateWidget(configWidgetId.value, updates)
-  
-  if (widget.type === 'text' || widget.type === 'chart') {
-    unsubscribeWidget(configWidgetId.value)
-    subscribeWidget(configWidgetId.value)
-  }
-  
-  showConfigWidget.value = false
-  configWidgetId.value = null
-  validationErrors.value = {}
+/**
+ * Handle widget creation from modal
+ */
+function handleCreateWidget(type: WidgetType) {
+  createWidget(type)
 }
 
 /**
- * Create widget of specified type
- * Renamed from addTestWidget - this is the main widget creation function
+ * Handle widget deletion
  */
-function createWidget(type: 'text' | 'chart' | 'button' | 'kv' | 'switch' | 'slider' | 'stat' | 'gauge' = 'text') {
-  const position = { x: 0, y: 100 } 
-  const widget = createDefaultWidget(type, position)
-  
-  switch (type) {
-    case 'text':
-      widget.title = 'Text Widget'
-      widget.dataSource = { type: 'subscription', subject: 'test.subject' }
-      widget.jsonPath = '$.value'
-      break
-    case 'chart':
-      widget.title = 'Chart Widget'
-      widget.dataSource = { type: 'subscription', subject: 'test.subject' }
-      widget.jsonPath = '$.value'
-      widget.chartConfig = { chartType: 'line' }
-      break
-    case 'button':
-      widget.title = 'Button Widget'
-      widget.buttonConfig = { label: 'Send', publishSubject: 'button.clicked', payload: '{"val": 1}' }
-      break
-    case 'kv':
-      widget.title = 'KV Widget'
-      widget.dataSource = { type: 'kv', kvBucket: 'my-bucket', kvKey: 'my-key' }
-      break
-    case 'switch':
-      widget.title = 'Switch Control'
-      // Config already set by createDefaultWidget
-      break
-    case 'slider':
-      widget.title = 'Slider Control'
-      // Config already set by createDefaultWidget
-      break
-    case 'stat':
-      widget.title = 'Stat Card'
-      widget.dataSource = { type: 'subscription', subject: 'metrics.value' }
-      widget.jsonPath = '$.value'
-      break
-    case 'gauge':
-      widget.title = 'Gauge Meter'
-      widget.dataSource = { type: 'subscription', subject: 'sensor.value' }
-      widget.jsonPath = '$.value'
-      break
-  }
-  
-  dashboardStore.addWidget(widget)
-  
-  // Only subscribe if it's a data widget (not control widgets)
-  // Switch and Slider handle their own connections internally
-  if (type !== 'button' && type !== 'kv' && type !== 'switch' && type !== 'slider') {
-    subscribeWidget(widget.id)
-  }
-  
-  showAddWidget.value = false
+function handleDeleteWidget(widgetId: string) {
+  deleteWidget(widgetId)
 }
 
+/**
+ * Handle widget duplication
+ */
+function handleDuplicateWidget(widgetId: string) {
+  duplicateWidget(widgetId)
+}
+
+/**
+ * Handle widget configuration
+ */
+function handleConfigureWidget(widgetId: string) {
+  configWidgetId.value = widgetId
+  showConfigWidget.value = true
+}
+
+/**
+ * Handle widget config saved
+ * Resubscribe widget with new config
+ */
+function handleWidgetConfigSaved() {
+  if (configWidgetId.value) {
+    resubscribeWidget(configWidgetId.value)
+  }
+}
+
+/**
+ * Toggle fullscreen for widget
+ */
 function toggleFullScreen(widgetId: string) {
   fullScreenWidgetId.value = fullScreenWidgetId.value === widgetId ? null : widgetId
 }
 
+/**
+ * Exit fullscreen
+ */
 function exitFullScreen() {
   fullScreenWidgetId.value = null
 }
 
+/**
+ * Setup keyboard shortcuts
+ */
 useKeyboardShortcuts([
   { key: 's', ctrl: true, description: 'Save', handler: () => dashboardStore.saveToStorage() },
   { key: 'n', ctrl: true, description: 'New widget', handler: () => showAddWidget.value = true },
@@ -742,34 +297,51 @@ useKeyboardShortcuts([
   }}
 ])
 
+/**
+ * Lifecycle: Mount
+ */
 onMounted(() => {
   dashboardStore.loadFromStorage()
+  
+  // Redirect to settings if not connected and no saved settings
   if (!natsStore.isConnected && !natsStore.autoConnect) {
     const hasSettings = natsStore.serverUrls.length > 0 || natsStore.getStoredCreds() !== null
     if (!hasSettings) router.push('/settings')
   }
-  if (natsStore.isConnected) subscribeAllWidgets()
+  
+  // Subscribe to widgets if already connected
+  if (natsStore.isConnected) {
+    subscribeAllWidgets()
+  }
 })
 
+/**
+ * Lifecycle: Unmount
+ */
 onUnmounted(() => {
   unsubscribeAllWidgets()
 })
 
-// Watch for connection changes
+/**
+ * Watch: Connection changes
+ */
 watch(() => natsStore.isConnected, (connected) => {
-  if (connected) subscribeAllWidgets()
-  else {
+  if (connected) {
+    subscribeAllWidgets()
+  } else {
     unsubscribeAllWidgets()
     dataStore.clearAllBuffers()
   }
 })
 
-// Watch for dashboard switches - unsubscribe old, subscribe new
+/**
+ * Watch: Dashboard switches
+ * Unsubscribe old widgets, subscribe new ones
+ */
 watch(() => dashboardStore.activeDashboardId, async () => {
   unsubscribeAllWidgets()
   
-  // Wait for Vue to finish updating the DOM before subscribing
-  // Grug say: Let Vue finish work first, then we do our work
+  // Wait for Vue to finish updating the DOM
   await nextTick()
   
   if (natsStore.isConnected) {
@@ -777,14 +349,14 @@ watch(() => dashboardStore.activeDashboardId, async () => {
   }
 })
 
-// Watch for new widgets being added
+/**
+ * Watch: New widgets added
+ * Subscribe newly added widgets
+ */
 watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   if (natsStore.isConnected && newCount > oldCount) {
     const newWidget = dashboardStore.activeWidgets[newCount - 1]
-    // Only subscribe if it's a data widget
-    if (newWidget.type !== 'button' && newWidget.type !== 'kv' && newWidget.type !== 'switch' && newWidget.type !== 'slider') {
-      subscribeWidget(newWidget.id)
-    }
+    subscribeWidget(newWidget.id)
   }
 })
 </script>
@@ -984,10 +556,79 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   font-size: 14px;
 }
 
-/* --- Responsive Media Queries --- */
+/* Fullscreen Modal */
+.fullscreen-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg);
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+}
+
+.fullscreen-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.fullscreen-header {
+  display: flex;
+  justify-content: space-between;
+  padding: 20px 32px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.fullscreen-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 24px;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.close-btn:hover {
+  color: var(--text);
+}
+
+.fullscreen-body {
+  flex: 1;
+  padding: 32px;
+  overflow: auto;
+}
+
+.fullscreen-hint {
+  padding: 12px;
+  text-align: center;
+  color: var(--muted);
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+}
+
+.fullscreen-hint kbd {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* Responsive Media Queries */
 .btn-text {
   display: inline;
 }
+
 .btn-icon-only {
   display: none;
 }
@@ -1016,7 +657,9 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
     width: 100%;
   }
 
-  .btn-primary, .btn-secondary, .btn-icon {
+  .btn-primary,
+  .btn-secondary,
+  .btn-icon {
     flex: 1;
   }
 }
@@ -1025,94 +668,19 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   .btn-text {
     display: none;
   }
+
   .btn-icon-only {
     display: inline;
     font-size: 16px;
     font-weight: bold;
   }
+
   .rtt {
     display: none;
   }
+
   .status-label {
     font-size: 12px;
   }
 }
-
-/* Modal Styling */
-.modal-overlay {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  width: 90%;
-  max-width: 600px;
-  max-height: 80vh;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-}
-
-.modal-header h3 { margin: 0; font-size: 18px; }
-
-.close-btn {
-  background: none; border: none; color: var(--muted);
-  font-size: 24px; cursor: pointer;
-}
-
-.modal-body { padding: 20px; overflow-y: auto; }
-
-.form-group { margin-bottom: 20px; }
-.form-group label { display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500; color: var(--text); }
-.form-input, .form-textarea {
-  width: 100%; padding: 10px 12px;
-  background: var(--input-bg); border: 1px solid var(--border);
-  border-radius: 6px; color: var(--text); font-family: var(--mono);
-}
-.help-text { font-size: 12px; color: var(--muted); margin-top: 4px; }
-.error-text { font-size: 12px; color: var(--color-error); margin-top: 4px; }
-.modal-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
-
-.widget-type-buttons {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-top: 16px;
-}
-
-.widget-type-btn {
-  background: var(--panel); border: 2px solid var(--border);
-  border-radius: 8px; padding: 20px 10px; cursor: pointer;
-  text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px;
-  color: var(--text);
-}
-.widget-type-btn:hover { border-color: var(--color-accent); background: var(--color-info-bg); }
-.widget-type-icon { font-size: 32px; }
-.widget-type-name { font-size: 14px; font-weight: 600; color: var(--text); }
-.widget-type-desc { font-size: 11px; color: var(--muted); line-height: 1.3; }
-
-/* Fullscreen Modal */
-.fullscreen-modal {
-  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: var(--bg); z-index: 2000; display: flex; flex-direction: column;
-}
-.fullscreen-header {
-  display: flex; justify-content: space-between; padding: 20px 32px;
-  background: var(--panel); border-bottom: 1px solid var(--border);
-}
-.fullscreen-body { flex: 1; padding: 32px; overflow: auto; }
-.fullscreen-hint { padding: 12px; text-align: center; color: var(--muted); background: var(--panel); border-top: 1px solid var(--border); }
 </style>

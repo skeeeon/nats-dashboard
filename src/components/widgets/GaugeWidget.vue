@@ -2,42 +2,37 @@
   <div class="gauge-widget">
     <!-- SVG Gauge -->
     <svg :viewBox="`0 0 ${size} ${size}`" class="gauge-svg">
-      <!-- Background circle -->
-      <circle
-        :cx="center"
-        :cy="center"
-        :r="radius"
+      <!-- Background track (270° arc) -->
+      <path
+        :d="backgroundPath"
         fill="none"
         :stroke="backgroundColor"
         :stroke-width="strokeWidth"
+        stroke-linecap="round"
+        class="background-arc"
       />
       
       <!-- Zone segments -->
-      <circle
-        v-for="(zone, index) in zoneArcs"
+      <path
+        v-for="(zone, index) in zonePaths"
         :key="index"
-        :cx="center"
-        :cy="center"
-        :r="radius"
+        :d="zone.path"
         fill="none"
         :stroke="zone.color"
         :stroke-width="strokeWidth"
-        :stroke-dasharray="zone.dasharray"
-        :stroke-dashoffset="zone.dashoffset"
         stroke-linecap="round"
         class="zone-arc"
       />
       
-      <!-- Value arc -->
-      <circle
-        :cx="center"
-        :cy="center"
-        :r="radius"
+      <!-- Value arc (full path, animated with dasharray) -->
+      <path
+        v-if="hasData"
+        :d="fullGaugePath"
         fill="none"
         :stroke="valueColor"
         :stroke-width="strokeWidth + 2"
-        :stroke-dasharray="circumference"
-        :stroke-dashoffset="valueDashoffset"
+        :stroke-dasharray="valueArcLength"
+        :stroke-dashoffset="valueDashOffset"
         stroke-linecap="round"
         class="value-arc"
       />
@@ -45,7 +40,7 @@
       <!-- Center value text -->
       <text
         :x="center"
-        :y="center"
+        :y="center - 5"
         text-anchor="middle"
         dominant-baseline="middle"
         class="gauge-value"
@@ -89,10 +84,10 @@ import { useDesignTokens } from '@/composables/useDesignTokens'
 import type { WidgetConfig } from '@/types/dashboard'
 
 /**
- * Gauge Widget
+ * Gauge Widget (Simplified with SVG Paths)
  * 
- * Grug say: Round meter show value in range.
- * Color zones show good/warning/bad areas.
+ * Grug say: Use simple SVG path arcs. No dasharray tricks.
+ * Draw what we see. Much easier to understand.
  */
 
 const props = defineProps<{
@@ -100,7 +95,7 @@ const props = defineProps<{
 }>()
 
 const dataStore = useWidgetDataStore()
-const { baseColors, chartColors } = useDesignTokens()
+const { chartColors } = useDesignTokens()
 
 // SVG dimensions
 const size = 200
@@ -146,24 +141,92 @@ const valuePercent = computed(() => {
   return (clampedValue.value - cfg.value.min) / range
 })
 
-// SVG arc calculations
-const circumference = 2 * Math.PI * radius
-const startAngle = -135 // Start at bottom-left
-const endAngle = 135   // End at bottom-right
-const totalAngle = endAngle - startAngle // 270 degrees
+/**
+ * Helper function to convert polar coordinates to cartesian
+ * Grug say: Math to find point on circle at given angle
+ */
+function polarToCartesian(centerX: number, centerY: number, radius: number, angleInDegrees: number) {
+  const angleInRadians = (angleInDegrees - 90) * Math.PI / 180.0
+  return {
+    x: centerX + (radius * Math.cos(angleInRadians)),
+    y: centerY + (radius * Math.sin(angleInRadians))
+  }
+}
 
-// Value arc offset (animate from empty to filled)
-const valueDashoffset = computed(() => {
-  const arcLength = (totalAngle / 360) * circumference
-  return circumference - (arcLength * valuePercent.value)
+/**
+ * Helper function to create an SVG arc path
+ * Grug say: Make arc from start angle to end angle
+ */
+function describeArc(centerX: number, centerY: number, radius: number, startAngle: number, endAngle: number) {
+  const start = polarToCartesian(centerX, centerY, radius, endAngle)
+  const end = polarToCartesian(centerX, centerY, radius, startAngle)
+  const largeArcFlag = endAngle - startAngle <= 180 ? "0" : "1"
+  
+  return [
+    "M", start.x, start.y,
+    "A", radius, radius, 0, largeArcFlag, 0, end.x, end.y
+  ].join(" ")
+}
+
+/**
+ * Background path - full 270° arc from -135° to 135°
+ */
+const backgroundPath = computed(() => {
+  return describeArc(center, center, radius, -135, 135)
 })
 
-// Background color
-const backgroundColor = computed(() => {
-  return 'rgba(255, 255, 255, 0.1)'
+/**
+ * Full gauge path (always 270°) - we'll animate the dasharray instead of the path
+ */
+const fullGaugePath = computed(() => {
+  return describeArc(center, center, radius, -135, 135)
 })
 
-// Determine value color based on zones
+/**
+ * Calculate the length of the full gauge arc (270°)
+ */
+const fullArcLength = computed(() => {
+  // Arc length = radius × angle in radians
+  const angleInRadians = (270 * Math.PI) / 180
+  return radius * angleInRadians
+})
+
+/**
+ * Value arc length for dasharray animation
+ * This controls how much of the full path is visible
+ */
+const valueArcLength = computed(() => {
+  const visibleLength = fullArcLength.value * valuePercent.value
+  const invisibleLength = fullArcLength.value * 10 // Make sure rest is hidden
+  return `${visibleLength} ${invisibleLength}`
+})
+
+/**
+ * Dash offset to make the arc fill from left to right
+ * Without this, it fills from right to left (the end of the path)
+ */
+const valueDashOffset = computed(() => {
+  // Negative offset shifts the visible portion to start at the beginning
+  return -fullArcLength.value * (1 - valuePercent.value)
+})
+
+/**
+ * Value path - arc showing current value (kept for reference, not used)
+ */
+const valuePath = computed(() => {
+  const startAngle = -135
+  const endAngle = startAngle + (270 * valuePercent.value)
+  return describeArc(center, center, radius, startAngle, endAngle)
+})
+
+/**
+ * Background color
+ */
+const backgroundColor = computed(() => 'rgba(255, 255, 255, 0.1)')
+
+/**
+ * Determine value color based on zones
+ */
 const valueColor = computed(() => {
   if (!cfg.value.zones || cfg.value.zones.length === 0) {
     return chartColors.value.color1
@@ -182,22 +245,28 @@ const valueColor = computed(() => {
   return chartColors.value.color1
 })
 
-// Zone arcs (background colored segments)
-const zoneArcs = computed(() => {
+/**
+ * Zone paths - each zone as a separate arc
+ */
+const zonePaths = computed(() => {
   if (!cfg.value.zones) return []
   
   const range = cfg.value.max - cfg.value.min
-  const arcLength = (totalAngle / 360) * circumference
+  const gaugeStartAngle = -135
+  const gaugeAngleRange = 270
   
   return cfg.value.zones.map(zone => {
-    const zoneStart = (zone.min - cfg.value.min) / range
-    const zoneEnd = (zone.max - cfg.value.min) / range
-    const zoneLength = (zoneEnd - zoneStart) * arcLength
+    // Calculate zone start and end as percentages (0-1)
+    const zoneStartPercent = (zone.min - cfg.value.min) / range
+    const zoneEndPercent = (zone.max - cfg.value.min) / range
+    
+    // Convert to angles within the gauge range
+    const startAngle = gaugeStartAngle + (gaugeAngleRange * zoneStartPercent)
+    const endAngle = gaugeStartAngle + (gaugeAngleRange * zoneEndPercent)
     
     return {
       color: zone.color,
-      dasharray: `${zoneLength} ${circumference}`,
-      dashoffset: circumference - (zoneStart * arcLength)
+      path: describeArc(center, center, radius, startAngle, endAngle)
     }
   })
 })
@@ -219,7 +288,10 @@ const zoneArcs = computed(() => {
   width: 100%;
   max-width: 200px;
   height: auto;
-  transform: rotate(135deg); /* Start from bottom-left */
+}
+
+.background-arc {
+  transition: stroke 0.3s;
 }
 
 .zone-arc {
@@ -228,7 +300,7 @@ const zoneArcs = computed(() => {
 }
 
 .value-arc {
-  transition: stroke-dashoffset 0.5s ease-out, stroke 0.3s ease;
+  transition: stroke-dasharray 0.5s ease-out, stroke-dashoffset 0.5s ease-out, stroke 0.3s ease;
   filter: drop-shadow(0 0 4px currentColor);
 }
 
@@ -249,7 +321,7 @@ const zoneArcs = computed(() => {
   justify-content: space-between;
   width: 100%;
   max-width: 180px;
-  margin-top: -20px;
+  margin-top: 8px;
   font-size: 12px;
   color: var(--muted);
   font-family: var(--mono);

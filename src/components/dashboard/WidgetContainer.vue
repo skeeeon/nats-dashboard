@@ -8,7 +8,7 @@
     
     <template v-else>
       <!-- Header with title and actions -->
-      <div class="widget-header">
+      <div class="widget-header vue-draggable-handle">
         <div class="widget-title" :title="config.title">{{ config.title }}</div>
         <div class="widget-actions">
           <button 
@@ -65,13 +65,21 @@ import TextWidget from '@/components/widgets/TextWidget.vue'
 import ChartWidget from '@/components/widgets/ChartWidget.vue'
 import ButtonWidget from '@/components/widgets/ButtonWidget.vue'
 import KvWidget from '@/components/widgets/KvWidget.vue'
+import SwitchWidget from '@/components/widgets/SwitchWidget.vue'
+import SliderWidget from '@/components/widgets/SliderWidget.vue'
+import StatCardWidget from '@/components/widgets/StatCardWidget.vue'
+import GaugeWidget from '@/components/widgets/GaugeWidget.vue'
 
 /**
  * Widget Container Component
  * 
  * Grug say: Box around widget. Has title and buttons.
  * 
- * FIXED: Now handles undefined config gracefully
+ * FIXED: Now handles all 8 widget types including the new ones!
+ * - switch: Toggle control widget
+ * - slider: Range control widget
+ * - stat: KPI card with trend
+ * - gauge: Circular meter widget
  */
 
 const props = defineProps<{
@@ -97,6 +105,10 @@ const widgetComponent = computed(() => {
     case 'chart': return ChartWidget
     case 'button': return ButtonWidget
     case 'kv': return KvWidget
+    case 'switch': return SwitchWidget
+    case 'slider': return SliderWidget
+    case 'stat': return StatCardWidget
+    case 'gauge': return GaugeWidget
     default:
       error.value = `Unknown type: ${props.config.type}`
       return null
@@ -201,8 +213,10 @@ onErrorCaptured((err) => {
   min-height: 0;
   overflow: hidden;
   position: relative;
-  /* Ensure touch actions propagate in the body (e.g., charts) */
+  /* Allow touch actions and interactions within widget body */
   touch-action: auto;
+  /* Ensure interactive elements work properly */
+  pointer-events: auto;
 }
 
 /* Error state styling */

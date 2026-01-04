@@ -12,6 +12,8 @@
       :responsive="true"
       :breakpoints="breakpoints"
       :cols="cols"
+      drag-allow-from=".vue-draggable-handle"
+      drag-ignore-from=".vue-grid-item-no-drag"      
       @breakpoint-changed="handleBreakpointChange"
       @layout-updated="handleLayoutUpdate"
     >

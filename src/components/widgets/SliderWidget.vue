@@ -8,7 +8,7 @@
         <span v-if="cfg.unit" class="value-unit">{{ cfg.unit }}</span>
       </div>
       
-      <!-- Slider input -->
+      <!-- Slider wrapper -->
       <div class="slider-wrapper">
         <input
           type="range"
@@ -74,6 +74,8 @@ import type { WidgetConfig } from '@/types/dashboard'
  * 
  * Grug say: Drag slider, publish value when release.
  * Simple range control for IoT devices.
+ * 
+ * FIXED: Stops event propagation to prevent grid dragging
  */
 
 const props = defineProps<{
@@ -284,12 +286,14 @@ onMounted(() => {
   color: var(--muted);
 }
 
-/* Slider Wrapper */
+/* Slider Wrapper - IMPORTANT: This prevents grid dragging */
 .slider-wrapper {
   width: 100%;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* Ensure this container doesn't trigger grid drag */
+  cursor: default;
 }
 
 /* Slider Input */
