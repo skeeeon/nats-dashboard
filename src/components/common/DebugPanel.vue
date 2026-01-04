@@ -62,7 +62,7 @@
           <span class="stat-label">Memory Est:</span>
           <span 
             class="stat-value"
-            :class="{ 'memory-warning': memoryMB > 10 }"
+            :class="{ 'memory-warning': memoryMBNumber > 10 }"
           >
             {{ memoryMB }}MB
           </span>
@@ -125,7 +125,6 @@ import { useNatsStore } from '@/stores/nats'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useWidgetDataStore } from '@/stores/widgetData'
 import { getSubscriptionManager } from '@/composables/useSubscriptionManager'
-import { useDesignTokens } from '@/composables/useDesignTokens'
 
 /**
  * Debug Panel Component
@@ -134,13 +133,13 @@ import { useDesignTokens } from '@/composables/useDesignTokens'
  * Good for development and troubleshooting.
  * 
  * NEW: Uses design tokens for all colors!
+ * (Colors are applied via CSS variables in the style section)
  */
 
 const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
 const dataStore = useWidgetDataStore()
 const subManager = getSubscriptionManager()
-const { getConnectionColor } = useDesignTokens()
 
 // Start collapsed by default - less intrusive
 const isCollapsed = ref(true)
@@ -188,10 +187,17 @@ const subStats = computed(() => {
 })
 
 /**
- * Calculate memory usage in MB
+ * Calculate memory usage in MB (as string for display)
  */
 const memoryMB = computed(() => {
   return (dataStore.memoryEstimate / 1024 / 1024).toFixed(2)
+})
+
+/**
+ * Calculate memory usage in MB (as number for comparison)
+ */
+const memoryMBNumber = computed(() => {
+  return dataStore.memoryEstimate / 1024 / 1024
 })
 
 /**

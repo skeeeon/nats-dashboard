@@ -363,7 +363,7 @@ import ChartWidget from '@/components/widgets/ChartWidget.vue'
 import ButtonWidget from '@/components/widgets/ButtonWidget.vue'
 import KvWidget from '@/components/widgets/KvWidget.vue'
 import { createDefaultWidget } from '@/types/dashboard'
-import type { WidgetConfig, ThresholdRule } from '@/types/dashboard'
+import type { ThresholdRule } from '@/types/dashboard'
 
 /**
  * Dashboard View

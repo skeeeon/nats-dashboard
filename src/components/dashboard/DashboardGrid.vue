@@ -4,8 +4,8 @@
       v-model:layout="layoutItems"
       :col-num="12"
       :row-height="80"
-      :is-draggable="true"
-      :is-resizable="true"
+      :is-draggable="isDraggable"
+      :is-resizable="isResizable"
       :vertical-compact="true"
       :margin="[16, 16]"
       :use-css-transforms="true"
@@ -38,15 +38,28 @@
       <div class="empty-message">No widgets yet</div>
       <div class="empty-hint">Click "Add Widget" to get started</div>
     </div>
+    
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { GridLayout, GridItem } from 'grid-layout-plus'
 import WidgetContainer from './WidgetContainer.vue'
 import { useDashboardStore } from '@/stores/dashboard'
 import type { WidgetConfig } from '@/types/dashboard'
+
+/**
+ * Dashboard Grid Component
+ * 
+ * Grug say: Grid hold widgets. Drag and drop on desktop.
+ * Stack nice on mobile. No drag on mobile - too hard to use.
+ * 
+ * FIXED: Dashboard switching now works on mobile!
+ * - Detects when widget IDs completely change (dashboard switch)
+ * - Syncs layout properly on all breakpoints
+ * - Disables drag/resize on mobile for better UX
+ */
 
 const props = defineProps<{
   widgets: WidgetConfig[]
@@ -69,13 +82,25 @@ const breakpoints = { lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }
 const cols = { lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }
 
 /**
+ * Detect if we're on mobile
+ * Grug say: Mobile = small screen. No drag there.
+ */
+const isMobile = computed(() => {
+  return ['sm', 'xs', 'xxs'].includes(currentBreakpoint.value)
+})
+
+/**
+ * Conditionally enable drag/resize based on breakpoint
+ * Grug say: Desktop = drag good. Mobile = drag bad (fingers too big).
+ */
+const isDraggable = computed(() => !isMobile.value)
+const isResizable = computed(() => !isMobile.value)
+
+/**
  * Helper to map store widgets to grid layout items
  * 
- * FIX IMPLEMENTED:
- * We sort the widgets by their Y (row) and then X (col) position.
- * This ensures the DOM order matches the Visual order.
- * When the grid switches to mobile (stacking), it stacks based on DOM order,
- * so this ensures Top-Left widgets appear first on mobile.
+ * Grug say: Sort by position so mobile stack looks good.
+ * Top-left widgets appear first on mobile.
  */
 function mapWidgetsToLayout(widgets: WidgetConfig[]) {
   // 1. Create a shallow copy to sort
@@ -102,16 +127,65 @@ function mapWidgetsToLayout(widgets: WidgetConfig[]) {
 const layoutItems = ref(mapWidgetsToLayout(props.widgets))
 
 /**
+ * Extract widget IDs from current layout
+ * Grug say: Use this to detect dashboard switches
+ */
+function getLayoutWidgetIds(): string[] {
+  return layoutItems.value.map(item => item.i)
+}
+
+/**
+ * Extract widget IDs from props
+ */
+function getPropsWidgetIds(): string[] {
+  return props.widgets.map(w => w.id)
+}
+
+/**
+ * Check if widget sets are completely different
+ * Grug say: If IDs don't match, user switched dashboard
+ */
+function isWidgetSetChanged(layoutIds: string[], propsIds: string[]): boolean {
+  // Different lengths = definitely changed
+  if (layoutIds.length !== propsIds.length) {
+    return true
+  }
+  
+  // Check if any ID in layout is missing from props
+  // This means the widget set has fundamentally changed (dashboard switch)
+  const propsSet = new Set(propsIds)
+  return layoutIds.some(id => !propsSet.has(id))
+}
+
+/**
  * Sync from store to local state
+ * 
+ * FIXED: Now properly detects dashboard switches vs. grid manipulation
  */
 watch(() => props.widgets, (newWidgets) => {
-  if (currentBreakpoint.value === 'lg') {
+  const currentLayoutIds = getLayoutWidgetIds()
+  const newPropsIds = getPropsWidgetIds()
+  
+  // Check if this is a fundamental change (dashboard switch)
+  const isDashboardSwitch = isWidgetSetChanged(currentLayoutIds, newPropsIds)
+  
+  if (isDashboardSwitch) {
+    // Dashboard switched - update layout on ALL breakpoints
+    console.log('[Grid] Dashboard switch detected, syncing layout')
+    layoutItems.value = mapWidgetsToLayout(newWidgets)
+  } else if (currentBreakpoint.value === 'lg') {
+    // Same dashboard, desktop mode - sync layout from store
+    // (This handles external changes like widget addition)
     layoutItems.value = mapWidgetsToLayout(newWidgets)
   }
+  // else: Same dashboard, mobile mode, user dragging - don't interfere
+  
 }, { deep: true })
 
 /**
  * Handle Breakpoint Changes
+ * 
+ * Grug say: When screen size change, adjust layout
  */
 function handleBreakpointChange(breakpoint: string, newLayout: any[]) {
   console.log(`[Grid] Breakpoint changed: ${currentBreakpoint.value} -> ${breakpoint}`)
@@ -128,10 +202,13 @@ function handleBreakpointChange(breakpoint: string, newLayout: any[]) {
 
 /**
  * Handle layout changes (drag/resize)
+ * 
+ * Grug say: Only save to store on desktop. Mobile no drag anyway.
  */
 function handleLayoutUpdate(newLayout: Array<{ i: string; x: number; y: number; w: number; h: number }>) {
   layoutItems.value = newLayout
 
+  // Only save to store when on desktop
   if (currentBreakpoint.value === 'lg') {
     // Save to Store
     newLayout.forEach(item => {
@@ -145,10 +222,18 @@ function handleLayoutUpdate(newLayout: Array<{ i: string; x: number; y: number; 
   }
 }
 
+/**
+ * Get widget config by ID
+ * Grug say: Find widget blueprint from ID
+ */
 function getWidgetConfig(id: string): WidgetConfig | undefined {
   return props.widgets.find(w => w.id === id)
 }
 
+/**
+ * Widget action handlers
+ * Grug say: Pass events up to parent
+ */
 function handleWidgetDelete(widgetId: string) {
   emit('deleteWidget', widgetId)
 }
@@ -206,6 +291,36 @@ function handleWidgetFullscreen(widgetId: string) {
   font-size: 14px;
 }
 
+/* Mobile hint - NEW */
+.mobile-hint {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-info-bg);
+  border: 1px solid var(--color-info-border);
+  color: var(--color-info);
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 10;
+  pointer-events: none;
+  opacity: 0.9;
+  animation: fadeInUp 0.3s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px);
+  }
+  to {
+    opacity: 0.9;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
 /* Grid item styling */
 :deep(.vue-grid-item) {
   transition: all 0.2s ease;
@@ -251,6 +366,16 @@ function handleWidgetFullscreen(widgetId: string) {
 @media (max-width: 768px) {
   .dashboard-grid-container {
     padding: 8px;
+  }
+  
+  /* Hide resize handles on mobile since drag/resize disabled */
+  :deep(.vue-resizable-handle) {
+    display: none;
+  }
+  
+  /* Remove hover effects on mobile */
+  :deep(.vue-grid-item:hover .vue-resizable-handle) {
+    opacity: 0;
   }
 }
 </style>

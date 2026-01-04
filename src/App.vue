@@ -52,7 +52,9 @@ import ErrorBoundary from '@/components/common/ErrorBoundary.vue'
 const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
 const dataStore = useWidgetDataStore()
-const { theme } = useTheme() // Initialize theme
+
+// Initialize theme on app load (side effect only, don't need the return value)
+useTheme()
 
 onMounted(() => {
   // Load NATS settings
