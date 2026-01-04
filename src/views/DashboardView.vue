@@ -18,6 +18,13 @@
       </div>
       
       <div class="toolbar-right">
+        <button 
+          class="btn-icon" 
+          :title="`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`"
+          @click="toggleTheme"
+        >
+          {{ theme === 'dark' ? '☀️' : '🌙' }}
+        </button>
         <button class="btn-primary" @click="showAddWidget = true">
           + Add Widget
         </button>
@@ -33,6 +40,8 @@
         :widgets="dashboardStore.activeWidgets"
         @delete-widget="handleDeleteWidget"
         @configure-widget="handleConfigureWidget"
+        @duplicate-widget="handleDuplicateWidget"
+        @fullscreen-widget="toggleFullScreen"
       />
     </div>
     
@@ -85,8 +94,12 @@
               v-model="configForm.title" 
               type="text" 
               class="form-input"
+              :class="{ 'has-error': validationErrors.title }"
               placeholder="My Widget"
             />
+            <div v-if="validationErrors.title" class="error-text">
+              {{ validationErrors.title }}
+            </div>
           </div>
           
           <!-- Text & Chart Widget Config -->
@@ -97,9 +110,13 @@
                 v-model="configForm.subject" 
                 type="text" 
                 class="form-input"
+                :class="{ 'has-error': validationErrors.subject }"
                 placeholder="sensors.temperature"
               />
-              <div class="help-text">
+              <div v-if="validationErrors.subject" class="error-text">
+                {{ validationErrors.subject }}
+              </div>
+              <div v-else class="help-text">
                 NATS subject pattern to subscribe to
               </div>
             </div>
@@ -110,9 +127,13 @@
                 v-model="configForm.jsonPath" 
                 type="text" 
                 class="form-input"
+                :class="{ 'has-error': validationErrors.jsonPath }"
                 placeholder="$.value or $.sensors[0].temp"
               />
-              <div class="help-text">
+              <div v-if="validationErrors.jsonPath" class="error-text">
+                {{ validationErrors.jsonPath }}
+              </div>
+              <div v-else class="help-text">
                 Extract specific data from messages. Leave empty to show full message.
               </div>
             </div>
@@ -123,10 +144,14 @@
                 v-model.number="configForm.bufferSize" 
                 type="number" 
                 class="form-input"
+                :class="{ 'has-error': validationErrors.bufferSize }"
                 min="10"
                 max="1000"
               />
-              <div class="help-text">
+              <div v-if="validationErrors.bufferSize" class="error-text">
+                {{ validationErrors.bufferSize }}
+              </div>
+              <div v-else class="help-text">
                 Number of messages to keep in history (10-1000)
               </div>
             </div>
@@ -140,9 +165,13 @@
                 v-model="configForm.buttonLabel" 
                 type="text" 
                 class="form-input"
+                :class="{ 'has-error': validationErrors.buttonLabel }"
                 placeholder="Send Message"
               />
-              <div class="help-text">
+              <div v-if="validationErrors.buttonLabel" class="error-text">
+                {{ validationErrors.buttonLabel }}
+              </div>
+              <div v-else class="help-text">
                 Text displayed on the button
               </div>
             </div>
@@ -153,9 +182,13 @@
                 v-model="configForm.subject" 
                 type="text" 
                 class="form-input"
+                :class="{ 'has-error': validationErrors.subject }"
                 placeholder="button.clicked"
               />
-              <div class="help-text">
+              <div v-if="validationErrors.subject" class="error-text">
+                {{ validationErrors.subject }}
+              </div>
+              <div v-else class="help-text">
                 NATS subject to publish to when clicked
               </div>
             </div>
@@ -165,10 +198,14 @@
               <textarea 
                 v-model="configForm.buttonPayload" 
                 class="form-textarea"
+                :class="{ 'has-error': validationErrors.buttonPayload }"
                 rows="6"
                 placeholder='{"action": "clicked"}'
               />
-              <div class="help-text">
+              <div v-if="validationErrors.buttonPayload" class="error-text">
+                {{ validationErrors.buttonPayload }}
+              </div>
+              <div v-else class="help-text">
                 Data to send (JSON, string, number, boolean, etc.)
               </div>
             </div>
@@ -182,9 +219,13 @@
                 v-model="configForm.kvBucket" 
                 type="text" 
                 class="form-input"
+                :class="{ 'has-error': validationErrors.kvBucket }"
                 placeholder="my-bucket"
               />
-              <div class="help-text">
+              <div v-if="validationErrors.kvBucket" class="error-text">
+                {{ validationErrors.kvBucket }}
+              </div>
+              <div v-else class="help-text">
                 Name of the KV bucket (e.g., "config", "twin")
               </div>
             </div>
@@ -195,9 +236,13 @@
                 v-model="configForm.kvKey" 
                 type="text" 
                 class="form-input"
+                :class="{ 'has-error': validationErrors.kvKey }"
                 placeholder="app.version"
               />
-              <div class="help-text">
+              <div v-if="validationErrors.kvKey" class="error-text">
+                {{ validationErrors.kvKey }}
+              </div>
+              <div v-else class="help-text">
                 Key within the bucket (e.g., "app.version", "location.bldg-home.test")
               </div>
             </div>
@@ -214,6 +259,45 @@
         </div>
       </div>
     </div>
+    
+    <!-- Full-Screen Widget Modal -->
+    <div v-if="fullScreenWidgetId && fullScreenWidget" class="fullscreen-modal" @click.self="exitFullScreen">
+      <div class="fullscreen-container">
+        <div class="fullscreen-header">
+          <div class="fullscreen-title">{{ fullScreenWidget.title }}</div>
+          <button class="close-btn" title="Exit full screen (Esc)" @click="exitFullScreen">✕</button>
+        </div>
+        <div class="fullscreen-body">
+          <!-- Render the widget component directly -->
+          <component
+            v-if="fullScreenWidget.type === 'text'"
+            :is="TextWidget"
+            :config="fullScreenWidget"
+          />
+          <component
+            v-else-if="fullScreenWidget.type === 'chart'"
+            :is="ChartWidget"
+            :config="fullScreenWidget"
+          />
+          <component
+            v-else-if="fullScreenWidget.type === 'button'"
+            :is="ButtonWidget"
+            :config="fullScreenWidget"
+          />
+          <component
+            v-else-if="fullScreenWidget.type === 'kv'"
+            :is="KvWidget"
+            :config="fullScreenWidget"
+          />
+        </div>
+        <div class="fullscreen-hint">
+          Press <kbd>Esc</kbd> to exit full screen
+        </div>
+      </div>
+    </div>
+    
+    <!-- Debug Panel (Performance Monitoring) -->
+    <DebugPanel />
   </div>
 </template>
 
@@ -224,8 +308,17 @@ import { useNatsStore } from '@/stores/nats'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useWidgetDataStore } from '@/stores/widgetData'
 import { getSubscriptionManager } from '@/composables/useSubscriptionManager'
+import { useValidation } from '@/composables/useValidation'
+import { useTheme } from '@/composables/useTheme'
+import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 import DashboardGrid from '@/components/dashboard/DashboardGrid.vue'
+import DebugPanel from '@/components/common/DebugPanel.vue'
+import TextWidget from '@/components/widgets/TextWidget.vue'
+import ChartWidget from '@/components/widgets/ChartWidget.vue'
+import ButtonWidget from '@/components/widgets/ButtonWidget.vue'
+import KvWidget from '@/components/widgets/KvWidget.vue'
 import { createDefaultWidget } from '@/types/dashboard'
+import type { WidgetConfig } from '@/types/dashboard'
 
 /**
  * Dashboard View
@@ -241,10 +334,23 @@ const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
 const dataStore = useWidgetDataStore()
 const subManager = getSubscriptionManager()
+const validator = useValidation()
+const { theme, toggleTheme } = useTheme()
 
 const showAddWidget = ref(false)
 const showConfigWidget = ref(false)
 const configWidgetId = ref<string | null>(null)
+const validationErrors = ref<Record<string, string>>({})
+
+// Full-screen widget state
+const fullScreenWidgetId = ref<string | null>(null)
+const fullScreenWidget = computed(() => {
+  if (!fullScreenWidgetId.value) return null
+  return dashboardStore.getWidget(fullScreenWidgetId.value)
+})
+
+// Track selected widget (for keyboard shortcuts)
+const selectedWidgetId = ref<string | null>(null)
 
 // Get widget type being configured
 const configWidgetType = computed(() => {
@@ -350,6 +456,38 @@ function handleDeleteWidget(widgetId: string) {
 }
 
 /**
+ * Handle widget duplication
+ * Grug say: Copy widget. Put copy below original. Simple.
+ */
+function handleDuplicateWidget(widgetId: string) {
+  const original = dashboardStore.getWidget(widgetId)
+  if (!original) return
+  
+  // Create copy of widget
+  const copy = JSON.parse(JSON.stringify(original))
+  
+  // Generate new ID
+  copy.id = `widget_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  
+  // Update title
+  copy.title = `${original.title} (Copy)`
+  
+  // Position below original
+  copy.y = original.y + original.h + 1
+  copy.x = original.x
+  
+  // Add to dashboard
+  dashboardStore.addWidget(copy)
+  
+  // Subscribe if it's a data widget
+  if (copy.type !== 'button' && copy.type !== 'kv') {
+    subscribeWidget(copy.id)
+  }
+  
+  console.log(`[Dashboard] Duplicated widget ${widgetId} → ${copy.id}`)
+}
+
+/**
  * Handle widget configuration
  */
 function handleConfigureWidget(widgetId: string) {
@@ -374,6 +512,7 @@ function handleConfigureWidget(widgetId: string) {
 
 /**
  * Save widget configuration
+ * Grug say: Check inputs before saving. Bad data should not go in.
  */
 function saveWidgetConfig() {
   if (!configWidgetId.value) return
@@ -381,9 +520,80 @@ function saveWidgetConfig() {
   const widget = dashboardStore.getWidget(configWidgetId.value)
   if (!widget) return
   
+  // Clear previous validation errors
+  validationErrors.value = {}
+  
+  // Validate title (common to all widget types)
+  const titleResult = validator.validateWidgetTitle(configForm.value.title)
+  if (!titleResult.valid) {
+    validationErrors.value.title = titleResult.error!
+  }
+  
+  // Type-specific validation
+  if (widget.type === 'text' || widget.type === 'chart') {
+    // Validate subject
+    const subjectResult = validator.validateSubject(configForm.value.subject)
+    if (!subjectResult.valid) {
+      validationErrors.value.subject = subjectResult.error!
+    }
+    
+    // Validate JSONPath if provided
+    if (configForm.value.jsonPath) {
+      const jsonPathResult = validator.validateJsonPath(configForm.value.jsonPath)
+      if (!jsonPathResult.valid) {
+        validationErrors.value.jsonPath = jsonPathResult.error!
+      }
+    }
+    
+    // Validate buffer size
+    const bufferResult = validator.validateBufferSize(configForm.value.bufferSize)
+    if (!bufferResult.valid) {
+      validationErrors.value.bufferSize = bufferResult.error!
+    }
+    
+  } else if (widget.type === 'button') {
+    // Validate publish subject
+    const subjectResult = validator.validateSubject(configForm.value.subject)
+    if (!subjectResult.valid) {
+      validationErrors.value.subject = subjectResult.error!
+    }
+    
+    // Validate button label (just check not empty)
+    if (!configForm.value.buttonLabel.trim()) {
+      validationErrors.value.buttonLabel = 'Button label cannot be empty'
+    }
+    
+    // Validate payload JSON if provided
+    if (configForm.value.buttonPayload) {
+      const jsonResult = validator.validateJson(configForm.value.buttonPayload)
+      if (!jsonResult.valid) {
+        validationErrors.value.buttonPayload = jsonResult.error!
+      }
+    }
+    
+  } else if (widget.type === 'kv') {
+    // Validate bucket name
+    const bucketResult = validator.validateKvBucket(configForm.value.kvBucket)
+    if (!bucketResult.valid) {
+      validationErrors.value.kvBucket = bucketResult.error!
+    }
+    
+    // Validate key
+    const keyResult = validator.validateKvKey(configForm.value.kvKey)
+    if (!keyResult.valid) {
+      validationErrors.value.kvKey = keyResult.error!
+    }
+  }
+  
+  // If any validation errors, don't save
+  if (Object.keys(validationErrors.value).length > 0) {
+    console.log('[Dashboard] Validation errors:', validationErrors.value)
+    return
+  }
+  
   // Build updates based on widget type
   const updates: any = {
-    title: configForm.value.title,
+    title: configForm.value.title.trim(),
   }
   
   // Type-specific configuration
@@ -391,25 +601,25 @@ function saveWidgetConfig() {
     // Text and Chart widgets use subject + JSONPath
     updates.dataSource = {
       ...widget.dataSource,
-      subject: configForm.value.subject,
+      subject: configForm.value.subject.trim(),
     }
-    updates.jsonPath = configForm.value.jsonPath
+    updates.jsonPath = configForm.value.jsonPath.trim() || undefined
     updates.buffer = {
       maxCount: configForm.value.bufferSize,
     }
   } else if (widget.type === 'button') {
     // Button widget configuration
     updates.buttonConfig = {
-      label: configForm.value.buttonLabel || 'Send',
-      publishSubject: configForm.value.subject,
-      payload: configForm.value.buttonPayload || '{}',
+      label: configForm.value.buttonLabel.trim() || 'Send',
+      publishSubject: configForm.value.subject.trim(),
+      payload: configForm.value.buttonPayload.trim() || '{}',
     }
   } else if (widget.type === 'kv') {
     // KV widget uses bucket + key
     updates.dataSource = {
       type: 'kv',
-      kvBucket: configForm.value.kvBucket,
-      kvKey: configForm.value.kvKey,
+      kvBucket: configForm.value.kvBucket.trim(),
+      kvKey: configForm.value.kvKey.trim(),
     }
   }
   
@@ -425,6 +635,7 @@ function saveWidgetConfig() {
   // Close modal
   showConfigWidget.value = false
   configWidgetId.value = null
+  validationErrors.value = {}
 }
 
 /**
@@ -530,6 +741,112 @@ function findNextAvailablePosition(size: { w: number; h: number }): { x: number;
 }
 
 // ============================================================================
+// FULL-SCREEN MODE
+// ============================================================================
+
+/**
+ * Toggle full-screen mode for widget
+ * Grug say: Make widget fill screen. Press F or double-click.
+ */
+function toggleFullScreen(widgetId: string) {
+  if (fullScreenWidgetId.value === widgetId) {
+    // Already full screen - exit
+    fullScreenWidgetId.value = null
+  } else {
+    // Enter full screen
+    fullScreenWidgetId.value = widgetId
+  }
+}
+
+/**
+ * Exit full-screen mode
+ */
+function exitFullScreen() {
+  fullScreenWidgetId.value = null
+}
+
+// ============================================================================
+// KEYBOARD SHORTCUTS
+// ============================================================================
+
+/**
+ * Register keyboard shortcuts
+ * Grug say: Keyboard make fast. Mouse make slow.
+ */
+useKeyboardShortcuts([
+  {
+    key: 's',
+    ctrl: true,
+    description: 'Save dashboard',
+    handler: () => {
+      dashboardStore.saveToStorage()
+      console.log('[Shortcuts] Dashboard saved')
+      // Could add a toast notification here
+    }
+  },
+  {
+    key: 'n',
+    ctrl: true,
+    description: 'Add new widget',
+    handler: () => {
+      showAddWidget.value = true
+    }
+  },
+  {
+    key: 'Delete',
+    description: 'Delete selected widget',
+    handler: () => {
+      if (selectedWidgetId.value) {
+        handleDeleteWidget(selectedWidgetId.value)
+        selectedWidgetId.value = null
+      }
+    }
+  },
+  {
+    key: 'Backspace',
+    description: 'Delete selected widget',
+    handler: () => {
+      if (selectedWidgetId.value) {
+        handleDeleteWidget(selectedWidgetId.value)
+        selectedWidgetId.value = null
+      }
+    }
+  },
+  {
+    key: 'Escape',
+    description: 'Close modal / Exit full screen',
+    handler: () => {
+      if (fullScreenWidgetId.value) {
+        exitFullScreen()
+      } else if (showConfigWidget.value) {
+        showConfigWidget.value = false
+      } else if (showAddWidget.value) {
+        showAddWidget.value = false
+      }
+    }
+  },
+  {
+    key: 'd',
+    ctrl: true,
+    description: 'Duplicate selected widget',
+    handler: (e) => {
+      if (selectedWidgetId.value) {
+        handleDuplicateWidget(selectedWidgetId.value)
+      }
+    }
+  },
+  {
+    key: 'f',
+    description: 'Toggle full screen on selected widget',
+    handler: () => {
+      if (selectedWidgetId.value) {
+        toggleFullScreen(selectedWidgetId.value)
+      }
+    }
+  },
+])
+
+// ============================================================================
 // LIFECYCLE
 // ============================================================================
 
@@ -539,15 +856,24 @@ onMounted(async () => {
   // Load dashboard configuration
   dashboardStore.loadFromStorage()
   
-  // Check NATS connection
-  if (!natsStore.isConnected) {
-    console.log('[Dashboard] Not connected to NATS, redirecting to settings')
-    router.push('/settings')
-    return
+  // Grug say: Only redirect to settings if truly not connected
+  // Check if we have connection info and auto-connect is enabled
+  if (!natsStore.isConnected && !natsStore.autoConnect) {
+    // Check if we have saved connection settings at all
+    const hasSettings = natsStore.serverUrls.length > 0 || natsStore.getStoredCreds() !== null
+    
+    if (!hasSettings) {
+      console.log('[Dashboard] No saved settings found, redirecting to settings')
+      router.push('/settings')
+      return
+    }
   }
   
-  // Subscribe all widgets
-  subscribeAllWidgets()
+  // If we're connected or have auto-connect enabled, stay on dashboard
+  if (natsStore.isConnected) {
+    // Subscribe all widgets
+    subscribeAllWidgets()
+  }
 })
 
 onUnmounted(() => {
@@ -655,7 +981,8 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 
 /* Buttons */
 .btn-primary,
-.btn-secondary {
+.btn-secondary,
+.btn-icon {
   padding: 8px 16px;
   border-radius: 6px;
   font-size: 14px;
@@ -663,6 +990,17 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   cursor: pointer;
   transition: all 0.2s;
   border: none;
+}
+
+.btn-icon {
+  padding: 8px 12px;
+  font-size: 18px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.btn-icon:hover {
+  background: rgba(255, 255, 255, 0.15);
+  transform: scale(1.1);
 }
 
 .btn-primary {
@@ -786,11 +1124,27 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
 }
 
+.form-input.has-error {
+  border-color: var(--danger, #f85149);
+}
+
+.form-input.has-error:focus {
+  box-shadow: 0 0 0 3px rgba(248, 81, 73, 0.15);
+}
+
 .help-text {
   margin-top: 4px;
   font-size: 12px;
   color: var(--muted, #888);
   line-height: 1.4;
+}
+
+.error-text {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--danger, #f85149);
+  line-height: 1.4;
+  font-weight: 500;
 }
 
 .form-textarea {
@@ -811,6 +1165,14 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   outline: none;
   border-color: var(--accent, #58a6ff);
   box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+}
+
+.form-textarea.has-error {
+  border-color: var(--danger, #f85149);
+}
+
+.form-textarea.has-error:focus {
+  box-shadow: 0 0 0 3px rgba(248, 81, 73, 0.15);
 }
 
 .modal-actions {
@@ -865,5 +1227,81 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   font-size: 11px;
   color: var(--muted, #888);
   line-height: 1.3;
+}
+
+/* Full-screen Modal */
+.fullscreen-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg, #0a0a0a);
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.fullscreen-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+}
+
+.fullscreen-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 32px;
+  background: var(--panel, #161616);
+  border-bottom: 1px solid var(--border, #333);
+  flex-shrink: 0;
+}
+
+.fullscreen-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text, #e0e0e0);
+}
+
+.fullscreen-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 32px;
+}
+
+.fullscreen-hint {
+  padding: 12px 32px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted, #888);
+  background: var(--panel, #161616);
+  border-top: 1px solid var(--border, #333);
+  flex-shrink: 0;
+}
+
+.fullscreen-hint kbd {
+  display: inline-block;
+  padding: 3px 8px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text, #e0e0e0);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border, #333);
+  border-radius: 4px;
+  font-family: var(--mono, monospace);
+  margin: 0 4px;
 }
 </style>

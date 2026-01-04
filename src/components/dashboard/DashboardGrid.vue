@@ -22,6 +22,8 @@
           :config="getWidgetConfig(item.i)"
           @delete="handleWidgetDelete(item.i)"
           @configure="handleWidgetConfigure(item.i)"
+          @duplicate="handleWidgetDuplicate(item.i)"
+          @fullscreen="handleWidgetFullscreen(item.i)"
         />
       </GridItem>
     </GridLayout>
@@ -56,6 +58,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   deleteWidget: [widgetId: string]
   configureWidget: [widgetId: string]
+  duplicateWidget: [widgetId: string]
+  fullscreenWidget: [widgetId: string]
 }>()
 
 const dashboardStore = useDashboardStore()
@@ -115,6 +119,22 @@ function handleWidgetDelete(widgetId: string) {
  */
 function handleWidgetConfigure(widgetId: string) {
   emit('configureWidget', widgetId)
+}
+
+/**
+ * Handle widget duplication
+ * Grug say: New feature! Copy widget.
+ */
+function handleWidgetDuplicate(widgetId: string) {
+  emit('duplicateWidget', widgetId)
+}
+
+/**
+ * Handle widget full screen
+ * Grug say: Make widget big!
+ */
+function handleWidgetFullscreen(widgetId: string) {
+  emit('fullscreenWidget', widgetId)
 }
 </script>
 

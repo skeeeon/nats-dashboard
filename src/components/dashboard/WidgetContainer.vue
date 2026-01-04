@@ -6,6 +6,20 @@
       <div class="widget-actions">
         <button 
           class="icon-btn" 
+          title="Full Screen (F)"
+          @click="$emit('fullscreen')"
+        >
+          ⛶
+        </button>
+        <button 
+          class="icon-btn" 
+          title="Duplicate Widget"
+          @click="$emit('duplicate')"
+        >
+          📋
+        </button>
+        <button 
+          class="icon-btn" 
           title="Configure Widget"
           @click="$emit('configure')"
         >
@@ -50,8 +64,9 @@ import KvWidget from '@/components/widgets/KvWidget.vue'
  * Grug say: Container is box that holds widget.
  * Box same for all widgets. Provides:
  * - Title bar
- * - Delete button
+ * - Duplicate button (NEW!)
  * - Configure button
+ * - Delete button
  * - Error handling
  */
 
@@ -62,6 +77,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   delete: []
   configure: []
+  duplicate: []
+  fullscreen: []
 }>()
 
 // Error state for error boundary
