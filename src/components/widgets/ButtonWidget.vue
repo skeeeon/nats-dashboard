@@ -23,6 +23,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useNatsStore } from '@/stores/nats'
+import { useDesignTokens } from '@/composables/useDesignTokens'
 import type { WidgetConfig } from '@/types/dashboard'
 
 /**
@@ -31,6 +32,8 @@ import type { WidgetConfig } from '@/types/dashboard'
  * Grug say: Button push, message go. Simple.
  * Click button → publish message to NATS.
  * Good for triggering actions, sending commands, testing.
+ * 
+ * NEW: Now uses design tokens for colors and proper hover states!
  */
 
 const props = defineProps<{
@@ -38,6 +41,7 @@ const props = defineProps<{
 }>()
 
 const natsStore = useNatsStore()
+const { semanticColors, getToken } = useDesignTokens()
 const lastPublished = ref<string | null>(null)
 
 // Get button configuration with defaults
@@ -50,13 +54,30 @@ const buttonIcon = computed(() => {
   return '📤'
 })
 
-const buttonColor = computed(() => 
-  props.config.buttonConfig?.color || '#3fb950'
-)
+// Get button color - use primary if not specified
+const buttonColor = computed(() => {
+  if (props.config.buttonConfig?.color) {
+    return props.config.buttonConfig.color
+  }
+  // Default to primary color
+  return semanticColors.value.primary
+})
+
+// Calculate hover color (slightly darker)
+const buttonHoverColor = computed(() => {
+  if (props.config.buttonConfig?.color) {
+    // If custom color, darken it slightly
+    // This is a simple approach - could be more sophisticated
+    return props.config.buttonConfig.color
+  }
+  // Use token hover color
+  return semanticColors.value.primaryHover
+})
 
 const buttonStyle = computed(() => ({
   backgroundColor: buttonColor.value,
   borderColor: buttonColor.value,
+  '--hover-bg': buttonHoverColor.value,
 }))
 
 const publishSubject = computed(() => 
@@ -102,7 +123,7 @@ function handleClick() {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--widget-bg);
   border-radius: 8px;
   gap: 12px;
 }
@@ -122,9 +143,11 @@ function handleClick() {
   color: white;
   min-width: 150px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  /* backgroundColor and borderColor from style binding */
 }
 
 .widget-button:hover:not(:disabled) {
+  background: var(--hover-bg);
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
@@ -150,13 +173,13 @@ function handleClick() {
 
 .last-published {
   font-size: 11px;
-  color: var(--muted, #888);
+  color: var(--muted);
   animation: fadeIn 0.3s ease-out;
 }
 
 .disconnected-warning {
   font-size: 11px;
-  color: var(--danger, #f85149);
+  color: var(--color-error);
   display: flex;
   align-items: center;
   gap: 4px;

@@ -18,7 +18,7 @@
         <div class="section-title">Connection</div>
         <div class="stat-row">
           <span class="stat-label">Status:</span>
-          <span class="stat-value" :class="`status-${natsStore.status}`">
+          <span class="stat-value" :class="statusClass">
             {{ natsStore.status }}
           </span>
         </div>
@@ -65,6 +65,12 @@
             :class="{ 'memory-warning': memoryMB > 10 }"
           >
             {{ memoryMB }}MB
+          </span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Usage:</span>
+          <span class="stat-value" :class="memoryPercentClass">
+            {{ memoryPercent.toFixed(1) }}%
           </span>
         </div>
       </div>
@@ -119,18 +125,22 @@ import { useNatsStore } from '@/stores/nats'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useWidgetDataStore } from '@/stores/widgetData'
 import { getSubscriptionManager } from '@/composables/useSubscriptionManager'
+import { useDesignTokens } from '@/composables/useDesignTokens'
 
 /**
  * Debug Panel Component
  * 
  * Grug say: Show what happening inside. Find slow parts. Fix problems.
  * Good for development and troubleshooting.
+ * 
+ * NEW: Uses design tokens for all colors!
  */
 
 const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
 const dataStore = useWidgetDataStore()
 const subManager = getSubscriptionManager()
+const { getConnectionColor } = useDesignTokens()
 
 // Start collapsed by default - less intrusive
 const isCollapsed = ref(true)
@@ -140,6 +150,27 @@ const throughputHistory = ref<number[]>(new Array(20).fill(0))
 
 // Update interval
 let updateInterval: number | null = null
+
+/**
+ * Status class based on connection state
+ */
+const statusClass = computed(() => {
+  return `status-${natsStore.status}`
+})
+
+/**
+ * Memory percentage
+ */
+const memoryPercent = computed(() => dataStore.memoryUsagePercent)
+
+/**
+ * Memory percentage class for color
+ */
+const memoryPercentClass = computed(() => {
+  if (memoryPercent.value >= 90) return 'memory-critical'
+  if (memoryPercent.value >= 70) return 'memory-warning'
+  return ''
+})
 
 /**
  * Get subscription stats from manager
@@ -240,8 +271,8 @@ onUnmounted(() => {
   bottom: 0;
   right: 16px;
   width: 320px;
-  background: var(--panel, #161616);
-  border: 1px solid var(--border, #333);
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-bottom: none;
   border-radius: 8px 8px 0 0;
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
@@ -258,8 +289,8 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  background: rgba(0, 0, 0, 0.3);
-  border-bottom: 1px solid var(--border, #333);
+  background: var(--widget-header-bg);
+  border-bottom: 1px solid var(--border);
   cursor: pointer;
   user-select: none;
 }
@@ -274,7 +305,7 @@ onUnmounted(() => {
   gap: 8px;
   font-size: 14px;
   font-weight: 600;
-  color: var(--text, #e0e0e0);
+  color: var(--text);
 }
 
 .debug-icon {
@@ -282,7 +313,7 @@ onUnmounted(() => {
 }
 
 .debug-toggle {
-  color: var(--muted, #888);
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -295,7 +326,7 @@ onUnmounted(() => {
 .debug-section {
   margin-bottom: 16px;
   padding-bottom: 16px;
-  border-bottom: 1px solid var(--border, #333);
+  border-bottom: 1px solid var(--border);
 }
 
 .debug-section:last-of-type {
@@ -309,7 +340,7 @@ onUnmounted(() => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--muted, #888);
+  color: var(--muted);
   margin-bottom: 8px;
 }
 
@@ -322,30 +353,36 @@ onUnmounted(() => {
 }
 
 .stat-label {
-  color: var(--muted, #888);
+  color: var(--muted);
 }
 
 .stat-value {
-  color: var(--text, #e0e0e0);
+  color: var(--text);
   font-weight: 500;
-  font-family: var(--mono, monospace);
+  font-family: var(--mono);
 }
 
+/* Status colors using design tokens! */
 .stat-value.status-connected {
-  color: var(--primary, #3fb950);
+  color: var(--connection-connected);
 }
 
 .stat-value.status-connecting,
 .stat-value.status-reconnecting {
-  color: var(--accent, #58a6ff);
+  color: var(--connection-connecting);
 }
 
 .stat-value.status-disconnected {
-  color: var(--danger, #f85149);
+  color: var(--connection-disconnected);
 }
 
+/* Memory warning colors using design tokens! */
 .stat-value.memory-warning {
-  color: #d29922;
+  color: var(--color-warning);
+}
+
+.stat-value.memory-critical {
+  color: var(--color-error);
 }
 
 /* Subscription List */
@@ -365,8 +402,8 @@ onUnmounted(() => {
 }
 
 .sub-subject {
-  color: var(--accent, #58a6ff);
-  font-family: var(--mono, monospace);
+  color: var(--color-accent);
+  font-family: var(--mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -375,7 +412,7 @@ onUnmounted(() => {
 }
 
 .sub-listeners {
-  color: var(--muted, #888);
+  color: var(--muted);
   flex-shrink: 0;
 }
 
@@ -392,10 +429,10 @@ onUnmounted(() => {
   padding: 4px 8px;
   background: rgba(0, 0, 0, 0.2);
   border-radius: 4px;
-  color: var(--text, #e0e0e0);
+  color: var(--text);
 }
 
-/* Throughput Chart */
+/* Throughput Chart - uses design tokens! */
 .throughput-chart {
   display: flex;
   align-items: flex-end;
@@ -407,7 +444,7 @@ onUnmounted(() => {
 
 .throughput-bar {
   flex: 1;
-  background: var(--accent, #58a6ff);
+  background: var(--color-accent);
   border-radius: 2px 2px 0 0;
   min-height: 2px;
   transition: height 0.3s ease;
@@ -424,9 +461,9 @@ onUnmounted(() => {
   flex: 1;
   padding: 8px 12px;
   background: rgba(255, 255, 255, 0.1);
-  border: 1px solid var(--border, #333);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  color: var(--text, #e0e0e0);
+  color: var(--text);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -435,6 +472,6 @@ onUnmounted(() => {
 
 .debug-btn:hover {
   background: rgba(255, 255, 255, 0.15);
-  border-color: var(--accent, #58a6ff);
+  border-color: var(--color-accent);
 }
 </style>

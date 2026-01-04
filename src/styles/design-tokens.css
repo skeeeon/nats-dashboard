@@ -1,0 +1,237 @@
+/* src/styles/design-tokens.css */
+
+/**
+ * Design Token System
+ * 
+ * Centralized color management for theming.
+ * All colors should reference these tokens instead of hardcoded values.
+ * 
+ * Usage in components:
+ * - CSS: color: var(--color-success)
+ * - JS: useDesignTokens().chartColors.value.color1
+ */
+
+/* ============================================================================
+   DARK THEME (Default)
+   ============================================================================ */
+:root,
+:root[data-theme="dark"] {
+  /* -------------------- Base Colors -------------------- */
+  --bg: #0a0a0a;
+  --panel: #161616;
+  --border: #333;
+  --input-bg: #050505;
+  --text: #e0e0e0;
+  --text-secondary: #b1b1b1;
+  --muted: #888;
+  
+  /* -------------------- Semantic Colors -------------------- */
+  --color-primary: #3fb950;
+  --color-primary-hover: #2ea043;
+  --color-primary-active: #26843b;
+  
+  --color-secondary: #58a6ff;
+  --color-secondary-hover: #4493e6;
+  --color-secondary-active: #3681d8;
+  
+  --color-accent: #58a6ff;
+  --color-accent-hover: #4493e6;
+  
+  --color-success: #3fb950;
+  --color-success-bg: rgba(63, 185, 80, 0.15);
+  --color-success-border: rgba(63, 185, 80, 0.4);
+  
+  --color-warning: #d29922;
+  --color-warning-bg: rgba(210, 153, 34, 0.15);
+  --color-warning-border: rgba(210, 153, 34, 0.4);
+  
+  --color-error: #f85149;
+  --color-error-bg: rgba(248, 81, 73, 0.15);
+  --color-error-border: rgba(248, 81, 73, 0.4);
+  
+  --color-info: #58a6ff;
+  --color-info-bg: rgba(88, 166, 255, 0.15);
+  --color-info-border: rgba(88, 166, 255, 0.4);
+  
+  /* -------------------- Chart Colors -------------------- */
+  /* Optimized for dark backgrounds, high contrast */
+  --chart-color-1: #58a6ff;  /* Blue - primary line */
+  --chart-color-2: #3fb950;  /* Green - success/positive */
+  --chart-color-3: #d29922;  /* Orange - warning */
+  --chart-color-4: #bc8cff;  /* Purple */
+  --chart-color-5: #ff7b72;  /* Coral red */
+  --chart-color-6: #56d364;  /* Light green */
+  --chart-color-7: #f778ba;  /* Pink */
+  --chart-color-8: #ffd700;  /* Gold */
+  
+  /* Chart color with opacity for areas */
+  --chart-color-1-alpha-30: rgba(88, 166, 255, 0.3);
+  --chart-color-1-alpha-05: rgba(88, 166, 255, 0.05);
+  --chart-color-2-alpha-30: rgba(63, 185, 80, 0.3);
+  --chart-color-2-alpha-05: rgba(63, 185, 80, 0.05);
+  --chart-color-3-alpha-30: rgba(210, 153, 34, 0.3);
+  --chart-color-3-alpha-05: rgba(210, 153, 34, 0.05);
+  
+  /* -------------------- Threshold Colors -------------------- */
+  /* For alert thresholds: normal -> warning -> critical -> severe */
+  --threshold-normal: #3fb950;
+  --threshold-warning: #d29922;
+  --threshold-critical: #f85149;
+  --threshold-severe: #da3633;
+  
+  --threshold-normal-bg: rgba(63, 185, 80, 0.15);
+  --threshold-warning-bg: rgba(210, 153, 34, 0.15);
+  --threshold-critical-bg: rgba(248, 81, 73, 0.15);
+  --threshold-severe-bg: rgba(218, 54, 51, 0.15);
+  
+  /* -------------------- Status Colors -------------------- */
+  --status-active: #3fb950;
+  --status-inactive: #888;
+  --status-pending: #d29922;
+  --status-error: #f85149;
+  --status-unknown: #656d76;
+  
+  /* -------------------- Connection Status -------------------- */
+  --connection-connected: #3fb950;
+  --connection-connecting: #58a6ff;
+  --connection-reconnecting: #d29922;
+  --connection-disconnected: #f85149;
+  
+  /* -------------------- Widget Colors -------------------- */
+  --widget-bg: rgba(0, 0, 0, 0.2);
+  --widget-border: var(--border);
+  --widget-header-bg: rgba(0, 0, 0, 0.3);
+  
+  /* -------------------- Chart Styling -------------------- */
+  --chart-grid: #222;
+  --chart-axis: #333;
+  --chart-tooltip-bg: rgba(0, 0, 0, 0.8);
+  --chart-tooltip-border: #333;
+  
+  /* -------------------- Fonts -------------------- */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+/* ============================================================================
+   LIGHT THEME
+   ============================================================================ */
+:root[data-theme="light"] {
+  /* -------------------- Base Colors -------------------- */
+  --bg: #ffffff;
+  --panel: #f6f8fa;
+  --border: #d0d7de;
+  --input-bg: #ffffff;
+  --text: #1f2328;
+  --text-secondary: #656d76;
+  --muted: #656d76;
+  
+  /* -------------------- Semantic Colors -------------------- */
+  --color-primary: #1f883d;
+  --color-primary-hover: #1a7f37;
+  --color-primary-active: #166e31;
+  
+  --color-secondary: #0969da;
+  --color-secondary-hover: #0860ca;
+  --color-secondary-active: #0757ba;
+  
+  --color-accent: #0969da;
+  --color-accent-hover: #0860ca;
+  
+  --color-success: #1f883d;
+  --color-success-bg: rgba(31, 136, 61, 0.1);
+  --color-success-border: rgba(31, 136, 61, 0.3);
+  
+  --color-warning: #bf8700;
+  --color-warning-bg: rgba(191, 135, 0, 0.1);
+  --color-warning-border: rgba(191, 135, 0, 0.3);
+  
+  --color-error: #d1242f;
+  --color-error-bg: rgba(209, 36, 47, 0.1);
+  --color-error-border: rgba(209, 36, 47, 0.3);
+  
+  --color-info: #0969da;
+  --color-info-bg: rgba(9, 105, 218, 0.1);
+  --color-info-border: rgba(9, 105, 218, 0.3);
+  
+  /* -------------------- Chart Colors -------------------- */
+  /* Optimized for light backgrounds, sufficient contrast */
+  --chart-color-1: #0969da;  /* Blue */
+  --chart-color-2: #1f883d;  /* Green */
+  --chart-color-3: #bf8700;  /* Orange */
+  --chart-color-4: #8250df;  /* Purple */
+  --chart-color-5: #d1242f;  /* Red */
+  --chart-color-6: #1a7f37;  /* Dark green */
+  --chart-color-7: #bf3989;  /* Pink */
+  --chart-color-8: #9a6700;  /* Gold */
+  
+  /* Chart color with opacity for areas */
+  --chart-color-1-alpha-30: rgba(9, 105, 218, 0.3);
+  --chart-color-1-alpha-05: rgba(9, 105, 218, 0.05);
+  --chart-color-2-alpha-30: rgba(31, 136, 61, 0.3);
+  --chart-color-2-alpha-05: rgba(31, 136, 61, 0.05);
+  --chart-color-3-alpha-30: rgba(191, 135, 0, 0.3);
+  --chart-color-3-alpha-05: rgba(191, 135, 0, 0.05);
+  
+  /* -------------------- Threshold Colors -------------------- */
+  --threshold-normal: #1f883d;
+  --threshold-warning: #bf8700;
+  --threshold-critical: #d1242f;
+  --threshold-severe: #a40e26;
+  
+  --threshold-normal-bg: rgba(31, 136, 61, 0.1);
+  --threshold-warning-bg: rgba(191, 135, 0, 0.1);
+  --threshold-critical-bg: rgba(209, 36, 47, 0.1);
+  --threshold-severe-bg: rgba(164, 14, 38, 0.1);
+  
+  /* -------------------- Status Colors -------------------- */
+  --status-active: #1f883d;
+  --status-inactive: #656d76;
+  --status-pending: #bf8700;
+  --status-error: #d1242f;
+  --status-unknown: #8c959f;
+  
+  /* -------------------- Connection Status -------------------- */
+  --connection-connected: #1f883d;
+  --connection-connecting: #0969da;
+  --connection-reconnecting: #bf8700;
+  --connection-disconnected: #d1242f;
+  
+  /* -------------------- Widget Colors -------------------- */
+  --widget-bg: #ffffff;
+  --widget-border: var(--border);
+  --widget-header-bg: #f6f8fa;
+  
+  /* -------------------- Chart Styling -------------------- */
+  --chart-grid: #eaeef2;
+  --chart-axis: #d0d7de;
+  --chart-tooltip-bg: rgba(255, 255, 255, 0.95);
+  --chart-tooltip-border: #d0d7de;
+}
+
+/* ============================================================================
+   HELPER CLASSES
+   ============================================================================ */
+
+/* Semantic color utilities */
+.text-success { color: var(--color-success); }
+.text-warning { color: var(--color-warning); }
+.text-error { color: var(--color-error); }
+.text-info { color: var(--color-info); }
+.text-muted { color: var(--muted); }
+
+.bg-success { background-color: var(--color-success-bg); }
+.bg-warning { background-color: var(--color-warning-bg); }
+.bg-error { background-color: var(--color-error-bg); }
+.bg-info { background-color: var(--color-info-bg); }
+
+.border-success { border-color: var(--color-success-border); }
+.border-warning { border-color: var(--color-warning-border); }
+.border-error { border-color: var(--color-error-border); }
+.border-info { border-color: var(--color-info-border); }
+
+/* Status utilities */
+.status-active { color: var(--status-active); }
+.status-inactive { color: var(--status-inactive); }
+.status-pending { color: var(--status-pending); }
+.status-error { color: var(--status-error); }

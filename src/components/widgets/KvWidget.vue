@@ -1,8 +1,7 @@
 <template>
   <div class="kv-widget">
     <div v-if="loading" class="kv-loading">
-      <div class="loading-spinner">⟳</div>
-      <div>Loading...</div>
+      <LoadingState size="small" inline />
     </div>
     
     <div v-else-if="error" class="kv-error">
@@ -22,8 +21,14 @@
       </div>
       
       <div class="kv-meta">
-        <span>Revision: {{ revision }}</span>
-        <span v-if="lastUpdated">Updated: {{ lastUpdated }}</span>
+        <span class="meta-item">
+          <span class="meta-label">Revision:</span>
+          <span class="meta-value">{{ revision }}</span>
+        </span>
+        <span v-if="lastUpdated" class="meta-item">
+          <span class="meta-label">Updated:</span>
+          <span class="meta-value">{{ lastUpdated }}</span>
+        </span>
       </div>
     </div>
     
@@ -41,6 +46,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useNatsStore } from '@/stores/nats'
 import { Kvm } from '@nats-io/kv'
+import LoadingState from '@/components/common/LoadingState.vue'
 import type { WidgetConfig } from '@/types/dashboard'
 
 /**
@@ -48,6 +54,8 @@ import type { WidgetConfig } from '@/types/dashboard'
  * 
  * Grug say: Show value from KV bucket. Watch for changes.
  * Like text widget but for KV store instead of messages.
+ * 
+ * NEW: Now uses design tokens for status colors and loading states!
  */
 
 const props = defineProps<{
@@ -208,7 +216,7 @@ watch(
   display: flex;
   flex-direction: column;
   padding: 16px;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--widget-bg);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -220,28 +228,16 @@ watch(
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: var(--muted, #888);
-  gap: 8px;
 }
 
-.loading-spinner {
-  font-size: 32px;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-/* Error state */
+/* Error state - uses design tokens! */
 .kv-error {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: var(--danger, #f85149);
+  color: var(--color-error);
   gap: 8px;
 }
 
@@ -252,6 +248,7 @@ watch(
 .error-text {
   font-size: 13px;
   text-align: center;
+  line-height: 1.4;
 }
 
 /* Content */
@@ -267,12 +264,12 @@ watch(
   flex-direction: column;
   gap: 4px;
   padding-bottom: 8px;
-  border-bottom: 1px solid var(--border, #333);
+  border-bottom: 1px solid var(--border);
 }
 
 .kv-bucket {
   font-size: 11px;
-  color: var(--muted, #888);
+  color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -280,8 +277,8 @@ watch(
 .kv-key {
   font-size: 14px;
   font-weight: 600;
-  color: var(--accent, #58a6ff);
-  font-family: var(--mono, monospace);
+  color: var(--color-accent);
+  font-family: var(--mono);
 }
 
 .kv-value {
@@ -297,8 +294,8 @@ watch(
   border-radius: 4px;
   font-size: 12px;
   line-height: 1.4;
-  color: var(--text, #e0e0e0);
-  font-family: var(--mono, monospace);
+  color: var(--text);
+  font-family: var(--mono);
   overflow: auto;
 }
 
@@ -308,8 +305,8 @@ watch(
   border-radius: 4px;
   font-size: 14px;
   line-height: 1.4;
-  color: var(--text, #e0e0e0);
-  font-family: var(--mono, monospace);
+  color: var(--text);
+  font-family: var(--mono);
   word-break: break-all;
 }
 
@@ -317,9 +314,23 @@ watch(
   display: flex;
   justify-content: space-between;
   font-size: 11px;
-  color: var(--muted, #888);
   padding-top: 8px;
-  border-top: 1px solid var(--border, #333);
+  border-top: 1px solid var(--border);
+  gap: 12px;
+}
+
+.meta-item {
+  display: flex;
+  gap: 6px;
+}
+
+.meta-label {
+  color: var(--muted);
+}
+
+.meta-value {
+  color: var(--text);
+  font-family: var(--mono);
 }
 
 /* Empty state */
@@ -329,7 +340,7 @@ watch(
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: var(--muted, #888);
+  color: var(--muted);
   gap: 8px;
 }
 
@@ -340,7 +351,7 @@ watch(
 
 .empty-hint {
   font-size: 11px;
-  font-family: var(--mono, monospace);
-  color: var(--accent, #58a6ff);
+  font-family: var(--mono);
+  color: var(--color-accent);
 }
 </style>

@@ -49,6 +49,8 @@ import type { WidgetConfig } from '@/types/dashboard'
  * 
  * Grug say: Use correct API this time! v-bind="item" is key.
  * Now we get drag-drop AND resize. Much better!
+ * 
+ * NEW: Uses design tokens for styling!
  */
 
 const props = defineProps<{
@@ -145,17 +147,17 @@ function handleWidgetFullscreen(widgetId: string) {
   position: relative;
   overflow: auto;
   padding: 16px;
-  background: var(--bg, #0a0a0a);
+  background: var(--bg);
 }
 
-/* Empty state styling */
+/* Empty state styling - uses design tokens! */
 .empty-state {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   text-align: center;
-  color: var(--muted, #888);
+  color: var(--muted);
   pointer-events: none;
   z-index: 0;
 }
@@ -170,7 +172,7 @@ function handleWidgetFullscreen(widgetId: string) {
   font-size: 20px;
   font-weight: 600;
   margin-bottom: 8px;
-  color: var(--text, #e0e0e0);
+  color: var(--text);
 }
 
 .empty-hint {
@@ -183,19 +185,19 @@ function handleWidgetFullscreen(widgetId: string) {
   background: transparent;
 }
 
-/* Dragging state */
+/* Dragging placeholder - uses design tokens! */
 :deep(.vue-grid-item.vue-grid-placeholder) {
-  background: rgba(88, 166, 255, 0.2);
-  border: 2px dashed var(--accent, #58a6ff);
+  background: var(--color-info-bg);
+  border: 2px dashed var(--color-accent);
   border-radius: 8px;
   transition: all 0.2s;
 }
 
-/* Resize handle styling */
+/* Resize handle styling - uses design tokens! */
 :deep(.vue-resizable-handle) {
   opacity: 0;
   transition: opacity 0.2s;
-  background: var(--accent, #58a6ff);
+  background: var(--color-accent);
   border-radius: 0 0 8px 0;
 }
 

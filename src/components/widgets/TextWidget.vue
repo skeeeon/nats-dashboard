@@ -2,10 +2,7 @@
   <div class="text-widget">
     <div 
       class="value-display"
-      :style="{
-        fontSize: fontSize + 'px',
-        color: color,
-      }"
+      :style="valueStyle"
     >
       {{ displayValue }}
     </div>
@@ -18,6 +15,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useWidgetDataStore } from '@/stores/widgetData'
+import { useDesignTokens } from '@/composables/useDesignTokens'
 import type { WidgetConfig } from '@/types/dashboard'
 
 /**
@@ -26,6 +24,8 @@ import type { WidgetConfig } from '@/types/dashboard'
  * Grug say: Simplest widget. Just show latest value.
  * No fancy chart. No button. Just text on screen.
  * If this not work, nothing work.
+ * 
+ * NEW: Now uses design tokens for colors!
  */
 
 const props = defineProps<{
@@ -33,10 +33,21 @@ const props = defineProps<{
 }>()
 
 const dataStore = useWidgetDataStore()
+const { baseColors } = useDesignTokens()
 
 // Get configuration
 const fontSize = computed(() => props.config.textConfig?.fontSize || 24)
-const color = computed(() => props.config.textConfig?.color || '#e0e0e0')
+
+// Get color - use token if not specified
+const color = computed(() => {
+  // If custom color specified, use it
+  if (props.config.textConfig?.color) {
+    return props.config.textConfig.color
+  }
+  // Otherwise use theme text color
+  return baseColors.value.text
+})
+
 const format = computed(() => props.config.textConfig?.format)
 
 // Get latest value from buffer
@@ -86,6 +97,12 @@ const timestamp = computed(() => {
 
 // Show timestamp if we have data
 const showTimestamp = computed(() => latestMessage.value !== null)
+
+// Computed style for value display
+const valueStyle = computed(() => ({
+  fontSize: fontSize.value + 'px',
+  color: color.value,
+}))
 </script>
 
 <style scoped>
@@ -96,7 +113,7 @@ const showTimestamp = computed(() => latestMessage.value !== null)
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--widget-bg);
   border-radius: 8px;
 }
 
@@ -105,14 +122,15 @@ const showTimestamp = computed(() => latestMessage.value !== null)
   text-align: center;
   word-break: break-word;
   line-height: 1.3;
-  font-family: var(--mono, 'Courier New', monospace);
+  font-family: var(--mono);
+  /* color and fontSize applied via style binding */
 }
 
 .timestamp {
   margin-top: 12px;
   font-size: 12px;
-  color: #888;
-  font-family: var(--mono, 'Courier New', monospace);
+  color: var(--muted);
+  font-family: var(--mono);
 }
 
 /* Handle long text gracefully */

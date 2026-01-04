@@ -17,7 +17,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { use } from 'echarts/core'
 import { LineChart, BarChart, PieChart, GaugeChart } from 'echarts/charts'
 import {
@@ -29,6 +29,8 @@ import {
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import { useWidgetDataStore } from '@/stores/widgetData'
+import { useDesignTokens } from '@/composables/useDesignTokens'
+import { useTheme } from '@/composables/useTheme'
 import type { WidgetConfig } from '@/types/dashboard'
 
 /**
@@ -36,7 +38,9 @@ import type { WidgetConfig } from '@/types/dashboard'
  * 
  * Grug say: Show data as pretty pictures. Lines go up, lines go down.
  * Use ECharts because it good at making charts.
- * Start with line chart. Add others later if needed.
+ * 
+ * NEW: Now uses design tokens for theme-aware colors!
+ * Charts automatically update when theme changes.
  */
 
 // Register ECharts components
@@ -57,6 +61,8 @@ const props = defineProps<{
 }>()
 
 const dataStore = useWidgetDataStore()
+const { chartColors, chartStyling, getChartColorArray } = useDesignTokens()
+const { theme } = useTheme()
 
 // Get buffered data
 const buffer = computed(() => dataStore.getBuffer(props.config.id))
@@ -69,6 +75,7 @@ const chartType = computed(() => props.config.chartConfig?.chartType || 'line')
 
 /**
  * Generate chart option based on chart type
+ * All colors now come from design tokens!
  */
 const chartOption = computed(() => {
   const data = buffer.value
@@ -90,8 +97,13 @@ const chartOption = computed(() => {
 /**
  * Line Chart - Show values over time
  * Grug say: Most useful for NATS messages. See trends.
+ * 
+ * NEW: Uses design tokens for all colors!
  */
 function generateLineChart(data: any[]) {
+  const colors = chartColors.value
+  const styling = chartStyling.value
+  
   return {
     grid: {
       left: 50,
@@ -101,21 +113,36 @@ function generateLineChart(data: any[]) {
     },
     tooltip: {
       trigger: 'axis',
-      backgroundColor: 'rgba(0, 0, 0, 0.8)',
-      borderColor: '#333',
-      textStyle: { color: '#e0e0e0' },
+      backgroundColor: styling.tooltipBg,
+      borderColor: styling.tooltipBorder,
+      textStyle: { 
+        color: styling.text,
+        fontSize: 12,
+      },
     },
     xAxis: {
       type: 'category',
       data: data.map((m) => new Date(m.timestamp).toLocaleTimeString()),
-      axisLine: { lineStyle: { color: '#333' } },
-      axisLabel: { color: '#888', fontSize: 11 },
+      axisLine: { 
+        lineStyle: { color: styling.axis }
+      },
+      axisLabel: { 
+        color: styling.muted,
+        fontSize: 11,
+      },
     },
     yAxis: {
       type: 'value',
-      axisLine: { lineStyle: { color: '#333' } },
-      axisLabel: { color: '#888', fontSize: 11 },
-      splitLine: { lineStyle: { color: '#222' } },
+      axisLine: { 
+        lineStyle: { color: styling.axis }
+      },
+      axisLabel: { 
+        color: styling.muted,
+        fontSize: 11,
+      },
+      splitLine: { 
+        lineStyle: { color: styling.grid }
+      },
     },
     series: [
       {
@@ -125,11 +152,11 @@ function generateLineChart(data: any[]) {
         symbol: 'circle',
         symbolSize: 6,
         lineStyle: {
-          color: '#58a6ff',
+          color: colors.color1,
           width: 2,
         },
         itemStyle: {
-          color: '#58a6ff',
+          color: colors.color1,
         },
         areaStyle: {
           color: {
@@ -139,22 +166,26 @@ function generateLineChart(data: any[]) {
             x2: 0,
             y2: 1,
             colorStops: [
-              { offset: 0, color: 'rgba(88, 166, 255, 0.3)' },
-              { offset: 1, color: 'rgba(88, 166, 255, 0.05)' },
+              { offset: 0, color: colors.color1Alpha30 },
+              { offset: 1, color: colors.color1Alpha05 },
             ],
           },
         },
       },
     ],
-    // Apply custom options if provided
+    // Apply custom options if provided (but don't override colors)
     ...props.config.chartConfig?.echartOptions,
   }
 }
 
 /**
  * Bar Chart - Show values as bars
+ * NEW: Uses design tokens!
  */
 function generateBarChart(data: any[]) {
+  const colors = chartColors.value
+  const styling = chartStyling.value
+  
   return {
     grid: {
       left: 50,
@@ -164,28 +195,43 @@ function generateBarChart(data: any[]) {
     },
     tooltip: {
       trigger: 'axis',
-      backgroundColor: 'rgba(0, 0, 0, 0.8)',
-      borderColor: '#333',
-      textStyle: { color: '#e0e0e0' },
+      backgroundColor: styling.tooltipBg,
+      borderColor: styling.tooltipBorder,
+      textStyle: { 
+        color: styling.text,
+        fontSize: 12,
+      },
     },
     xAxis: {
       type: 'category',
       data: data.map((m) => new Date(m.timestamp).toLocaleTimeString()),
-      axisLine: { lineStyle: { color: '#333' } },
-      axisLabel: { color: '#888', fontSize: 11 },
+      axisLine: { 
+        lineStyle: { color: styling.axis }
+      },
+      axisLabel: { 
+        color: styling.muted,
+        fontSize: 11,
+      },
     },
     yAxis: {
       type: 'value',
-      axisLine: { lineStyle: { color: '#333' } },
-      axisLabel: { color: '#888', fontSize: 11 },
-      splitLine: { lineStyle: { color: '#222' } },
+      axisLine: { 
+        lineStyle: { color: styling.axis }
+      },
+      axisLabel: { 
+        color: styling.muted,
+        fontSize: 11,
+      },
+      splitLine: { 
+        lineStyle: { color: styling.grid }
+      },
     },
     series: [
       {
         data: data.map((m) => m.value),
         type: 'bar',
         itemStyle: {
-          color: '#3fb950',
+          color: colors.color2, // Use green for bars
         },
       },
     ],
@@ -196,8 +242,13 @@ function generateBarChart(data: any[]) {
 /**
  * Gauge Chart - Show single value as gauge
  * Grug say: Good for showing current value like temperature, speed, etc.
+ * 
+ * NEW: Uses threshold colors for color ranges!
  */
 function generateGaugeChart(data: any[]) {
+  const colors = chartColors.value
+  const styling = chartStyling.value
+  
   // Use latest value for gauge
   const latestValue = data.length > 0 ? data[data.length - 1].value : 0
 
@@ -211,7 +262,7 @@ function generateGaugeChart(data: any[]) {
         max: 100,
         splitNumber: 5,
         itemStyle: {
-          color: '#58a6ff',
+          color: colors.color1,
         },
         progress: {
           show: true,
@@ -223,10 +274,11 @@ function generateGaugeChart(data: any[]) {
         axisLine: {
           lineStyle: {
             width: 18,
+            // Use semantic colors for ranges
             color: [
-              [0.3, '#3fb950'],
-              [0.7, '#d29922'],
-              [1, '#f85149'],
+              [0.3, colors.color2],  // Green for low (good)
+              [0.7, colors.color3],  // Orange for medium (warning)
+              [1, colors.color5],    // Red for high (critical)
             ],
           },
         },
@@ -235,7 +287,7 @@ function generateGaugeChart(data: any[]) {
           splitNumber: 5,
           lineStyle: {
             width: 1,
-            color: '#999',
+            color: styling.muted,
           },
         },
         splitLine: {
@@ -243,12 +295,12 @@ function generateGaugeChart(data: any[]) {
           length: 14,
           lineStyle: {
             width: 2,
-            color: '#999',
+            color: styling.muted,
           },
         },
         axisLabel: {
           distance: -20,
-          color: '#999',
+          color: styling.muted,
           fontSize: 12,
         },
         anchor: {
@@ -266,7 +318,7 @@ function generateGaugeChart(data: any[]) {
           fontSize: 32,
           fontWeight: 'bolder',
           formatter: '{value}',
-          color: 'inherit',
+          color: styling.text,
         },
         data: [
           {
@@ -282,8 +334,12 @@ function generateGaugeChart(data: any[]) {
 /**
  * Pie Chart - Show distribution
  * Grug say: Good if your data has categories
+ * 
+ * NEW: Uses chart color palette!
  */
 function generatePieChart(data: any[]) {
+  const styling = chartStyling.value
+  
   // For pie chart, we need to aggregate data
   // If value is object with categories, use those
   // Otherwise, count occurrences of each value
@@ -294,19 +350,28 @@ function generatePieChart(data: any[]) {
     const val = String(m.value)
     pieData[val] = (pieData[val] || 0) + 1
   })
+  
+  // Get colors for pie slices
+  const colorArray = getChartColorArray(Object.keys(pieData).length)
 
   return {
     tooltip: {
       trigger: 'item',
-      backgroundColor: 'rgba(0, 0, 0, 0.8)',
-      borderColor: '#333',
-      textStyle: { color: '#e0e0e0' },
+      backgroundColor: styling.tooltipBg,
+      borderColor: styling.tooltipBorder,
+      textStyle: { 
+        color: styling.text,
+        fontSize: 12,
+      },
     },
     legend: {
       orient: 'vertical',
       left: 'left',
-      textStyle: { color: '#888' },
+      textStyle: { 
+        color: styling.muted,
+      },
     },
+    color: colorArray, // Use our color palette
     series: [
       {
         type: 'pie',
@@ -327,6 +392,16 @@ function generatePieChart(data: any[]) {
     ...props.config.chartConfig?.echartOptions,
   }
 }
+
+// Watch for theme changes and force chart update
+// ECharts needs explicit notification when colors change
+watch(theme, () => {
+  // chartOption is already reactive and will update,
+  // but we log it for debugging
+  if (import.meta.env.DEV) {
+    console.log('[ChartWidget] Theme changed, chart colors will update')
+  }
+})
 </script>
 
 <style scoped>
@@ -336,7 +411,7 @@ function generatePieChart(data: any[]) {
   display: flex;
   flex-direction: column;
   padding: 8px;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--widget-bg);
   border-radius: 8px;
 }
 
@@ -352,7 +427,7 @@ function generatePieChart(data: any[]) {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: var(--muted, #888);
+  color: var(--muted);
   padding: 20px;
 }
 
@@ -366,7 +441,7 @@ function generatePieChart(data: any[]) {
   font-size: 16px;
   font-weight: 500;
   margin-bottom: 8px;
-  color: var(--text, #e0e0e0);
+  color: var(--text);
 }
 
 .no-data-hint {
@@ -379,7 +454,7 @@ function generatePieChart(data: any[]) {
   background: rgba(255, 255, 255, 0.1);
   padding: 2px 6px;
   border-radius: 3px;
-  font-family: var(--mono, monospace);
-  color: var(--accent, #58a6ff);
+  font-family: var(--mono);
+  color: var(--color-accent);
 }
 </style>

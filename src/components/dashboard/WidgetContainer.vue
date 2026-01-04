@@ -64,10 +64,12 @@ import KvWidget from '@/components/widgets/KvWidget.vue'
  * Grug say: Container is box that holds widget.
  * Box same for all widgets. Provides:
  * - Title bar
- * - Duplicate button (NEW!)
+ * - Duplicate button
  * - Configure button
  * - Delete button
  * - Error handling
+ * 
+ * NEW: Now uses design tokens for all colors!
  */
 
 const props = defineProps<{
@@ -121,11 +123,16 @@ onErrorCaptured((err) => {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--panel, #161616);
-  border: 1px solid var(--border, #333);
+  background: var(--panel);
+  border: 1px solid var(--widget-border);
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: box-shadow 0.2s ease;
+}
+
+.widget-container:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
 .widget-header {
@@ -133,15 +140,15 @@ onErrorCaptured((err) => {
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.3);
-  border-bottom: 1px solid var(--border, #333);
+  background: var(--widget-header-bg);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
 .widget-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text, #e0e0e0);
+  color: var(--text);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   overflow: hidden;
@@ -157,7 +164,7 @@ onErrorCaptured((err) => {
 .icon-btn {
   background: transparent;
   border: none;
-  color: var(--muted, #888);
+  color: var(--muted);
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 4px;
@@ -167,12 +174,12 @@ onErrorCaptured((err) => {
 
 .icon-btn:hover {
   background: rgba(255, 255, 255, 0.1);
-  color: var(--text, #e0e0e0);
+  color: var(--text);
 }
 
 .icon-btn.danger:hover {
-  background: rgba(248, 81, 73, 0.2);
-  color: var(--danger, #f85149);
+  background: var(--color-error-bg);
+  color: var(--color-error);
 }
 
 .widget-body {
@@ -182,7 +189,7 @@ onErrorCaptured((err) => {
   position: relative;
 }
 
-/* Error state styling */
+/* Error state styling - uses design tokens! */
 .widget-error {
   height: 100%;
   display: flex;
@@ -190,7 +197,7 @@ onErrorCaptured((err) => {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  color: var(--danger, #f85149);
+  color: var(--color-error);
   text-align: center;
 }
 

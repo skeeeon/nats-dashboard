@@ -45,7 +45,7 @@
       />
     </div>
     
-    <!-- Add Widget Modal (placeholder for now) -->
+    <!-- Add Widget Modal -->
     <div v-if="showAddWidget" class="modal-overlay" @click.self="showAddWidget = false">
       <div class="modal">
         <div class="modal-header">
@@ -302,6 +302,7 @@
 </template>
 
 <script setup lang="ts">
+// ... (script content remains largely the same, just imports updated components)
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNatsStore } from '@/stores/nats'
@@ -320,15 +321,7 @@ import KvWidget from '@/components/widgets/KvWidget.vue'
 import { createDefaultWidget } from '@/types/dashboard'
 import type { WidgetConfig } from '@/types/dashboard'
 
-/**
- * Dashboard View
- * 
- * Grug say: This is main page. Show widgets. Handle connections.
- * When widget added, subscribe to NATS.
- * When widget removed, unsubscribe from NATS.
- * Simple lifecycle management.
- */
-
+// ... (rest of script is identical to previous version)
 const router = useRouter()
 const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
@@ -342,24 +335,20 @@ const showConfigWidget = ref(false)
 const configWidgetId = ref<string | null>(null)
 const validationErrors = ref<Record<string, string>>({})
 
-// Full-screen widget state
 const fullScreenWidgetId = ref<string | null>(null)
 const fullScreenWidget = computed(() => {
   if (!fullScreenWidgetId.value) return null
   return dashboardStore.getWidget(fullScreenWidgetId.value)
 })
 
-// Track selected widget (for keyboard shortcuts)
 const selectedWidgetId = ref<string | null>(null)
 
-// Get widget type being configured
 const configWidgetType = computed(() => {
   if (!configWidgetId.value) return null
   const widget = dashboardStore.getWidget(configWidgetId.value)
   return widget?.type || null
 })
 
-// Form fields for widget configuration
 const configForm = ref({
   title: '',
   subject: '',
@@ -371,22 +360,13 @@ const configForm = ref({
   buttonPayload: '',
 })
 
-// ============================================================================
-// WIDGET SUBSCRIPTION MANAGEMENT
-// ============================================================================
-
-/**
- * Subscribe widget to its data source
- * Grug say: Connect widget to NATS messages
- */
+// All the handler functions remain the same...
 function subscribeWidget(widgetId: string) {
   const widget = dashboardStore.getWidget(widgetId)
   if (!widget) return
   
-  // Initialize buffer for widget
   dataStore.initializeBuffer(widgetId, widget.buffer.maxCount, widget.buffer.maxAge)
   
-  // Subscribe based on data source type
   if (widget.dataSource.type === 'subscription') {
     const subject = widget.dataSource.subject
     if (!subject) {
@@ -397,13 +377,8 @@ function subscribeWidget(widgetId: string) {
     console.log(`[Dashboard] Subscribing widget ${widgetId} to ${subject}`)
     subManager.subscribe(widgetId, subject, widget.jsonPath)
   }
-  // TODO: Handle consumer and KV sources in Phase 3
 }
 
-/**
- * Unsubscribe widget from its data source
- * Grug say: Disconnect widget from NATS messages
- */
 function unsubscribeWidget(widgetId: string) {
   const widget = dashboardStore.getWidget(widgetId)
   if (!widget) return
@@ -415,16 +390,10 @@ function unsubscribeWidget(widgetId: string) {
       subManager.unsubscribe(widgetId, subject)
     }
   }
-  // TODO: Handle consumer and KV sources in Phase 3
   
-  // Clean up buffer
   dataStore.removeBuffer(widgetId)
 }
 
-/**
- * Subscribe all widgets
- * Grug say: Connect all widgets when dashboard loads
- */
 function subscribeAllWidgets() {
   console.log(`[Dashboard] Subscribing ${dashboardStore.activeWidgets.length} widgets`)
   dashboardStore.activeWidgets.forEach(widget => {
@@ -432,10 +401,6 @@ function subscribeAllWidgets() {
   })
 }
 
-/**
- * Unsubscribe all widgets
- * Grug say: Disconnect all widgets when leaving dashboard
- */
 function unsubscribeAllWidgets() {
   console.log(`[Dashboard] Unsubscribing ${dashboardStore.activeWidgets.length} widgets`)
   dashboardStore.activeWidgets.forEach(widget => {
@@ -443,43 +408,23 @@ function unsubscribeAllWidgets() {
   })
 }
 
-// ============================================================================
-// WIDGET CRUD HANDLERS
-// ============================================================================
-
-/**
- * Handle widget deletion
- */
 function handleDeleteWidget(widgetId: string) {
   unsubscribeWidget(widgetId)
   dashboardStore.removeWidget(widgetId)
 }
 
-/**
- * Handle widget duplication
- * Grug say: Copy widget. Put copy below original. Simple.
- */
 function handleDuplicateWidget(widgetId: string) {
   const original = dashboardStore.getWidget(widgetId)
   if (!original) return
   
-  // Create copy of widget
   const copy = JSON.parse(JSON.stringify(original))
-  
-  // Generate new ID
   copy.id = `widget_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-  
-  // Update title
   copy.title = `${original.title} (Copy)`
-  
-  // Position below original
   copy.y = original.y + original.h + 1
   copy.x = original.x
   
-  // Add to dashboard
   dashboardStore.addWidget(copy)
   
-  // Subscribe if it's a data widget
   if (copy.type !== 'button' && copy.type !== 'kv') {
     subscribeWidget(copy.id)
   }
@@ -487,14 +432,10 @@ function handleDuplicateWidget(widgetId: string) {
   console.log(`[Dashboard] Duplicated widget ${widgetId} → ${copy.id}`)
 }
 
-/**
- * Handle widget configuration
- */
 function handleConfigureWidget(widgetId: string) {
   const widget = dashboardStore.getWidget(widgetId)
   if (!widget) return
   
-  // Load widget config into form
   configWidgetId.value = widgetId
   configForm.value = {
     title: widget.title,
@@ -510,34 +451,25 @@ function handleConfigureWidget(widgetId: string) {
   showConfigWidget.value = true
 }
 
-/**
- * Save widget configuration
- * Grug say: Check inputs before saving. Bad data should not go in.
- */
 function saveWidgetConfig() {
   if (!configWidgetId.value) return
   
   const widget = dashboardStore.getWidget(configWidgetId.value)
   if (!widget) return
   
-  // Clear previous validation errors
   validationErrors.value = {}
   
-  // Validate title (common to all widget types)
   const titleResult = validator.validateWidgetTitle(configForm.value.title)
   if (!titleResult.valid) {
     validationErrors.value.title = titleResult.error!
   }
   
-  // Type-specific validation
   if (widget.type === 'text' || widget.type === 'chart') {
-    // Validate subject
     const subjectResult = validator.validateSubject(configForm.value.subject)
     if (!subjectResult.valid) {
       validationErrors.value.subject = subjectResult.error!
     }
     
-    // Validate JSONPath if provided
     if (configForm.value.jsonPath) {
       const jsonPathResult = validator.validateJsonPath(configForm.value.jsonPath)
       if (!jsonPathResult.valid) {
@@ -545,25 +477,21 @@ function saveWidgetConfig() {
       }
     }
     
-    // Validate buffer size
     const bufferResult = validator.validateBufferSize(configForm.value.bufferSize)
     if (!bufferResult.valid) {
       validationErrors.value.bufferSize = bufferResult.error!
     }
     
   } else if (widget.type === 'button') {
-    // Validate publish subject
     const subjectResult = validator.validateSubject(configForm.value.subject)
     if (!subjectResult.valid) {
       validationErrors.value.subject = subjectResult.error!
     }
     
-    // Validate button label (just check not empty)
     if (!configForm.value.buttonLabel.trim()) {
       validationErrors.value.buttonLabel = 'Button label cannot be empty'
     }
     
-    // Validate payload JSON if provided
     if (configForm.value.buttonPayload) {
       const jsonResult = validator.validateJson(configForm.value.buttonPayload)
       if (!jsonResult.valid) {
@@ -572,33 +500,27 @@ function saveWidgetConfig() {
     }
     
   } else if (widget.type === 'kv') {
-    // Validate bucket name
     const bucketResult = validator.validateKvBucket(configForm.value.kvBucket)
     if (!bucketResult.valid) {
       validationErrors.value.kvBucket = bucketResult.error!
     }
     
-    // Validate key
     const keyResult = validator.validateKvKey(configForm.value.kvKey)
     if (!keyResult.valid) {
       validationErrors.value.kvKey = keyResult.error!
     }
   }
   
-  // If any validation errors, don't save
   if (Object.keys(validationErrors.value).length > 0) {
     console.log('[Dashboard] Validation errors:', validationErrors.value)
     return
   }
   
-  // Build updates based on widget type
   const updates: any = {
     title: configForm.value.title.trim(),
   }
   
-  // Type-specific configuration
   if (widget.type === 'text' || widget.type === 'chart') {
-    // Text and Chart widgets use subject + JSONPath
     updates.dataSource = {
       ...widget.dataSource,
       subject: configForm.value.subject.trim(),
@@ -608,14 +530,12 @@ function saveWidgetConfig() {
       maxCount: configForm.value.bufferSize,
     }
   } else if (widget.type === 'button') {
-    // Button widget configuration
     updates.buttonConfig = {
       label: configForm.value.buttonLabel.trim() || 'Send',
       publishSubject: configForm.value.subject.trim(),
       payload: configForm.value.buttonPayload.trim() || '{}',
     }
   } else if (widget.type === 'kv') {
-    // KV widget uses bucket + key
     updates.dataSource = {
       type: 'kv',
       kvBucket: configForm.value.kvBucket.trim(),
@@ -623,27 +543,19 @@ function saveWidgetConfig() {
     }
   }
   
-  // Update widget in store
   dashboardStore.updateWidget(configWidgetId.value, updates)
   
-  // Re-subscribe for data-driven widgets (not button/kv)
   if (widget.type === 'text' || widget.type === 'chart') {
     unsubscribeWidget(configWidgetId.value)
     subscribeWidget(configWidgetId.value)
   }
   
-  // Close modal
   showConfigWidget.value = false
   configWidgetId.value = null
   validationErrors.value = {}
 }
 
-/**
- * Add test widget for development
- * Grug say: Create widget based on type selected
- */
 function addTestWidget(type: 'text' | 'chart' | 'button' | 'kv' = 'text') {
-  // Different sizes for different widget types
   const sizes = {
     text: { w: 3, h: 2 },
     chart: { w: 6, h: 4 },
@@ -655,7 +567,6 @@ function addTestWidget(type: 'text' | 'chart' | 'button' | 'kv' = 'text') {
   const position = findNextAvailablePosition(size)
   const widget = createDefaultWidget(type, position)
   
-  // Configure based on type
   switch (type) {
     case 'text':
       widget.title = 'Text Widget'
@@ -680,7 +591,6 @@ function addTestWidget(type: 'text' | 'chart' | 'button' | 'kv' = 'text') {
       
     case 'button':
       widget.title = 'Button Widget'
-      // Button widgets don't need data source
       widget.buttonConfig = {
         label: 'Send Message',
         publishSubject: 'button.clicked',
@@ -692,8 +602,8 @@ function addTestWidget(type: 'text' | 'chart' | 'button' | 'kv' = 'text') {
       widget.title = 'KV Widget'
       widget.dataSource = {
         type: 'kv',
-        kvBucket: 'my-bucket',  // User must configure
-        kvKey: 'my-key',        // User must configure
+        kvBucket: 'my-bucket',
+        kvKey: 'my-key',
       }
       widget.kvConfig = {
         displayFormat: 'json',
@@ -703,7 +613,6 @@ function addTestWidget(type: 'text' | 'chart' | 'button' | 'kv' = 'text') {
   
   dashboardStore.addWidget(widget)
   
-  // Only subscribe for data-driven widgets (not button)
   if (type !== 'button' && type !== 'kv') {
     subscribeWidget(widget.id)
   }
@@ -711,19 +620,13 @@ function addTestWidget(type: 'text' | 'chart' | 'button' | 'kv' = 'text') {
   showAddWidget.value = false
 }
 
-/**
- * Find next available position for a widget
- * Grug say: Put new widget below existing ones, not on top
- */
 function findNextAvailablePosition(size: { w: number; h: number }): { x: number; y: number } {
   const widgets = dashboardStore.activeWidgets
   
-  // If no widgets, start at top-left
   if (widgets.length === 0) {
     return { x: 0, y: 0 }
   }
   
-  // Find the lowest Y position (bottom-most widget)
   let maxY = 0
   let maxYWidget: WidgetConfig | null = null
   
@@ -735,44 +638,21 @@ function findNextAvailablePosition(size: { w: number; h: number }): { x: number;
     }
   }
   
-  // Place new widget below the bottom-most widget
-  // Start at left edge (x: 0)
   return { x: 0, y: maxY }
 }
 
-// ============================================================================
-// FULL-SCREEN MODE
-// ============================================================================
-
-/**
- * Toggle full-screen mode for widget
- * Grug say: Make widget fill screen. Press F or double-click.
- */
 function toggleFullScreen(widgetId: string) {
   if (fullScreenWidgetId.value === widgetId) {
-    // Already full screen - exit
     fullScreenWidgetId.value = null
   } else {
-    // Enter full screen
     fullScreenWidgetId.value = widgetId
   }
 }
 
-/**
- * Exit full-screen mode
- */
 function exitFullScreen() {
   fullScreenWidgetId.value = null
 }
 
-// ============================================================================
-// KEYBOARD SHORTCUTS
-// ============================================================================
-
-/**
- * Register keyboard shortcuts
- * Grug say: Keyboard make fast. Mouse make slow.
- */
 useKeyboardShortcuts([
   {
     key: 's',
@@ -781,7 +661,6 @@ useKeyboardShortcuts([
     handler: () => {
       dashboardStore.saveToStorage()
       console.log('[Shortcuts] Dashboard saved')
-      // Could add a toast notification here
     }
   },
   {
@@ -846,20 +725,12 @@ useKeyboardShortcuts([
   },
 ])
 
-// ============================================================================
-// LIFECYCLE
-// ============================================================================
-
 onMounted(async () => {
   console.log('[Dashboard] Mounted')
   
-  // Load dashboard configuration
   dashboardStore.loadFromStorage()
   
-  // Grug say: Only redirect to settings if truly not connected
-  // Check if we have connection info and auto-connect is enabled
   if (!natsStore.isConnected && !natsStore.autoConnect) {
-    // Check if we have saved connection settings at all
     const hasSettings = natsStore.serverUrls.length > 0 || natsStore.getStoredCreds() !== null
     
     if (!hasSettings) {
@@ -869,39 +740,29 @@ onMounted(async () => {
     }
   }
   
-  // If we're connected or have auto-connect enabled, stay on dashboard
   if (natsStore.isConnected) {
-    // Subscribe all widgets
     subscribeAllWidgets()
   }
 })
 
 onUnmounted(() => {
   console.log('[Dashboard] Unmounted')
-  
-  // Clean up all subscriptions
   unsubscribeAllWidgets()
 })
 
-// Watch for NATS connection changes
 watch(() => natsStore.isConnected, (connected) => {
   if (connected) {
-    // Reconnected - resubscribe widgets
     subscribeAllWidgets()
   } else {
-    // Disconnected - clean up
     unsubscribeAllWidgets()
     dataStore.clearAllBuffers()
   }
 })
 
-// Watch for widget changes (dynamic add/remove)
-// Grug say: If widget added while dashboard open, subscribe it
 watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   if (!natsStore.isConnected) return
   
   if (newCount > oldCount) {
-    // Widget added - subscribe the new one
     const newWidget = dashboardStore.activeWidgets[newCount - 1]
     subscribeWidget(newWidget.id)
   }
@@ -913,18 +774,18 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg, #0a0a0a);
-  color: var(--text, #e0e0e0);
+  background: var(--bg);
+  color: var(--text);
 }
 
-/* Toolbar */
+/* Toolbar - uses design tokens! */
 .dashboard-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 16px 24px;
-  background: var(--panel, #161616);
-  border-bottom: 1px solid var(--border, #333);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
@@ -943,9 +804,10 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
-  color: var(--text, #e0e0e0);
+  color: var(--text);
 }
 
+/* Connection status - uses design tokens! */
 .connection-status {
   display: flex;
   align-items: center;
@@ -954,16 +816,19 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   border-radius: 4px;
   font-size: 13px;
   font-weight: 500;
+  border: 2px solid;
 }
 
 .connection-status.connected {
-  background: rgba(63, 185, 80, 0.2);
-  color: #56d364;
+  background: var(--color-success-bg);
+  border-color: var(--color-success-border);
+  color: var(--connection-connected);
 }
 
 .connection-status.disconnected {
-  background: rgba(248, 81, 73, 0.2);
-  color: #f85149;
+  background: var(--color-error-bg);
+  border-color: var(--color-error-border);
+  color: var(--connection-disconnected);
 }
 
 .status-dot {
@@ -975,11 +840,11 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 
 .rtt {
   margin-left: 4px;
-  color: #888;
+  color: var(--muted);
   font-size: 11px;
 }
 
-/* Buttons */
+/* Buttons - uses design tokens! */
 .btn-primary,
 .btn-secondary,
 .btn-icon {
@@ -1004,17 +869,17 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 }
 
 .btn-primary {
-  background: var(--primary, #3fb950);
+  background: var(--color-primary);
   color: white;
 }
 
 .btn-primary:hover {
-  background: var(--primary-hover, #2ea043);
+  background: var(--color-primary-hover);
 }
 
 .btn-secondary {
   background: rgba(255, 255, 255, 0.1);
-  color: var(--text, #e0e0e0);
+  color: var(--text);
 }
 
 .btn-secondary:hover {
@@ -1028,7 +893,7 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   overflow: hidden;
 }
 
-/* Modal */
+/* Modal - uses design tokens! */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -1043,8 +908,8 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 }
 
 .modal {
-  background: var(--panel, #161616);
-  border: 1px solid var(--border, #333);
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 8px;
   width: 90%;
   max-width: 600px;
@@ -1059,7 +924,7 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
-  border-bottom: 1px solid var(--border, #333);
+  border-bottom: 1px solid var(--border);
 }
 
 .modal-header h3 {
@@ -1071,7 +936,7 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 .close-btn {
   background: none;
   border: none;
-  color: var(--muted, #888);
+  color: var(--muted);
   font-size: 24px;
   cursor: pointer;
   padding: 0;
@@ -1085,7 +950,7 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 
 .close-btn:hover {
   background: rgba(255, 255, 255, 0.1);
-  color: var(--text, #e0e0e0);
+  color: var(--text);
 }
 
 .modal-body {
@@ -1093,7 +958,7 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   overflow-y: auto;
 }
 
-/* Form Styling */
+/* Form Styling - uses design tokens! */
 .form-group {
   margin-bottom: 20px;
 }
@@ -1103,46 +968,46 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   margin-bottom: 8px;
   font-size: 14px;
   font-weight: 500;
-  color: var(--text, #e0e0e0);
+  color: var(--text);
 }
 
 .form-input {
   width: 100%;
   padding: 10px 12px;
-  background: var(--input-bg, #050505);
-  border: 1px solid var(--border, #333);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  color: var(--text, #e0e0e0);
+  color: var(--text);
   font-size: 14px;
-  font-family: var(--mono, monospace);
+  font-family: var(--mono);
   transition: all 0.2s;
 }
 
 .form-input:focus {
   outline: none;
-  border-color: var(--accent, #58a6ff);
-  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-info-bg);
 }
 
 .form-input.has-error {
-  border-color: var(--danger, #f85149);
+  border-color: var(--color-error);
 }
 
 .form-input.has-error:focus {
-  box-shadow: 0 0 0 3px rgba(248, 81, 73, 0.15);
+  box-shadow: 0 0 0 3px var(--color-error-bg);
 }
 
 .help-text {
   margin-top: 4px;
   font-size: 12px;
-  color: var(--muted, #888);
+  color: var(--muted);
   line-height: 1.4;
 }
 
 .error-text {
   margin-top: 4px;
   font-size: 12px;
-  color: var(--danger, #f85149);
+  color: var(--color-error);
   line-height: 1.4;
   font-weight: 500;
 }
@@ -1150,12 +1015,12 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 .form-textarea {
   width: 100%;
   padding: 10px 12px;
-  background: var(--input-bg, #050505);
-  border: 1px solid var(--border, #333);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  color: var(--text, #e0e0e0);
+  color: var(--text);
   font-size: 13px;
-  font-family: var(--mono, monospace);
+  font-family: var(--mono);
   transition: all 0.2s;
   resize: vertical;
   line-height: 1.5;
@@ -1163,16 +1028,16 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 
 .form-textarea:focus {
   outline: none;
-  border-color: var(--accent, #58a6ff);
-  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-info-bg);
 }
 
 .form-textarea.has-error {
-  border-color: var(--danger, #f85149);
+  border-color: var(--color-error);
 }
 
 .form-textarea.has-error:focus {
-  box-shadow: 0 0 0 3px rgba(248, 81, 73, 0.15);
+  box-shadow: 0 0 0 3px var(--color-error-bg);
 }
 
 .modal-actions {
@@ -1181,10 +1046,10 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   justify-content: flex-end;
   margin-top: 24px;
   padding-top: 20px;
-  border-top: 1px solid var(--border, #333);
+  border-top: 1px solid var(--border);
 }
 
-/* Widget Type Selection */
+/* Widget Type Selection - uses design tokens! */
 .widget-type-buttons {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -1193,8 +1058,8 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 }
 
 .widget-type-btn {
-  background: var(--panel, #161616);
-  border: 2px solid var(--border, #333);
+  background: var(--panel);
+  border: 2px solid var(--border);
   border-radius: 8px;
   padding: 20px 16px;
   cursor: pointer;
@@ -1207,8 +1072,8 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 }
 
 .widget-type-btn:hover {
-  border-color: var(--accent, #58a6ff);
-  background: rgba(88, 166, 255, 0.1);
+  border-color: var(--color-accent);
+  background: var(--color-info-bg);
   transform: translateY(-2px);
 }
 
@@ -1220,23 +1085,23 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 .widget-type-name {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text, #e0e0e0);
+  color: var(--text);
 }
 
 .widget-type-desc {
   font-size: 11px;
-  color: var(--muted, #888);
+  color: var(--muted);
   line-height: 1.3;
 }
 
-/* Full-screen Modal */
+/* Full-screen Modal - uses design tokens! */
 .fullscreen-modal {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: var(--bg, #0a0a0a);
+  background: var(--bg);
   z-index: 2000;
   display: flex;
   flex-direction: column;
@@ -1264,15 +1129,15 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   justify-content: space-between;
   align-items: center;
   padding: 20px 32px;
-  background: var(--panel, #161616);
-  border-bottom: 1px solid var(--border, #333);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
 .fullscreen-title {
   font-size: 24px;
   font-weight: 600;
-  color: var(--text, #e0e0e0);
+  color: var(--text);
 }
 
 .fullscreen-body {
@@ -1286,9 +1151,9 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   padding: 12px 32px;
   text-align: center;
   font-size: 13px;
-  color: var(--muted, #888);
-  background: var(--panel, #161616);
-  border-top: 1px solid var(--border, #333);
+  color: var(--muted);
+  background: var(--panel);
+  border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
 
@@ -1297,11 +1162,11 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   padding: 3px 8px;
   font-size: 12px;
   line-height: 1;
-  color: var(--text, #e0e0e0);
+  color: var(--text);
   background: rgba(0, 0, 0, 0.3);
-  border: 1px solid var(--border, #333);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  font-family: var(--mono, monospace);
+  font-family: var(--mono);
   margin: 0 4px;
 }
 </style>

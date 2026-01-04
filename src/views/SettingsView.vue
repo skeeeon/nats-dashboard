@@ -8,18 +8,25 @@
         </button>
       </div>
       
-      <div class="settings-content">
+      <!-- Loading overlay when connecting -->
+      <div v-if="connecting" class="loading-overlay">
+        <LoadingState 
+          message="Connecting to NATS..."
+          submessage="Authenticating and establishing connection"
+          size="large"
+          variant="primary"
+        />
+      </div>
+      
+      <div v-else class="settings-content">
         <!-- Connection Status -->
         <div class="setting-section">
           <h3>Connection Status</h3>
-          <div class="status-card" :class="{ connected: natsStore.isConnected }">
+          <div class="status-card" :class="statusClass">
             <div class="status-indicator">
               <div class="status-dot"></div>
               <span class="status-text">
-                {{ natsStore.status === 'connected' ? 'Connected' : 
-                   natsStore.status === 'connecting' ? 'Connecting...' :
-                   natsStore.status === 'reconnecting' ? 'Reconnecting...' :
-                   'Disconnected' }}
+                {{ statusText }}
               </span>
               <span v-if="natsStore.rtt" class="rtt">RTT: {{ natsStore.rtt }}ms</span>
             </div>
@@ -120,7 +127,7 @@
             <button 
               v-if="!natsStore.isConnected"
               class="btn-primary btn-large"
-              :disabled="connecting"
+              :disabled="connecting || !serverUrl"
               @click="handleConnect"
             >
               {{ connecting ? 'Connecting...' : 'Connect' }}
@@ -143,12 +150,15 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNatsStore } from '@/stores/nats'
+import LoadingState from '@/components/common/LoadingState.vue'
 
 /**
  * Settings View
  * 
  * Grug say: Configure NATS connection. Simple form.
  * Connect button. Disconnect button. That's it.
+ * 
+ * NEW: Now with loading states and design token colors!
  */
 
 const router = useRouter()
@@ -169,6 +179,39 @@ const hasStoredCreds = computed(() => {
 })
 
 /**
+ * Status text based on connection state
+ */
+const statusText = computed(() => {
+  switch (natsStore.status) {
+    case 'connected':
+      return 'Connected'
+    case 'connecting':
+      return 'Connecting...'
+    case 'reconnecting':
+      return 'Reconnecting...'
+    case 'disconnected':
+    default:
+      return 'Disconnected'
+  }
+})
+
+/**
+ * CSS class for status card based on connection state
+ */
+const statusClass = computed(() => {
+  switch (natsStore.status) {
+    case 'connected':
+      return 'status-connected'
+    case 'connecting':
+    case 'reconnecting':
+      return 'status-connecting'
+    case 'disconnected':
+    default:
+      return 'status-disconnected'
+  }
+})
+
+/**
  * Handle credentials file upload
  */
 async function handleCredsFile(event: Event) {
@@ -180,9 +223,9 @@ async function handleCredsFile(event: Event) {
   try {
     const text = await file.text()
     credsContent.value = text
-    console.log('Credentials file loaded')
+    console.log('[Settings] Credentials file loaded')
   } catch (err) {
-    console.error('Failed to read credentials file:', err)
+    console.error('[Settings] Failed to read credentials file:', err)
     alert('Failed to read credentials file')
   }
 }
@@ -218,11 +261,14 @@ async function handleConnect() {
     natsStore.addUrl(serverUrl.value)
     natsStore.saveSettings()
     
+    // Small delay to show success state
+    await new Promise(resolve => setTimeout(resolve, 500))
+    
     // Navigate to dashboard
     router.push('/')
     
   } catch (err: any) {
-    console.error('Connection failed:', err)
+    console.error('[Settings] Connection failed:', err)
     alert(err.message || 'Connection failed')
   } finally {
     connecting.value = false
@@ -236,7 +282,7 @@ async function handleDisconnect() {
   try {
     await natsStore.disconnect()
   } catch (err) {
-    console.error('Disconnect failed:', err)
+    console.error('[Settings] Disconnect failed:', err)
   }
 }
 
@@ -278,15 +324,17 @@ watch(serverUrl, (newUrl) => {
 .settings-view {
   min-height: 100vh;
   height: 100vh;
-  background: var(--bg, #0a0a0a);
-  color: var(--text, #e0e0e0);
+  background: var(--bg);
+  color: var(--text);
   padding: 24px;
   overflow-y: auto;
+  position: relative;
 }
 
 .settings-container {
   max-width: 800px;
   margin: 0 auto;
+  position: relative;
 }
 
 .settings-header {
@@ -302,6 +350,26 @@ watch(serverUrl, (newUrl) => {
   font-weight: 600;
 }
 
+/* Loading overlay */
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .settings-content {
   display: flex;
   flex-direction: column;
@@ -310,8 +378,8 @@ watch(serverUrl, (newUrl) => {
 
 /* Setting Sections */
 .setting-section {
-  background: var(--panel, #161616);
-  border: 1px solid var(--border, #333);
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 24px;
 }
@@ -322,20 +390,30 @@ watch(serverUrl, (newUrl) => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--muted, #888);
+  color: var(--muted);
 }
 
-/* Status Card */
+/* Status Card - now using design tokens! */
 .status-card {
   padding: 16px;
   border-radius: 6px;
-  background: rgba(248, 81, 73, 0.1);
-  border: 1px solid rgba(248, 81, 73, 0.3);
+  border: 2px solid;
+  transition: all 0.3s ease;
 }
 
-.status-card.connected {
-  background: rgba(63, 185, 80, 0.1);
-  border-color: rgba(63, 185, 80, 0.3);
+.status-card.status-connected {
+  background: var(--color-success-bg);
+  border-color: var(--color-success-border);
+}
+
+.status-card.status-connecting {
+  background: var(--color-info-bg);
+  border-color: var(--color-info-border);
+}
+
+.status-card.status-disconnected {
+  background: var(--color-error-bg);
+  border-color: var(--color-error-border);
 }
 
 .status-indicator {
@@ -348,50 +426,65 @@ watch(serverUrl, (newUrl) => {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: var(--danger, #f85149);
+  animation: pulse 2s ease-in-out infinite;
 }
 
-.status-card.connected .status-dot {
-  background: var(--primary, #3fb950);
+.status-card.status-connected .status-dot {
+  background: var(--color-success);
+}
+
+.status-card.status-connecting .status-dot {
+  background: var(--color-info);
+}
+
+.status-card.status-disconnected .status-dot {
+  background: var(--color-error);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .status-text {
   font-size: 16px;
   font-weight: 600;
+  color: var(--text);
 }
 
 .rtt {
   margin-left: auto;
-  color: var(--muted, #888);
+  color: var(--muted);
   font-size: 13px;
 }
 
 .error-message {
   margin-top: 12px;
   padding: 12px;
-  background: rgba(248, 81, 73, 0.1);
+  background: var(--color-error-bg);
   border-radius: 4px;
-  color: var(--danger, #f85149);
+  color: var(--color-error);
   font-size: 13px;
+  line-height: 1.4;
 }
 
 /* Form Inputs */
 .input-field {
   width: 100%;
   padding: 12px;
-  background: var(--input-bg, #050505);
-  border: 1px solid var(--border, #333);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  color: var(--text, #e0e0e0);
+  color: var(--text);
   font-size: 14px;
-  font-family: var(--mono, monospace);
+  font-family: var(--mono);
   transition: all 0.2s;
 }
 
 .input-field:focus {
   outline: none;
-  border-color: var(--accent, #58a6ff);
-  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-info-bg);
 }
 
 .input-field:disabled {
@@ -402,18 +495,28 @@ watch(serverUrl, (newUrl) => {
 .file-input {
   width: 100%;
   padding: 8px;
-  background: var(--input-bg, #050505);
-  border: 1px solid var(--border, #333);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  color: var(--text, #e0e0e0);
+  color: var(--text);
   font-size: 14px;
   cursor: pointer;
+  transition: all 0.2s;
+}
+
+.file-input:hover:not(:disabled) {
+  border-color: var(--color-accent);
+}
+
+.file-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .help-text {
   margin-top: 8px;
   font-size: 13px;
-  color: var(--muted, #888);
+  color: var(--muted);
   line-height: 1.4;
 }
 
@@ -431,7 +534,7 @@ watch(serverUrl, (newUrl) => {
   margin-bottom: 8px;
   font-size: 14px;
   font-weight: 500;
-  color: var(--text, #e0e0e0);
+  color: var(--text);
 }
 
 .input-group {
@@ -442,7 +545,7 @@ watch(serverUrl, (newUrl) => {
 
 .stored-creds-indicator {
   margin-top: 8px;
-  color: var(--primary, #3fb950);
+  color: var(--color-success);
   font-size: 13px;
   font-weight: 500;
 }
@@ -460,6 +563,7 @@ watch(serverUrl, (newUrl) => {
   width: 20px;
   height: 20px;
   cursor: pointer;
+  accent-color: var(--color-primary);
 }
 
 /* Buttons */
@@ -482,12 +586,18 @@ watch(serverUrl, (newUrl) => {
 }
 
 .btn-primary {
-  background: var(--primary, #3fb950);
+  background: var(--color-primary);
   color: white;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--primary-hover, #2ea043);
+  background: var(--color-primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .btn-primary:disabled {
@@ -497,7 +607,7 @@ watch(serverUrl, (newUrl) => {
 
 .btn-secondary {
   background: rgba(255, 255, 255, 0.1);
-  color: var(--text, #e0e0e0);
+  color: var(--text);
 }
 
 .btn-secondary:hover {
@@ -505,12 +615,18 @@ watch(serverUrl, (newUrl) => {
 }
 
 .btn-danger {
-  background: var(--danger, #f85149);
+  background: var(--color-error);
   color: white;
 }
 
 .btn-danger:hover {
-  background: #dc4c41;
+  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.btn-danger:active {
+  transform: translateY(0);
 }
 
 .action-buttons {
