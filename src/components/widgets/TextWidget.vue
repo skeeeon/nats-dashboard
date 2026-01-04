@@ -16,17 +16,8 @@
 import { computed } from 'vue'
 import { useWidgetDataStore } from '@/stores/widgetData'
 import { useDesignTokens } from '@/composables/useDesignTokens'
+import { useThresholds } from '@/composables/useThresholds'
 import type { WidgetConfig } from '@/types/dashboard'
-
-/**
- * Text Widget
- * 
- * Grug say: Simplest widget. Just show latest value.
- * No fancy chart. No button. Just text on screen.
- * If this not work, nothing work.
- * 
- * NEW: Now uses design tokens for colors!
- */
 
 const props = defineProps<{
   config: WidgetConfig
@@ -34,21 +25,13 @@ const props = defineProps<{
 
 const dataStore = useWidgetDataStore()
 const { baseColors } = useDesignTokens()
+const { evaluateThresholds } = useThresholds()
 
 // Get configuration
 const fontSize = computed(() => props.config.textConfig?.fontSize || 24)
-
-// Get color - use token if not specified
-const color = computed(() => {
-  // If custom color specified, use it
-  if (props.config.textConfig?.color) {
-    return props.config.textConfig.color
-  }
-  // Otherwise use theme text color
-  return baseColors.value.text
-})
-
+const defaultColor = computed(() => props.config.textConfig?.color || baseColors.value.text)
 const format = computed(() => props.config.textConfig?.format)
+const thresholds = computed(() => props.config.textConfig?.thresholds || [])
 
 // Get latest value from buffer
 const latestMessage = computed(() => {
@@ -61,16 +44,23 @@ const latestValue = computed(() => {
   return latestMessage.value?.value
 })
 
+// Determine Color (Threshold > Config > Default)
+const currentColor = computed(() => {
+  const val = latestValue.value
+  const thresholdColor = evaluateThresholds(val, thresholds.value)
+  
+  if (thresholdColor) return thresholdColor
+  return defaultColor.value
+})
+
 // Format display value
 const displayValue = computed(() => {
   const value = latestValue.value
   
-  // No data yet
   if (value === null || value === undefined) {
     return 'Waiting for data...'
   }
   
-  // Apply format template if specified
   if (format.value) {
     try {
       return format.value.replace('{value}', String(value))
@@ -79,8 +69,6 @@ const displayValue = computed(() => {
     }
   }
   
-  // Default: stringify value
-  // Handle objects/arrays nicely
   if (typeof value === 'object') {
     return JSON.stringify(value, null, 2)
   }
@@ -88,20 +76,18 @@ const displayValue = computed(() => {
   return String(value)
 })
 
-// Show timestamp of latest message
 const timestamp = computed(() => {
   if (!latestMessage.value) return ''
   const date = new Date(latestMessage.value.timestamp)
   return date.toLocaleTimeString()
 })
 
-// Show timestamp if we have data
 const showTimestamp = computed(() => latestMessage.value !== null)
 
-// Computed style for value display
 const valueStyle = computed(() => ({
   fontSize: fontSize.value + 'px',
-  color: color.value,
+  color: currentColor.value,
+  transition: 'color 0.3s ease'
 }))
 </script>
 
@@ -123,7 +109,8 @@ const valueStyle = computed(() => ({
   word-break: break-word;
   line-height: 1.3;
   font-family: var(--mono);
-  /* color and fontSize applied via style binding */
+  max-height: 100%;
+  overflow-y: auto;
 }
 
 .timestamp {
@@ -131,11 +118,5 @@ const valueStyle = computed(() => ({
   font-size: 12px;
   color: var(--muted);
   font-family: var(--mono);
-}
-
-/* Handle long text gracefully */
-.value-display {
-  max-height: 100%;
-  overflow-y: auto;
 }
 </style>

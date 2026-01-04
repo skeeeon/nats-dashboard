@@ -1,148 +1,98 @@
 /**
  * Widget Types
- * Grug say: Four types of widget. Chart show graph. Text show value. Button push message. KV show key.
  */
 export type WidgetType = 'chart' | 'text' | 'button' | 'kv'
-
-/**
- * Data Source Types
- * Grug say: Three ways to get data. Subscribe to subject. Consume from stream. Watch KV key.
- */
 export type DataSourceType = 'subscription' | 'consumer' | 'kv'
-
-/**
- * Chart Types (for ChartWidget)
- */
 export type ChartType = 'line' | 'bar' | 'pie' | 'gauge'
 
-/**
- * Data Source Configuration
- * Grug say: Tell widget where to get data from
- */
+// --- NEW: Threshold Types ---
+export type ThresholdOperator = '>' | '>=' | '<' | '<=' | '==' | '!='
+
+export interface ThresholdRule {
+  id: string
+  operator: ThresholdOperator
+  value: string      // Stored as string, parsed during evaluation
+  color: string      // Hex or CSS var
+}
+// ----------------------------
+
 export interface DataSourceConfig {
   type: DataSourceType
-  
-  // For subscription (NATS Core)
   subject?: string
-  
-  // For consumer (JetStream)
   stream?: string
-  consumer?: string  // Optional - if not provided, create ephemeral
-  
-  // For KV Store
+  consumer?: string
   kvBucket?: string
   kvKey?: string
 }
 
-/**
- * Message Buffer Configuration
- * Grug say: How many messages to keep. Start with count, add time later.
- */
 export interface BufferConfig {
-  maxCount: number     // Keep last N messages (default: 100)
-  maxAge?: number      // Keep messages from last N milliseconds (future enhancement)
+  maxCount: number
+  maxAge?: number
 }
 
-/**
- * Chart Widget Configuration
- */
 export interface ChartWidgetConfig {
   chartType: ChartType
-  echartOptions?: any  // ECharts options - use 'any' to avoid deep type checking issues
+  echartOptions?: any
 }
 
-/**
- * Text Widget Configuration
- */
 export interface TextWidgetConfig {
-  format?: string       // Template string like "{value}°C" or just show raw value
-  fontSize?: number     // Font size in pixels
-  color?: string        // Text color
+  format?: string
+  fontSize?: number
+  color?: string
+  thresholds?: ThresholdRule[] // Added
 }
 
-/**
- * Button Widget Configuration
- */
 export interface ButtonWidgetConfig {
-  label: string              // Button text
-  publishSubject: string     // Where to send message
-  payload: string            // Message payload (JSON string)
-  color?: string             // Button color
+  label: string
+  publishSubject: string
+  payload: string
+  color?: string
 }
 
-/**
- * KV Widget Configuration
- */
 export interface KvWidgetConfig {
-  displayFormat?: 'raw' | 'json'  // How to display value
-  refreshInterval?: number         // Auto-refresh every N ms (optional)
+  displayFormat?: 'raw' | 'json'
+  refreshInterval?: number
+  thresholds?: ThresholdRule[] // Added
 }
 
-/**
- * Widget Configuration
- * Grug say: This is blueprint for one widget. Everything widget need to know.
- */
 export interface WidgetConfig {
-  // Identity
   id: string
   type: WidgetType
   title: string
-  
-  // Layout (grid position)
   x: number
   y: number
-  w: number  // Width in grid units
-  h: number  // Height in grid units
-  
-  // Data source
+  w: number
+  h: number
   dataSource: DataSourceConfig
-  jsonPath?: string  // JSONPath to extract data from message (e.g., "$.temperature")
-  
-  // Buffering
+  jsonPath?: string
   buffer: BufferConfig
   
-  // Widget-specific configuration
   chartConfig?: ChartWidgetConfig
   textConfig?: TextWidgetConfig
   buttonConfig?: ButtonWidgetConfig
   kvConfig?: KvWidgetConfig
 }
 
-/**
- * Dashboard Configuration
- * Grug say: Dashboard is collection of widgets. Like shelf with many boxes.
- */
 export interface Dashboard {
   id: string
   name: string
   description?: string
-  created: number      // Timestamp
-  modified: number     // Timestamp
+  created: number
+  modified: number
   widgets: WidgetConfig[]
 }
 
-/**
- * Default Widget Sizes
- * Grug say: Good starting sizes for each widget type
- */
 export const DEFAULT_WIDGET_SIZES: Record<WidgetType, { w: number; h: number }> = {
-  chart: { w: 6, h: 4 },     // Medium size for charts
-  text: { w: 3, h: 2 },      // Small size for text
-  button: { w: 2, h: 1 },    // Compact button
-  kv: { w: 4, h: 3 },        // Medium size for KV display
+  chart: { w: 6, h: 4 },
+  text: { w: 3, h: 2 },
+  button: { w: 2, h: 1 },
+  kv: { w: 4, h: 3 },
 }
 
-/**
- * Default Buffer Configuration
- */
 export const DEFAULT_BUFFER_CONFIG: BufferConfig = {
-  maxCount: 100,  // Keep last 100 messages by default
+  maxCount: 100,
 }
 
-/**
- * Helper: Create new widget with defaults
- * Grug say: Make creating widget easy. Fill in sensible defaults.
- */
 export function createDefaultWidget(type: WidgetType, position: { x: number; y: number }): WidgetConfig {
   const size = DEFAULT_WIDGET_SIZES[type]
   const id = `widget_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -159,39 +109,24 @@ export function createDefaultWidget(type: WidgetType, position: { x: number; y: 
     buffer: { ...DEFAULT_BUFFER_CONFIG },
   }
   
-  // Add type-specific defaults
   switch (type) {
     case 'chart':
-      base.chartConfig = {
-        chartType: 'line',
-      }
+      base.chartConfig = { chartType: 'line' }
       break
     case 'text':
-      base.textConfig = {
-        fontSize: 24,
-        color: '#e0e0e0',
-      }
+      base.textConfig = { fontSize: 24, color: '#e0e0e0', thresholds: [] }
       break
     case 'button':
-      base.buttonConfig = {
-        label: 'Send',
-        publishSubject: 'button.clicked',
-        payload: '{}',
-      }
+      base.buttonConfig = { label: 'Send', publishSubject: 'button.clicked', payload: '{}' }
       break
     case 'kv':
-      base.kvConfig = {
-        displayFormat: 'json',
-      }
+      base.kvConfig = { displayFormat: 'json', thresholds: [] }
       break
   }
   
   return base
 }
 
-/**
- * Helper: Create new dashboard with defaults
- */
 export function createDefaultDashboard(name: string): Dashboard {
   const now = Date.now()
   return {

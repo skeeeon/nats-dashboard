@@ -125,9 +125,6 @@
               <div v-if="validationErrors.subject" class="error-text">
                 {{ validationErrors.subject }}
               </div>
-              <div v-else class="help-text">
-                NATS subject pattern to subscribe to
-              </div>
             </div>
             
             <div class="form-group">
@@ -141,9 +138,6 @@
               />
               <div v-if="validationErrors.jsonPath" class="error-text">
                 {{ validationErrors.jsonPath }}
-              </div>
-              <div v-else class="help-text">
-                Extract specific data from messages. Leave empty to show full message.
               </div>
             </div>
             
@@ -160,9 +154,12 @@
               <div v-if="validationErrors.bufferSize" class="error-text">
                 {{ validationErrors.bufferSize }}
               </div>
-              <div v-else class="help-text">
-                Number of messages to keep in history (10-1000)
-              </div>
+            </div>
+
+            <!-- Conditional Formatting for Text Widget -->
+            <div v-if="configWidgetType === 'text'" class="form-group">
+              <label>Conditional Formatting</label>
+              <ThresholdEditor v-model="configForm.thresholds" />
             </div>
           </template>
           
@@ -253,9 +250,12 @@
               <div v-if="validationErrors.jsonPath" class="error-text">
                 {{ validationErrors.jsonPath }}
               </div>
-              <div v-else class="help-text">
-                Extract specific data from JSON values
-              </div>
+            </div>
+
+            <!-- Conditional Formatting for KV Widget -->
+            <div class="form-group">
+              <label>Conditional Formatting (Single Value Mode)</label>
+              <ThresholdEditor v-model="configForm.thresholds" />
             </div>
           </template>
           
@@ -323,12 +323,13 @@ import { useTheme } from '@/composables/useTheme'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 import DashboardGrid from '@/components/dashboard/DashboardGrid.vue'
 import DebugPanel from '@/components/common/DebugPanel.vue'
+import ThresholdEditor from '@/components/dashboard/ThresholdEditor.vue' // New
 import TextWidget from '@/components/widgets/TextWidget.vue'
 import ChartWidget from '@/components/widgets/ChartWidget.vue'
 import ButtonWidget from '@/components/widgets/ButtonWidget.vue'
 import KvWidget from '@/components/widgets/KvWidget.vue'
 import { createDefaultWidget } from '@/types/dashboard'
-import type { WidgetConfig } from '@/types/dashboard'
+import type { WidgetConfig, ThresholdRule } from '@/types/dashboard'
 
 const router = useRouter()
 const natsStore = useNatsStore()
@@ -355,7 +356,19 @@ const configWidgetType = computed(() => {
   return widget?.type || null
 })
 
-const configForm = ref({
+interface ConfigFormState {
+  title: string
+  subject: string
+  jsonPath: string
+  bufferSize: number
+  kvBucket: string
+  kvKey: string
+  buttonLabel: string
+  buttonPayload: string
+  thresholds: ThresholdRule[]
+}
+
+const configForm = ref<ConfigFormState>({
   title: '',
   subject: '',
   jsonPath: '',
@@ -364,6 +377,7 @@ const configForm = ref({
   kvKey: '',
   buttonLabel: '',
   buttonPayload: '',
+  thresholds: [],
 })
 
 function subscribeWidget(widgetId: string) {
@@ -425,14 +439,19 @@ function handleConfigureWidget(widgetId: string) {
   
   configWidgetId.value = widgetId
   
-  // FIX: Determine subject based on widget type
-  // Text/Chart use dataSource.subject
-  // Buttons use buttonConfig.publishSubject
   let currentSubject = ''
   if (widget.type === 'button') {
     currentSubject = widget.buttonConfig?.publishSubject || ''
   } else {
     currentSubject = widget.dataSource.subject || ''
+  }
+
+  // Load thresholds based on type
+  let currentThresholds: ThresholdRule[] = []
+  if (widget.type === 'text') {
+    currentThresholds = widget.textConfig?.thresholds ? [...widget.textConfig.thresholds] : []
+  } else if (widget.type === 'kv') {
+    currentThresholds = widget.kvConfig?.thresholds ? [...widget.kvConfig.thresholds] : []
   }
 
   configForm.value = {
@@ -444,6 +463,7 @@ function handleConfigureWidget(widgetId: string) {
     kvKey: widget.dataSource.kvKey || '',
     buttonLabel: widget.buttonConfig?.label || '',
     buttonPayload: widget.buttonConfig?.payload || '',
+    thresholds: currentThresholds
   }
   showConfigWidget.value = true
 }
@@ -455,7 +475,6 @@ function saveWidgetConfig() {
   
   validationErrors.value = {}
   
-  // Validation Logic
   const titleResult = validator.validateWidgetTitle(configForm.value.title)
   if (!titleResult.valid) validationErrors.value.title = titleResult.error!
   
@@ -467,9 +486,9 @@ function saveWidgetConfig() {
       const jsonResult = validator.validateJsonPath(configForm.value.jsonPath)
       if (!jsonResult.valid) validationErrors.value.jsonPath = jsonResult.error!
     }
-    
     const bufferResult = validator.validateBufferSize(configForm.value.bufferSize)
     if (!bufferResult.valid) validationErrors.value.bufferSize = bufferResult.error!
+
   } else if (widget.type === 'button') {
     const subjectResult = validator.validateSubject(configForm.value.subject)
     if (!subjectResult.valid) validationErrors.value.subject = subjectResult.error!
@@ -478,13 +497,12 @@ function saveWidgetConfig() {
       const jsonResult = validator.validateJson(configForm.value.buttonPayload)
       if (!jsonResult.valid) validationErrors.value.buttonPayload = jsonResult.error!
     }
+
   } else if (widget.type === 'kv') {
     const bucketResult = validator.validateKvBucket(configForm.value.kvBucket)
     if (!bucketResult.valid) validationErrors.value.kvBucket = bucketResult.error!
     const keyResult = validator.validateKvKey(configForm.value.kvKey)
     if (!keyResult.valid) validationErrors.value.kvKey = keyResult.error!
-    
-    // Validate JSON Path if present for KV
     if (configForm.value.jsonPath) {
       const jsonResult = validator.validateJsonPath(configForm.value.jsonPath)
       if (!jsonResult.valid) validationErrors.value.jsonPath = jsonResult.error!
@@ -493,10 +511,18 @@ function saveWidgetConfig() {
   
   if (Object.keys(validationErrors.value).length > 0) return
   
-  // Apply Updates
   const updates: any = { title: configForm.value.title.trim() }
   
-  if (widget.type === 'text' || widget.type === 'chart') {
+  if (widget.type === 'text') {
+    updates.dataSource = { ...widget.dataSource, subject: configForm.value.subject.trim() }
+    updates.jsonPath = configForm.value.jsonPath.trim() || undefined
+    updates.buffer = { maxCount: configForm.value.bufferSize }
+    // Save thresholds for Text
+    updates.textConfig = { 
+      ...widget.textConfig,
+      thresholds: [...configForm.value.thresholds]
+    }
+  } else if (widget.type === 'chart') {
     updates.dataSource = { ...widget.dataSource, subject: configForm.value.subject.trim() }
     updates.jsonPath = configForm.value.jsonPath.trim() || undefined
     updates.buffer = { maxCount: configForm.value.bufferSize }
@@ -512,13 +538,16 @@ function saveWidgetConfig() {
       kvBucket: configForm.value.kvBucket.trim(),
       kvKey: configForm.value.kvKey.trim(),
     }
-    // Save JSON Path for KV
     updates.jsonPath = configForm.value.jsonPath.trim() || undefined
+    // Save thresholds for KV
+    updates.kvConfig = {
+      ...widget.kvConfig,
+      thresholds: [...configForm.value.thresholds]
+    }
   }
   
   dashboardStore.updateWidget(configWidgetId.value, updates)
   
-  // Re-subscribe if needed
   if (widget.type === 'text' || widget.type === 'chart') {
     unsubscribeWidget(configWidgetId.value)
     subscribeWidget(configWidgetId.value)
@@ -531,10 +560,9 @@ function saveWidgetConfig() {
 
 function addTestWidget(type: 'text' | 'chart' | 'button' | 'kv' = 'text') {
   const sizes = { text: { w: 3, h: 2 }, chart: { w: 6, h: 4 }, button: { w: 2, h: 1 }, kv: { w: 4, h: 3 } }
-  const position = { x: 0, y: 100 } // Grid layout auto-places items
+  const position = { x: 0, y: 100 } 
   const widget = createDefaultWidget(type, position)
   
-  // Set Type Specific Defaults
   switch (type) {
     case 'text':
       widget.title = 'Text Widget'
@@ -570,7 +598,6 @@ function exitFullScreen() {
   fullScreenWidgetId.value = null
 }
 
-// Shortcuts
 useKeyboardShortcuts([
   { key: 's', ctrl: true, description: 'Save', handler: () => dashboardStore.saveToStorage() },
   { key: 'n', ctrl: true, description: 'New widget', handler: () => showAddWidget.value = true },
@@ -746,8 +773,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 }
 
 /* --- Responsive Media Queries --- */
-
-/* Text vs Icon visibility logic */
 .btn-text {
   display: inline;
 }
@@ -755,14 +780,12 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   display: none;
 }
 
-/* Tablet / Small Laptop: < 900px */
 @media (max-width: 900px) {
   .dashboard-toolbar {
     padding: 12px 16px;
   }
 }
 
-/* Mobile: < 600px */
 @media (max-width: 600px) {
   .dashboard-toolbar {
     flex-direction: column;
@@ -782,13 +805,11 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   }
 
   .btn-primary, .btn-secondary, .btn-icon {
-    flex: 1; /* Make buttons distribute space evenly */
+    flex: 1;
   }
 }
 
-/* Very Small Mobile: < 400px */
 @media (max-width: 400px) {
-  /* Hide text labels, show icons only to save space */
   .btn-text {
     display: none;
   }
@@ -797,11 +818,9 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
     font-size: 16px;
     font-weight: bold;
   }
-  
   .rtt {
-    display: none; /* Hide RTT stats on tiny screens */
+    display: none;
   }
-  
   .status-label {
     font-size: 12px;
   }

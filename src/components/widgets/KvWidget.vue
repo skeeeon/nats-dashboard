@@ -10,33 +10,35 @@
     </div>
     
     <div v-else-if="kvValue !== null" class="kv-content">
-      <!-- Header: Only show for complex objects (explorer mode) -->
+      <!-- Header: Only show for complex objects -->
       <div v-if="!isSingleValue" class="kv-header">
         <div class="kv-bucket">{{ config.dataSource.kvBucket }}</div>
         <div class="kv-key">{{ config.dataSource.kvKey }}</div>
       </div>
       
       <div class="kv-value">
-        <!-- Single Value Mode: Large, Centered, No Box -->
-        <div v-if="isSingleValue" class="value-display">
+        <!-- Single Value Mode -->
+        <div 
+          v-if="isSingleValue" 
+          class="value-display"
+          :style="{ color: valueColor }"
+        >
           {{ displayContent }}
         </div>
         
-        <!-- Complex Mode: Code Block with Box -->
+        <!-- Complex Mode -->
         <pre v-else class="kv-value-content">{{ displayContent }}</pre>
       </div>
       
       <!-- Metadata Footer -->
       <div class="kv-meta">
         <template v-if="isSingleValue">
-          <!-- Simplified centered footer for single values -->
           <span class="meta-simple">
              Rev {{ revision }} • {{ lastUpdated }}
           </span>
         </template>
         
         <template v-else>
-          <!-- Detailed split footer for explorer mode -->
           <span class="meta-item">
             <span class="meta-label">Revision:</span>
             <span class="meta-value">{{ revision }}</span>
@@ -66,6 +68,7 @@ import { Kvm } from '@nats-io/kv'
 import { JSONPath } from 'jsonpath-plus'
 import LoadingState from '@/components/common/LoadingState.vue'
 import { useDesignTokens } from '@/composables/useDesignTokens'
+import { useThresholds } from '@/composables/useThresholds'
 import type { WidgetConfig } from '@/types/dashboard'
 
 const props = defineProps<{
@@ -74,6 +77,7 @@ const props = defineProps<{
 
 const natsStore = useNatsStore()
 const { baseColors } = useDesignTokens()
+const { evaluateThresholds } = useThresholds()
 
 // State
 const kvValue = ref<string | null>(null)
@@ -81,26 +85,19 @@ const revision = ref<number>(0)
 const lastUpdated = ref<string | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
-
-// Watcher
 let watcher: any = null
 
-// Processed Value Logic
+// Computed
 const processedValue = computed(() => {
   if (kvValue.value === null) return null
-
   let val: any = kvValue.value
   let isJson = false
 
-  // 1. Try parse JSON
   try {
     val = JSON.parse(kvValue.value)
     isJson = true
-  } catch {
-    // Keep as string
-  }
+  } catch { }
 
-  // 2. Apply JSONPath if configured
   if (props.config.jsonPath && isJson) {
     try {
       const extracted = JSONPath({ 
@@ -108,8 +105,6 @@ const processedValue = computed(() => {
         json: val, 
         wrap: false 
       })
-      
-      // Return a specific marker if undefined to handle display gracefully
       if (extracted === undefined) return undefined
       return extracted
     } catch (err) {
@@ -117,34 +112,34 @@ const processedValue = computed(() => {
       return undefined
     }
   }
-
   return val
 })
 
-// Determine if we are in "Single Value Mode" (Text Widget lookalike)
 const isSingleValue = computed(() => {
   const val = processedValue.value
-  // If it's primitive (string, number, boolean) or null/undefined, it's a single value
   return val === null || val === undefined || (typeof val !== 'object')
 })
 
-// Final Display String
 const displayContent = computed(() => {
   const val = processedValue.value
-  
   if (val === undefined) return '<path not found>'
   if (val === null) return ''
-  
-  if (typeof val === 'object') {
-    return JSON.stringify(val, null, 2)
-  }
-  
+  if (typeof val === 'object') return JSON.stringify(val, null, 2)
   return String(val)
 })
 
-/**
- * Load KV value and start watching
- */
+// Apply Thresholds
+const valueColor = computed(() => {
+  if (!isSingleValue.value) return baseColors.value.text
+  
+  const val = processedValue.value
+  const rules = props.config.kvConfig?.thresholds || []
+  
+  const color = evaluateThresholds(val, rules)
+  return color || baseColors.value.text
+})
+
+// --- Load Logic (Same as before) ---
 async function loadKvValue() {
   const bucket = props.config.dataSource.kvBucket
   const key = props.config.dataSource.kvKey
@@ -164,12 +159,8 @@ async function loadKvValue() {
   try {
     loading.value = true
     error.value = null
-    
-    // Open KV bucket
     const kvm = new Kvm(natsStore.nc)
     const kv = await kvm.open(bucket)
-    
-    // Get current value
     const entry = await kv.get(key)
     if (entry) {
       const decoder = new TextDecoder()
@@ -179,11 +170,8 @@ async function loadKvValue() {
     } else {
       kvValue.value = null
     }
-    
-    // Watch for changes
     const iter = await kv.watch({ key })
     watcher = iter
-    
     ;(async () => {
       try {
         for await (const e of iter) {
@@ -204,7 +192,6 @@ async function loadKvValue() {
         console.error('[KV Widget] Watch error:', err)
       }
     })()
-    
     loading.value = false
   } catch (err: any) {
     console.error('[KV Widget] Load error:', err)
@@ -219,32 +206,16 @@ async function loadKvValue() {
 
 function cleanup() {
   if (watcher) {
-    try {
-      watcher.stop()
-    } catch (err) {
-      console.error('[KV Widget] Cleanup error:', err)
-    }
+    try { watcher.stop() } catch {}
     watcher = null
   }
 }
 
-onMounted(() => {
-  loadKvValue()
-})
-
-onUnmounted(() => {
-  cleanup()
-})
-
+onMounted(() => loadKvValue())
+onUnmounted(() => cleanup())
 watch(
   () => [props.config.dataSource.kvBucket, props.config.dataSource.kvKey, props.config.jsonPath],
-  () => {
-    // Reload if bucket/key changes. 
-    // Note: Technically jsonPath only needs reactivity re-calc (handled by computed), 
-    // but a full reload ensures state consistency.
-    cleanup()
-    loadKvValue()
-  }
+  () => { cleanup(); loadKvValue() }
 )
 </script>
 
@@ -259,7 +230,6 @@ watch(
   overflow: hidden;
 }
 
-/* Center content in Single Value Mode to match Text Widget */
 .kv-widget.single-value-mode {
   justify-content: center;
   align-items: center;
@@ -277,7 +247,6 @@ watch(
 
 .kv-error { color: var(--color-error); }
 .kv-empty { color: var(--muted); }
-
 .error-icon, .empty-icon { font-size: 32px; }
 .error-text { font-size: 13px; line-height: 1.4; }
 .empty-hint { font-size: 11px; font-family: var(--mono); color: var(--color-accent); }
@@ -290,7 +259,6 @@ watch(
   gap: 12px;
 }
 
-/* --- Header --- */
 .kv-header {
   display: flex;
   flex-direction: column;
@@ -300,21 +268,9 @@ watch(
   flex-shrink: 0;
 }
 
-.kv-bucket {
-  font-size: 11px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
+.kv-bucket { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.kv-key { font-size: 14px; font-weight: 600; color: var(--color-accent); font-family: var(--mono); }
 
-.kv-key {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-accent);
-  font-family: var(--mono);
-}
-
-/* --- Value Area --- */
 .kv-value {
   flex: 1;
   min-height: 0;
@@ -324,10 +280,9 @@ watch(
   flex-direction: column;
 }
 
-/* Single Value Styling (Text Widget Lookalike) */
 .single-value-mode .kv-value {
-  justify-content: center; /* Vertical Center */
-  overflow: hidden; /* Prevent scroll bars for single values */
+  justify-content: center;
+  overflow: hidden;
 }
 
 .value-display {
@@ -337,10 +292,10 @@ watch(
   word-break: break-word;
   line-height: 1.3;
   font-family: var(--mono);
-  color: var(--text);
+  /* Color set via style binding now */
+  transition: color 0.3s ease;
 }
 
-/* Complex Value Styling (JSON Box) */
 .kv-value-content {
   margin: 0;
   padding: 12px;
@@ -355,7 +310,6 @@ watch(
   min-height: 100%;
 }
 
-/* --- Meta Footer --- */
 .kv-meta {
   display: flex;
   justify-content: space-between;
@@ -363,24 +317,18 @@ watch(
   flex-shrink: 0;
 }
 
-/* Explorer Mode Footer */
 .kv-widget:not(.single-value-mode) .kv-meta {
   padding-top: 8px;
   border-top: 1px solid var(--border);
   gap: 12px;
 }
 
-/* Single Value Mode Footer */
 .single-value-mode .kv-meta {
   margin-top: 12px;
   justify-content: center;
 }
 
-.meta-simple {
-  color: var(--muted);
-  font-family: var(--mono);
-}
-
+.meta-simple { color: var(--muted); font-family: var(--mono); }
 .meta-item { display: flex; gap: 6px; }
 .meta-label { color: var(--muted); }
 .meta-value { color: var(--text); font-family: var(--mono); }
