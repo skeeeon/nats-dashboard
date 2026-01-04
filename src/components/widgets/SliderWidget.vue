@@ -8,8 +8,13 @@
         <span v-if="cfg.unit" class="value-unit">{{ cfg.unit }}</span>
       </div>
       
-      <!-- Slider wrapper -->
-      <div class="slider-wrapper">
+      <!-- Slider wrapper - FIXED: Stop all events from bubbling to grid -->
+      <div 
+        class="slider-wrapper vue-grid-item-no-drag"
+        @mousedown.stop
+        @touchstart.stop
+        @pointermove.stop
+      >
         <input
           type="range"
           v-model.number="currentValue"
@@ -17,6 +22,8 @@
           :max="cfg.max"
           :step="cfg.step"
           :disabled="isDisabled"
+          @mousedown.stop
+          @touchstart.stop
           @mouseup="handleRelease"
           @touchend="handleRelease"
           class="slider-input"
@@ -29,11 +36,11 @@
           <span class="label-max">{{ cfg.max }}{{ cfg.unit }}</span>
         </div>
       </div>
-      
-      <!-- Publish status -->
-      <div v-if="publishStatus" class="publish-status" :class="statusClass">
-        {{ publishStatus }}
-      </div>
+    </div>
+    
+    <!-- Publish status - FIXED: Positioned absolutely to prevent layout shift -->
+    <div v-if="publishStatus" class="publish-status" :class="statusClass">
+      {{ publishStatus }}
     </div>
     
     <!-- Error message -->
@@ -75,7 +82,13 @@ import type { WidgetConfig } from '@/types/dashboard'
  * Grug say: Drag slider, publish value when release.
  * Simple range control for IoT devices.
  * 
- * FIXED: Stops event propagation to prevent grid dragging
+ * FIXED: Grid drag conflict resolution (heavy-handed but works)
+ * - Added .vue-grid-item-no-drag class to slider-wrapper
+ * - Added @mousedown.stop, @touchstart.stop on wrapper to stop event bubbling
+ * - Added @mousedown.stop, @touchstart.stop on input as extra safety
+ * 
+ * Belt and suspenders approach: stops events at multiple levels to ensure
+ * the grid system never captures slider drag gestures. A bit ugly but reliable.
  */
 
 const props = defineProps<{
@@ -286,13 +299,12 @@ onMounted(() => {
   color: var(--muted);
 }
 
-/* Slider Wrapper - IMPORTANT: This prevents grid dragging */
+/* Slider Wrapper - Grid drag prevention using both class and event stopping */
 .slider-wrapper {
   width: 100%;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  /* Ensure this container doesn't trigger grid drag */
   cursor: default;
 }
 
@@ -371,13 +383,31 @@ onMounted(() => {
   font-family: var(--mono);
 }
 
-/* Publish Status */
+/* Publish Status - FIXED: Positioned absolutely to prevent layout shift */
 .publish-status {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
   font-size: 12px;
   font-weight: 500;
   padding: 6px 12px;
   border-radius: 4px;
   transition: all 0.3s;
+  white-space: nowrap;
+  animation: slideInUp 0.3s ease-out;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 
 .publish-status.status-success {

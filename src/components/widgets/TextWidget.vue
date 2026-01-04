@@ -19,6 +19,16 @@ import { useDesignTokens } from '@/composables/useDesignTokens'
 import { useThresholds } from '@/composables/useThresholds'
 import type { WidgetConfig } from '@/types/dashboard'
 
+/**
+ * Text Widget Component
+ * 
+ * Grug say: Show latest value. Big text. Simple.
+ * 
+ * FIXED: Now properly follows theme changes
+ * - If config color is undefined or a CSS variable, uses reactive design token
+ * - Otherwise uses the saved color (for custom colors)
+ */
+
 const props = defineProps<{
   config: WidgetConfig
 }>()
@@ -29,7 +39,7 @@ const { evaluateThresholds } = useThresholds()
 
 // Get configuration
 const fontSize = computed(() => props.config.textConfig?.fontSize || 24)
-const defaultColor = computed(() => props.config.textConfig?.color || baseColors.value.text)
+const configColor = computed(() => props.config.textConfig?.color)
 const format = computed(() => props.config.textConfig?.format)
 const thresholds = computed(() => props.config.textConfig?.thresholds || [])
 
@@ -44,7 +54,24 @@ const latestValue = computed(() => {
   return latestMessage.value?.value
 })
 
-// Determine Color (Threshold > Config > Default)
+/**
+ * Default color - FIXED to be theme-reactive
+ * If config color is a CSS variable or undefined, use reactive design token
+ * Otherwise use the saved color value
+ */
+const defaultColor = computed(() => {
+  const saved = configColor.value
+  
+  // If no color saved, or if it's a CSS variable, use reactive theme color
+  if (!saved || saved.startsWith('var(--')) {
+    return baseColors.value.text
+  }
+  
+  // Otherwise use the saved color (custom color)
+  return saved
+})
+
+// Determine Color (Threshold > Default)
 const currentColor = computed(() => {
   const val = latestValue.value
   const thresholdColor = evaluateThresholds(val, thresholds.value)

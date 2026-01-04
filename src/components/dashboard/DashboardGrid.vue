@@ -21,7 +21,7 @@
         v-for="item in layoutItems"
         :key="item.i"
         v-bind="item"
-        :min-w="2"
+        :min-w="1"
         :min-h="1"
       >
         <WidgetContainer
@@ -65,18 +65,7 @@ import type { WidgetConfig } from '@/types/dashboard'
  * - Detects when widget IDs completely change (dashboard switch)
  * - Syncs layout properly on all breakpoints
  * - Disables drag/resize on mobile for better UX
- */
-
-/**
- * Dashboard Grid Component
- * 
- * Grug say: Grid hold widgets. Drag and drop on desktop.
- * Stack nice on mobile. No drag on mobile - too hard to use.
- * 
- * FIXED: Dashboard switching now works on mobile!
- * - Detects when widget IDs completely change (dashboard switch)
- * - Syncs layout properly on all breakpoints
- * - Disables drag/resize on mobile for better UX
+ * - Reduced minimum width from 2 to 1 for more compact layouts
  */
 
 const props = defineProps<{
@@ -309,7 +298,7 @@ function handleWidgetFullscreen(widgetId: string) {
   font-size: 14px;
 }
 
-/* Mobile hint - NEW */
+/* Mobile hint */
 .mobile-hint {
   position: fixed;
   bottom: 20px;

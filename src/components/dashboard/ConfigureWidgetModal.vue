@@ -532,6 +532,7 @@ import type { WidgetType, ThresholdRule } from '@/types/dashboard'
  * Validate before saving.
  * 
  * COMPLETE: Now includes Switch, Slider, Stat, and Gauge widgets!
+ * FIXED: Switch KV mode fields now properly load from switchConfig
  */
 
 interface Props {
@@ -646,6 +647,7 @@ const widgetType = computed<WidgetType | null>(() => {
 
 /**
  * Load widget data into form when widgetId changes
+ * FIXED: Now properly loads KV bucket/key for switch widgets
  */
 watch(() => props.widgetId, (widgetId) => {
   if (!widgetId) return
@@ -673,14 +675,28 @@ watch(() => props.widgetId, (widgetId) => {
     currentThresholds = widget.statConfig?.thresholds ? [...widget.statConfig.thresholds] : []
   }
 
+  // FIXED: Load KV bucket/key from the right place based on widget type
+  let currentKvBucket = ''
+  let currentKvKey = ''
+  
+  if (widget.type === 'switch' && widget.switchConfig?.mode === 'kv') {
+    // For switch in KV mode, load from switchConfig
+    currentKvBucket = widget.switchConfig.kvBucket || ''
+    currentKvKey = widget.switchConfig.kvKey || ''
+  } else if (widget.type === 'kv') {
+    // For KV widget, load from dataSource
+    currentKvBucket = widget.dataSource.kvBucket || ''
+    currentKvKey = widget.dataSource.kvKey || ''
+  }
+
   // Populate form
   form.value = {
     title: widget.title,
     subject: currentSubject,
     jsonPath: widget.jsonPath || '',
     bufferSize: widget.buffer.maxCount,
-    kvBucket: widget.dataSource.kvBucket || '',
-    kvKey: widget.dataSource.kvKey || '',
+    kvBucket: currentKvBucket,
+    kvKey: currentKvKey,
     buttonLabel: widget.buttonConfig?.label || '',
     buttonPayload: widget.buttonConfig?.payload || '',
     thresholds: currentThresholds,

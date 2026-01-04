@@ -5,9 +5,9 @@
       class="switch-container"
       :class="{ 'is-disabled': isDisabled }"
     >
-      <!-- Switch track -->
+      <!-- Switch track - FIXED: Added vue-grid-item-no-drag class -->
       <div 
-        class="switch-track"
+        class="switch-track vue-grid-item-no-drag"
         :class="switchStateClass"
         @click="handleToggle"
         :title="switchTooltip"
@@ -69,10 +69,16 @@ import type { WidgetConfig } from '@/types/dashboard'
  * Switch Widget Component
  * 
  * Grug say: Toggle switch with two modes:
- * - KV mode: Stateful, uses KV bucket for state
- * - CORE mode: Subscribe to state subject
+ * - KV mode: Stateful, uses KV bucket for state (kv.put/get/watch)
+ * - CORE mode: Subscribe to state subject (nc.publish/subscribe)
  * 
  * Visual states: unknown, on, off, pending
+ * 
+ * FIXED: 
+ * 1. Grid drag conflict - Added .vue-grid-item-no-drag class to switch-track
+ * 2. KV mode now properly uses kv.put() instead of nc.publish()
+ *    - KV mode writes directly to KV store with kv.put(key, value)
+ *    - CORE mode publishes to subject with nc.publish(subject, payload)
  */
 
 const props = defineProps<{
@@ -91,8 +97,9 @@ const isPending = ref(false)
 const showConfirm = ref(false)
 const pendingAction = ref<'on' | 'off' | null>(null)
 
-// KV watcher
+// KV watcher and instance
 let kvWatcher: any = null
+let kvInstance: any = null  // Store KV instance for writes
 
 // CORE subscription
 let subscription: any = null
@@ -189,6 +196,9 @@ async function initializeKvMode() {
     const kvm = new Kvm(natsStore.nc!)
     const kv = await kvm.open(bucket)
     
+    // Store KV instance for writes
+    kvInstance = kv
+    
     // Get initial value
     const entry = await kv.get(key)
     if (entry) {
@@ -226,7 +236,11 @@ async function initializeKvMode() {
     
   } catch (err: any) {
     console.error('[Switch] KV init error:', err)
-    error.value = err.message || 'Failed to initialize KV'
+    if (err.message.includes('stream not found')) {
+      error.value = `Bucket "${bucket}" not found`
+    } else {
+      error.value = err.message || 'Failed to initialize KV'
+    }
   }
 }
 
@@ -337,27 +351,49 @@ function cancelConfirm() {
 
 /**
  * Execute toggle action
+ * FIXED: Now properly handles KV mode vs CORE mode
  */
 async function executeToggle(targetState: 'on' | 'off') {
-  if (!natsStore.nc) return
-  
   error.value = null
   isPending.value = true
   currentState.value = 'pending'
   
   const payload = targetState === 'on' ? cfg.value.onPayload : cfg.value.offPayload
-  const subject = cfg.value.publishSubject
   
   try {
-    const data = serializePayload(payload)
-    natsStore.nc.publish(subject, data)
-    
-    console.log(`[Switch] Published ${targetState} to ${subject}`)
-    
-    // For CORE mode without state subject, update immediately (fire & forget)
-    if (mode.value === 'core' && !cfg.value.stateSubject) {
-      currentState.value = targetState
-      isPending.value = false
+    if (mode.value === 'kv') {
+      // KV MODE: Write directly to KV store
+      if (!kvInstance) {
+        throw new Error('KV instance not initialized')
+      }
+      
+      const key = cfg.value.kvKey!
+      const encoder = new TextEncoder()
+      const data = encoder.encode(JSON.stringify(payload))
+      
+      await kvInstance.put(key, data)
+      
+      console.log(`[Switch] KV put ${targetState} to ${cfg.value.kvBucket}/${key}`)
+      
+      // State will be updated via the watcher when KV confirms the write
+      
+    } else {
+      // CORE MODE: Publish to subject
+      if (!natsStore.nc) {
+        throw new Error('Not connected to NATS')
+      }
+      
+      const subject = cfg.value.publishSubject
+      const data = serializePayload(payload)
+      natsStore.nc.publish(subject, data)
+      
+      console.log(`[Switch] Published ${targetState} to ${subject}`)
+      
+      // For CORE mode without state subject, update immediately (fire & forget)
+      if (!cfg.value.stateSubject) {
+        currentState.value = targetState
+        isPending.value = false
+      }
     }
     
     // Set timeout for pending state (in case no confirmation)
@@ -369,8 +405,8 @@ async function executeToggle(targetState: 'on' | 'off') {
     }, 5000)
     
   } catch (err: any) {
-    console.error('[Switch] Publish error:', err)
-    error.value = err.message || 'Failed to publish'
+    console.error('[Switch] Toggle error:', err)
+    error.value = err.message || 'Failed to toggle switch'
     isPending.value = false
     currentState.value = targetState === 'on' ? 'off' : 'on' // Revert
   }
@@ -407,6 +443,9 @@ function cleanup() {
     try { kvWatcher.stop() } catch {}
     kvWatcher = null
   }
+  
+  // Clear KV instance reference
+  kvInstance = null
   
   if (subscription) {
     try { subscription.unsubscribe() } catch {}
@@ -469,7 +508,7 @@ watch(() => props.config.switchConfig, () => {
   pointer-events: none;
 }
 
-/* Switch Track */
+/* Switch Track - Grid drag prevention handled by .vue-grid-item-no-drag class */
 .switch-track {
   position: relative;
   width: 120px;

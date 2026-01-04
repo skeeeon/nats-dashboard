@@ -167,8 +167,8 @@ export interface Dashboard {
 // --- Default Widget Sizes ---
 export const DEFAULT_WIDGET_SIZES: Record<WidgetType, { w: number; h: number }> = {
   chart: { w: 6, h: 4 },
-  text: { w: 3, h: 2 },
-  button: { w: 2, h: 1 },
+  text: { w: 2, h: 2 },
+  button: { w: 2, h: 2 },
   kv: { w: 4, h: 3 },
   switch: { w: 2, h: 2 },
   slider: { w: 4, h: 2 },
@@ -177,7 +177,7 @@ export const DEFAULT_WIDGET_SIZES: Record<WidgetType, { w: number; h: number }> 
 }
 
 export const DEFAULT_BUFFER_CONFIG: BufferConfig = {
-  maxCount: 100,
+  maxCount: 10,
 }
 
 // --- Widget Factory Functions ---
@@ -202,7 +202,7 @@ export function createDefaultWidget(type: WidgetType, position: { x: number; y: 
       base.chartConfig = { chartType: 'line' }
       break
     case 'text':
-      base.textConfig = { fontSize: 24, color: '#e0e0e0', thresholds: [] }
+      base.textConfig = { fontSize: 24, thresholds: [] }
       break
     case 'button':
       base.buttonConfig = { label: 'Send', publishSubject: 'button.clicked', payload: '{}' }
