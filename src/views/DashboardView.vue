@@ -125,6 +125,9 @@
               <div v-if="validationErrors.subject" class="error-text">
                 {{ validationErrors.subject }}
               </div>
+              <div v-else class="help-text">
+                NATS subject pattern to subscribe to
+              </div>
             </div>
             
             <div class="form-group">
@@ -138,6 +141,9 @@
               />
               <div v-if="validationErrors.jsonPath" class="error-text">
                 {{ validationErrors.jsonPath }}
+              </div>
+              <div v-else class="help-text">
+                Extract specific data from messages. Leave empty to show full message.
               </div>
             </div>
             
@@ -153,6 +159,9 @@
               />
               <div v-if="validationErrors.bufferSize" class="error-text">
                 {{ validationErrors.bufferSize }}
+              </div>
+              <div v-else class="help-text">
+                Number of messages to keep in history (10-1000)
               </div>
             </div>
 
@@ -250,6 +259,9 @@
               <div v-if="validationErrors.jsonPath" class="error-text">
                 {{ validationErrors.jsonPath }}
               </div>
+              <div v-else class="help-text">
+                Extract specific data from JSON values
+              </div>
             </div>
 
             <!-- Conditional Formatting for KV Widget -->
@@ -323,7 +335,7 @@ import { useTheme } from '@/composables/useTheme'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 import DashboardGrid from '@/components/dashboard/DashboardGrid.vue'
 import DebugPanel from '@/components/common/DebugPanel.vue'
-import ThresholdEditor from '@/components/dashboard/ThresholdEditor.vue' // New
+import ThresholdEditor from '@/components/dashboard/ThresholdEditor.vue'
 import TextWidget from '@/components/widgets/TextWidget.vue'
 import ChartWidget from '@/components/widgets/ChartWidget.vue'
 import ButtonWidget from '@/components/widgets/ButtonWidget.vue'
@@ -881,13 +893,17 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-top: 16px;
 }
 
+/* Widget Type Button Styling Updates */
 .widget-type-btn {
   background: var(--panel); border: 2px solid var(--border);
   border-radius: 8px; padding: 20px 10px; cursor: pointer;
   text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  color: var(--text); /* Explicit text color for dark mode */
 }
 .widget-type-btn:hover { border-color: var(--color-accent); background: var(--color-info-bg); }
 .widget-type-icon { font-size: 32px; }
+.widget-type-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.widget-type-desc { font-size: 11px; color: var(--muted); line-height: 1.3; }
 
 /* Fullscreen Modal */
 .fullscreen-modal {
