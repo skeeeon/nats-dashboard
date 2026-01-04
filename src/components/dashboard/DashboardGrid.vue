@@ -39,6 +39,10 @@
       <div class="empty-hint">Click "Add Widget" to get started</div>
     </div>
     
+    <!-- Mobile drag disabled indicator -->
+    <div v-if="isMobile && widgets.length > 0" class="mobile-hint">
+      💡 Switch to desktop to rearrange widgets
+    </div>
   </div>
 </template>
 
@@ -48,6 +52,18 @@ import { GridLayout, GridItem } from 'grid-layout-plus'
 import WidgetContainer from './WidgetContainer.vue'
 import { useDashboardStore } from '@/stores/dashboard'
 import type { WidgetConfig } from '@/types/dashboard'
+
+/**
+ * Dashboard Grid Component
+ * 
+ * Grug say: Grid hold widgets. Drag and drop on desktop.
+ * Stack nice on mobile. No drag on mobile - too hard to use.
+ * 
+ * FIXED: Dashboard switching now works on mobile!
+ * - Detects when widget IDs completely change (dashboard switch)
+ * - Syncs layout properly on all breakpoints
+ * - Disables drag/resize on mobile for better UX
+ */
 
 /**
  * Dashboard Grid Component

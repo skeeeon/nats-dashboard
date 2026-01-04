@@ -85,22 +85,47 @@
         <div class="modal-body">
           <p>Select widget type to add:</p>
           <div class="widget-type-buttons">
-            <button class="widget-type-btn" @click="addTestWidget('text')">
+            <!-- Visualization Widgets -->
+            <button class="widget-type-btn" @click="createWidget('text')">
               <div class="widget-type-icon">📝</div>
               <div class="widget-type-name">Text Widget</div>
               <div class="widget-type-desc">Display latest value</div>
             </button>
-            <button class="widget-type-btn" @click="addTestWidget('chart')">
+            <button class="widget-type-btn" @click="createWidget('chart')">
               <div class="widget-type-icon">📈</div>
               <div class="widget-type-name">Chart Widget</div>
               <div class="widget-type-desc">Line chart over time</div>
             </button>
-            <button class="widget-type-btn" @click="addTestWidget('button')">
+            <button class="widget-type-btn" @click="createWidget('stat')">
+              <div class="widget-type-icon">📊</div>
+              <div class="widget-type-name">Stat Card</div>
+              <div class="widget-type-desc">KPI with trend</div>
+            </button>
+            <button class="widget-type-btn" @click="createWidget('gauge')">
+              <div class="widget-type-icon">⏲️</div>
+              <div class="widget-type-name">Gauge Widget</div>
+              <div class="widget-type-desc">Circular meter</div>
+            </button>
+            
+            <!-- Control Widgets -->
+            <button class="widget-type-btn" @click="createWidget('button')">
               <div class="widget-type-icon">📤</div>
               <div class="widget-type-name">Button Widget</div>
               <div class="widget-type-desc">Publish messages</div>
             </button>
-            <button class="widget-type-btn" @click="addTestWidget('kv')">
+            <button class="widget-type-btn" @click="createWidget('switch')">
+              <div class="widget-type-icon">🔄</div>
+              <div class="widget-type-name">Switch Widget</div>
+              <div class="widget-type-desc">Toggle control</div>
+            </button>
+            <button class="widget-type-btn" @click="createWidget('slider')">
+              <div class="widget-type-icon">🎚️</div>
+              <div class="widget-type-name">Slider Widget</div>
+              <div class="widget-type-desc">Range control</div>
+            </button>
+            
+            <!-- Data Widgets -->
+            <button class="widget-type-btn" @click="createWidget('kv')">
               <div class="widget-type-icon">🗄️</div>
               <div class="widget-type-name">KV Widget</div>
               <div class="widget-type-desc">Display KV values</div>
@@ -332,6 +357,26 @@
             :is="KvWidget"
             :config="fullScreenWidget"
           />
+          <component
+            v-else-if="fullScreenWidget.type === 'switch'"
+            :is="SwitchWidget"
+            :config="fullScreenWidget"
+          />
+          <component
+            v-else-if="fullScreenWidget.type === 'slider'"
+            :is="SliderWidget"
+            :config="fullScreenWidget"
+          />
+          <component
+            v-else-if="fullScreenWidget.type === 'stat'"
+            :is="StatCardWidget"
+            :config="fullScreenWidget"
+          />
+          <component
+            v-else-if="fullScreenWidget.type === 'gauge'"
+            :is="GaugeWidget"
+            :config="fullScreenWidget"
+          />
         </div>
         <div class="fullscreen-hint">
           Press <kbd>Esc</kbd> to exit full screen
@@ -362,6 +407,10 @@ import TextWidget from '@/components/widgets/TextWidget.vue'
 import ChartWidget from '@/components/widgets/ChartWidget.vue'
 import ButtonWidget from '@/components/widgets/ButtonWidget.vue'
 import KvWidget from '@/components/widgets/KvWidget.vue'
+import SwitchWidget from '@/components/widgets/SwitchWidget.vue'
+import SliderWidget from '@/components/widgets/SliderWidget.vue'
+import StatCardWidget from '@/components/widgets/StatCardWidget.vue'
+import GaugeWidget from '@/components/widgets/GaugeWidget.vue'
 import { createDefaultWidget } from '@/types/dashboard'
 import type { ThresholdRule } from '@/types/dashboard'
 
@@ -371,6 +420,7 @@ import type { ThresholdRule } from '@/types/dashboard'
  * Main dashboard page with sidebar for managing multiple dashboards.
  * 
  * NEW: Now includes multi-dashboard sidebar!
+ * NEW: Added Switch, Slider, Stat, and Gauge widgets!
  */
 
 const router = useRouter()
@@ -481,7 +531,8 @@ function handleDuplicateWidget(widgetId: string) {
   
   dashboardStore.addWidget(copy)
   
-  if (copy.type !== 'button' && copy.type !== 'kv') {
+  // Only subscribe if it's a data widget (not control widgets)
+  if (copy.type !== 'button' && copy.type !== 'kv' && copy.type !== 'switch' && copy.type !== 'slider') {
     subscribeWidget(copy.id)
   }
 }
@@ -609,7 +660,11 @@ function saveWidgetConfig() {
   validationErrors.value = {}
 }
 
-function addTestWidget(type: 'text' | 'chart' | 'button' | 'kv' = 'text') {
+/**
+ * Create widget of specified type
+ * Renamed from addTestWidget - this is the main widget creation function
+ */
+function createWidget(type: 'text' | 'chart' | 'button' | 'kv' | 'switch' | 'slider' | 'stat' | 'gauge' = 'text') {
   const position = { x: 0, y: 100 } 
   const widget = createDefaultWidget(type, position)
   
@@ -633,10 +688,34 @@ function addTestWidget(type: 'text' | 'chart' | 'button' | 'kv' = 'text') {
       widget.title = 'KV Widget'
       widget.dataSource = { type: 'kv', kvBucket: 'my-bucket', kvKey: 'my-key' }
       break
+    case 'switch':
+      widget.title = 'Switch Control'
+      // Config already set by createDefaultWidget
+      break
+    case 'slider':
+      widget.title = 'Slider Control'
+      // Config already set by createDefaultWidget
+      break
+    case 'stat':
+      widget.title = 'Stat Card'
+      widget.dataSource = { type: 'subscription', subject: 'metrics.value' }
+      widget.jsonPath = '$.value'
+      break
+    case 'gauge':
+      widget.title = 'Gauge Meter'
+      widget.dataSource = { type: 'subscription', subject: 'sensor.value' }
+      widget.jsonPath = '$.value'
+      break
   }
   
   dashboardStore.addWidget(widget)
-  if (type !== 'button' && type !== 'kv') subscribeWidget(widget.id)
+  
+  // Only subscribe if it's a data widget (not control widgets)
+  // Switch and Slider handle their own connections internally
+  if (type !== 'button' && type !== 'kv' && type !== 'switch' && type !== 'slider') {
+    subscribeWidget(widget.id)
+  }
+  
   showAddWidget.value = false
 }
 
@@ -701,7 +780,11 @@ watch(() => dashboardStore.activeDashboardId, async () => {
 // Watch for new widgets being added
 watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   if (natsStore.isConnected && newCount > oldCount) {
-    subscribeWidget(dashboardStore.activeWidgets[newCount - 1].id)
+    const newWidget = dashboardStore.activeWidgets[newCount - 1]
+    // Only subscribe if it's a data widget
+    if (newWidget.type !== 'button' && newWidget.type !== 'kv' && newWidget.type !== 'switch' && newWidget.type !== 'slider') {
+      subscribeWidget(newWidget.id)
+    }
   }
 })
 </script>
