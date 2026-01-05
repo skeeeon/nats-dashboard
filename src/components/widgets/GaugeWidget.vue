@@ -211,15 +211,6 @@ const valueDashOffset = computed(() => {
 })
 
 /**
- * Value path - arc showing current value (kept for reference, not used)
- */
-const valuePath = computed(() => {
-  const startAngle = -135
-  const endAngle = startAngle + (270 * valuePercent.value)
-  return describeArc(center, center, radius, startAngle, endAngle)
-})
-
-/**
  * Background color
  */
 const backgroundColor = computed(() => 'rgba(255, 255, 255, 0.1)')

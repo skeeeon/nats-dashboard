@@ -194,7 +194,6 @@ const { theme, toggleTheme } = useTheme()
 // Widget operations composable
 const {
   subscribeWidget,
-  unsubscribeWidget,
   subscribeAllWidgets,
   unsubscribeAllWidgets,
   createWidget,
