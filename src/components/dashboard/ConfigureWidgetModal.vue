@@ -520,6 +520,7 @@
 import { ref, computed, watch } from 'vue'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useValidation } from '@/composables/useValidation'
+import { useWidgetOperations } from '@/composables/useWidgetOperations'
 import ThresholdEditor from './ThresholdEditor.vue'
 import GaugeZoneEditor from './GaugeZoneEditor.vue'
 import type { WidgetType, ThresholdRule } from '@/types/dashboard'
@@ -531,8 +532,7 @@ import type { WidgetType, ThresholdRule } from '@/types/dashboard'
  * Each widget type has different fields.
  * Validate before saving.
  * 
- * COMPLETE: Now includes Switch, Slider, Stat, and Gauge widgets!
- * FIXED: Switch KV mode fields now properly load from switchConfig
+ * FIXED: Now uses useWidgetOperations to handle safe updates (unsubscribe -> update -> subscribe)
  */
 
 interface Props {
@@ -549,6 +549,7 @@ const emit = defineEmits<{
 
 const dashboardStore = useDashboardStore()
 const validator = useValidation()
+const { updateWidgetConfiguration } = useWidgetOperations()
 
 // Form state - extended to support all widget types
 interface FormState {
@@ -647,7 +648,6 @@ const widgetType = computed<WidgetType | null>(() => {
 
 /**
  * Load widget data into form when widgetId changes
- * FIXED: Now properly loads KV bucket/key for switch widgets
  */
 watch(() => props.widgetId, (widgetId) => {
   if (!widgetId) return
@@ -675,7 +675,7 @@ watch(() => props.widgetId, (widgetId) => {
     currentThresholds = widget.statConfig?.thresholds ? [...widget.statConfig.thresholds] : []
   }
 
-  // FIXED: Load KV bucket/key from the right place based on widget type
+  // Load KV bucket/key from the right place based on widget type
   let currentKvBucket = ''
   let currentKvKey = ''
   
@@ -904,7 +904,9 @@ function save() {
     }
   }
   
-  dashboardStore.updateWidget(props.widgetId, updates)
+  // Use the safe update method from our composable
+  updateWidgetConfiguration(props.widgetId, updates)
+  
   emit('saved')
   close()
 }

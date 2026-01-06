@@ -199,7 +199,6 @@ const {
   createWidget,
   deleteWidget,
   duplicateWidget,
-  resubscribeWidget,
 } = useWidgetOperations()
 
 const sidebarRef = ref<InstanceType<typeof DashboardSidebar> | null>(null)
@@ -259,9 +258,7 @@ function handleConfigureWidget(widgetId: string) {
  * Resubscribe widget with new config
  */
 function handleWidgetConfigSaved() {
-  if (configWidgetId.value) {
-    resubscribeWidget(configWidgetId.value)
-  }
+  showConfigWidget.value = false
 }
 
 /**

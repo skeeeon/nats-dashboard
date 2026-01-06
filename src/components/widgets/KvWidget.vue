@@ -70,6 +70,7 @@ import LoadingState from '@/components/common/LoadingState.vue'
 import { useDesignTokens } from '@/composables/useDesignTokens'
 import { useThresholds } from '@/composables/useThresholds'
 import type { WidgetConfig } from '@/types/dashboard'
+import { decodeBytes } from '@/utils/encoding'
 
 /**
  * KV Widget Component
@@ -176,8 +177,7 @@ async function loadKvValue() {
     const entry = await kv.get(key)
     
     if (entry) {
-      const decoder = new TextDecoder()
-      kvValue.value = decoder.decode(entry.value)
+      kvValue.value = decodeBytes(entry.value)
       revision.value = entry.revision
       lastUpdated.value = new Date().toLocaleTimeString()
     } else {

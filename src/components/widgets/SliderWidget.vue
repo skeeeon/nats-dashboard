@@ -75,6 +75,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useNatsStore } from '@/stores/nats'
 import type { WidgetConfig } from '@/types/dashboard'
+import { encodeString } from '@/utils/encoding'
 
 /**
  * Slider Widget Component
@@ -212,8 +213,7 @@ function publishValue(value: number) {
   publishStatus.value = 'Publishing...'
   
   try {
-    const encoder = new TextEncoder()
-    const payload = encoder.encode(JSON.stringify({ value }))
+    const payload = encodeString(JSON.stringify({ value }))
     
     natsStore.nc.publish(cfg.value.publishSubject, payload)
     

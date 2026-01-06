@@ -2,6 +2,7 @@ import { useNatsStore } from '@/stores/nats'
 import { useWidgetDataStore } from '@/stores/widgetData'
 import { JSONPath } from 'jsonpath-plus'
 import type { Subscription } from '@nats-io/nats-core'
+import { decodeBytes } from '@/utils/encoding'
 
 /**
  * Widget Listener
@@ -51,8 +52,6 @@ export function useSubscriptionManager() {
   // Grug say: This is where we track which subjects we're subscribed to
   const subscriptions = new Map<string, SubscriptionRef>()
   
-  // Text encoder/decoder for NATS messages
-  const decoder = new TextDecoder()
   
   // ============================================================================
   // SUBSCRIPTION MANAGEMENT
@@ -148,7 +147,7 @@ export function useSubscriptionManager() {
         // Decode message data
         let data: any
         try {
-          const text = decoder.decode(msg.data)
+          const text = decodeBytes(msg.data)
           // Try to parse as JSON
           try {
             data = JSON.parse(text)

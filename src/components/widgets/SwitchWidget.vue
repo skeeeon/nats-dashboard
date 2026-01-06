@@ -64,6 +64,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useNatsStore } from '@/stores/nats'
 import { Kvm } from '@nats-io/kv'
 import type { WidgetConfig } from '@/types/dashboard'
+import { decodeBytes, encodeString } from '@/utils/encoding'
 
 /**
  * Switch Widget Component
@@ -103,7 +104,6 @@ let kvInstance: any = null  // Store KV instance for writes
 
 // CORE subscription
 let subscription: any = null
-const decoder = new TextDecoder()
 
 // Configuration shortcuts
 const cfg = computed(() => props.config.switchConfig!)
@@ -202,7 +202,7 @@ async function initializeKvMode() {
     // Get initial value
     const entry = await kv.get(key)
     if (entry) {
-      const value = JSON.parse(decoder.decode(entry.value))
+      const value = JSON.parse(decodeBytes(entry.value))
       updateStateFromValue(value)
     } else {
       currentState.value = 'off' // Default to off if no value
@@ -217,7 +217,7 @@ async function initializeKvMode() {
         for await (const e of iter) {
           if (e.key === key) {
             if (e.operation === 'PUT') {
-              const value = JSON.parse(decoder.decode(e.value!))
+              const value = JSON.parse(decodeBytes(e.value!))
               updateStateFromValue(value)
               isPending.value = false
             } else if (e.operation === 'DEL' || e.operation === 'PURGE') {
@@ -283,7 +283,7 @@ async function initializeCoreMode() {
  */
 function parseMessage(data: Uint8Array): any {
   try {
-    const text = decoder.decode(data)
+    const text = decodeBytes(data)
     try {
       return JSON.parse(text)
     } catch {
@@ -368,8 +368,7 @@ async function executeToggle(targetState: 'on' | 'off') {
       }
       
       const key = cfg.value.kvKey!
-      const encoder = new TextEncoder()
-      const data = encoder.encode(JSON.stringify(payload))
+      const data = encodeString(JSON.stringify(payload))
       
       await kvInstance.put(key, data)
       
@@ -416,14 +415,13 @@ async function executeToggle(targetState: 'on' | 'off') {
  * Serialize payload to Uint8Array
  */
 function serializePayload(payload: any): Uint8Array {
-  const encoder = new TextEncoder()
   
   if (typeof payload === 'string') {
-    return encoder.encode(payload)
+    return encodeString(payload)
   } else if (typeof payload === 'number' || typeof payload === 'boolean') {
-    return encoder.encode(String(payload))
+    return encodeString(String(payload))
   } else {
-    return encoder.encode(JSON.stringify(payload))
+    return encodeString(JSON.stringify(payload))
   }
 }
 

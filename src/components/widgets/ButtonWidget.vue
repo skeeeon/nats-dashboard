@@ -35,6 +35,7 @@ import { ref, computed } from 'vue'
 import { useNatsStore } from '@/stores/nats'
 import { useDesignTokens } from '@/composables/useDesignTokens'
 import type { WidgetConfig } from '@/types/dashboard'
+import { encodeString } from '@/utils/encoding'
 
 const props = defineProps<{
   config: WidgetConfig
@@ -98,8 +99,7 @@ function handleClick() {
   if (!natsStore.nc) return
   
   try {
-    const encoder = new TextEncoder()
-    const payload = encoder.encode(publishPayload.value)
+    const payload = encodeString(publishPayload.value)
     
     natsStore.nc.publish(publishSubject.value, payload)
     

@@ -3,7 +3,7 @@ import { useWidgetDataStore } from '@/stores/widgetData'
 import { useNatsStore } from '@/stores/nats'
 import { getSubscriptionManager } from '@/composables/useSubscriptionManager'
 import { createDefaultWidget } from '@/types/dashboard'
-import type { WidgetType } from '@/types/dashboard'
+import type { WidgetType, WidgetConfig } from '@/types/dashboard'
 
 /**
  * Widget Operations Composable
@@ -176,14 +176,42 @@ export function useWidgetOperations() {
   }
 
   /**
+   * Safely update widget configuration
+   * 
+   * Grug say: Crucial step.
+   * 1. Unsubscribe using OLD config (so we know what subject to stop listening to)
+   * 2. Update store with NEW config
+   * 3. Subscribe using NEW config
+   * 
+   * This prevents "ghost subscriptions" where we update store first, then try to 
+   * unsubscribe, but can't find the old subject anymore.
+   */
+  function updateWidgetConfiguration(widgetId: string, updates: Partial<WidgetConfig>) {
+    const widget = dashboardStore.getWidget(widgetId)
+    if (!widget) return
+
+    // 1. Unsubscribe using CURRENT (old) configuration
+    if (needsSubscription(widget.type)) {
+      unsubscribeWidget(widgetId)
+    }
+
+    // 2. Update the blueprint in the store
+    dashboardStore.updateWidget(widgetId, updates)
+
+    // 3. Subscribe using NEW configuration
+    if (natsStore.isConnected && needsSubscription(widget.type)) {
+      subscribeWidget(widgetId)
+    }
+  }
+
+  /**
    * Resubscribe widget after configuration change
-   * Grug say: Unsubscribe old settings, subscribe with new settings
+   * @deprecated Use updateWidgetConfiguration instead for atomic updates
    */
   function resubscribeWidget(widgetId: string) {
     const widget = dashboardStore.getWidget(widgetId)
     if (!widget || !natsStore.isConnected) return
     
-    // Only resubscribe data widgets
     if (needsSubscription(widget.type)) {
       unsubscribeWidget(widgetId)
       subscribeWidget(widgetId)
@@ -195,6 +223,7 @@ export function useWidgetOperations() {
     subscribeWidget,
     unsubscribeWidget,
     resubscribeWidget,
+    updateWidgetConfiguration, // NEW explicit update function
     
     // Bulk operations
     subscribeAllWidgets,
