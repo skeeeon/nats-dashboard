@@ -60,12 +60,6 @@ import type { WidgetConfig } from '@/types/dashboard'
  * 
  * Grug say: Grid hold widgets. Drag and drop on desktop.
  * Stack nice on mobile. No drag on mobile - too hard to use.
- * 
- * FIXED: Dashboard switching now works on mobile!
- * - Detects when widget IDs completely change (dashboard switch)
- * - Syncs layout properly on all breakpoints
- * - Disables drag/resize on mobile for better UX
- * - Reduced minimum width from 2 to 1 for more compact layouts
  */
 
 const props = defineProps<{
@@ -90,7 +84,6 @@ const cols = { lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }
 
 /**
  * Detect if we're on mobile
- * Grug say: Mobile = small screen. No drag there.
  */
 const isMobile = computed(() => {
   return ['sm', 'xs', 'xxs'].includes(currentBreakpoint.value)
@@ -98,16 +91,12 @@ const isMobile = computed(() => {
 
 /**
  * Conditionally enable drag/resize based on breakpoint
- * Grug say: Desktop = drag good. Mobile = drag bad (fingers too big).
  */
 const isDraggable = computed(() => !isMobile.value)
 const isResizable = computed(() => !isMobile.value)
 
 /**
  * Helper to map store widgets to grid layout items
- * 
- * Grug say: Sort by position so mobile stack looks good.
- * Top-left widgets appear first on mobile.
  */
 function mapWidgetsToLayout(widgets: WidgetConfig[]) {
   // 1. Create a shallow copy to sort
@@ -135,7 +124,6 @@ const layoutItems = ref(mapWidgetsToLayout(props.widgets))
 
 /**
  * Extract widget IDs from current layout
- * Grug say: Use this to detect dashboard switches
  */
 function getLayoutWidgetIds(): string[] {
   return layoutItems.value.map(item => item.i)
@@ -150,59 +138,42 @@ function getPropsWidgetIds(): string[] {
 
 /**
  * Check if widget sets are completely different
- * Grug say: If IDs don't match, user switched dashboard
  */
 function isWidgetSetChanged(layoutIds: string[], propsIds: string[]): boolean {
-  // Different lengths = definitely changed
   if (layoutIds.length !== propsIds.length) {
     return true
   }
-  
-  // Check if any ID in layout is missing from props
-  // This means the widget set has fundamentally changed (dashboard switch)
   const propsSet = new Set(propsIds)
   return layoutIds.some(id => !propsSet.has(id))
 }
 
 /**
  * Sync from store to local state
- * 
- * FIXED: Now properly detects dashboard switches vs. grid manipulation
  */
 watch(() => props.widgets, (newWidgets) => {
   const currentLayoutIds = getLayoutWidgetIds()
   const newPropsIds = getPropsWidgetIds()
   
-  // Check if this is a fundamental change (dashboard switch)
   const isDashboardSwitch = isWidgetSetChanged(currentLayoutIds, newPropsIds)
   
   if (isDashboardSwitch) {
-    // Dashboard switched - update layout on ALL breakpoints
     console.log('[Grid] Dashboard switch detected, syncing layout')
     layoutItems.value = mapWidgetsToLayout(newWidgets)
   } else if (currentBreakpoint.value === 'lg') {
-    // Same dashboard, desktop mode - sync layout from store
-    // (This handles external changes like widget addition)
     layoutItems.value = mapWidgetsToLayout(newWidgets)
   }
-  // else: Same dashboard, mobile mode, user dragging - don't interfere
-  
 }, { deep: true })
 
 /**
  * Handle Breakpoint Changes
- * 
- * Grug say: When screen size change, adjust layout
  */
 function handleBreakpointChange(breakpoint: string, newLayout: any[]) {
   console.log(`[Grid] Breakpoint changed: ${currentBreakpoint.value} -> ${breakpoint}`)
   currentBreakpoint.value = breakpoint
 
   if (breakpoint === 'lg') {
-    // Restore Master Layout from store (Desktop)
     layoutItems.value = mapWidgetsToLayout(props.widgets)
   } else {
-    // Accept Mobile Layout (temporary visual reflow)
     layoutItems.value = newLayout
   }
 }
@@ -210,28 +181,29 @@ function handleBreakpointChange(breakpoint: string, newLayout: any[]) {
 /**
  * Handle layout changes (drag/resize)
  * 
- * Grug say: Only save to store on desktop. Mobile no drag anyway.
+ * UPDATED: Now uses batchUpdateLayout to save only once
  */
 function handleLayoutUpdate(newLayout: Array<{ i: string; x: number; y: number; w: number; h: number }>) {
   layoutItems.value = newLayout
 
   // Only save to store when on desktop
   if (currentBreakpoint.value === 'lg') {
-    // Save to Store
-    newLayout.forEach(item => {
-      dashboardStore.updateWidgetLayout(item.i, {
-        x: item.x,
-        y: item.y,
-        w: item.w,
-        h: item.h,
-      })
-    })
+    // Prepare batch update
+    const updates = newLayout.map(item => ({
+      id: item.i,
+      x: item.x,
+      y: item.y,
+      w: item.w,
+      h: item.h
+    }))
+
+    // Save once
+    dashboardStore.batchUpdateLayout(updates)
   }
 }
 
 /**
  * Get widget config by ID
- * Grug say: Find widget blueprint from ID
  */
 function getWidgetConfig(id: string): WidgetConfig | undefined {
   return props.widgets.find(w => w.id === id)
@@ -239,7 +211,6 @@ function getWidgetConfig(id: string): WidgetConfig | undefined {
 
 /**
  * Widget action handlers
- * Grug say: Pass events up to parent
  */
 function handleWidgetDelete(widgetId: string) {
   emit('deleteWidget', widgetId)
