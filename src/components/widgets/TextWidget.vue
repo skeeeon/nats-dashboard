@@ -15,7 +15,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useWidgetDataStore } from '@/stores/widgetData'
-import { useDesignTokens } from '@/composables/useDesignTokens'
 import { useThresholds } from '@/composables/useThresholds'
 import type { WidgetConfig } from '@/types/dashboard'
 
@@ -24,9 +23,8 @@ import type { WidgetConfig } from '@/types/dashboard'
  * 
  * Grug say: Show latest value. Big text. Simple.
  * 
- * FIXED: Now properly follows theme changes
- * - If config color is undefined or a CSS variable, uses reactive design token
- * - Otherwise uses the saved color (for custom colors)
+ * FIXED: Removed JS default color calculation. Now relies on CSS for default,
+ * only applying inline style if a threshold or custom color is set.
  */
 
 const props = defineProps<{
@@ -34,7 +32,6 @@ const props = defineProps<{
 }>()
 
 const dataStore = useWidgetDataStore()
-const { baseColors } = useDesignTokens()
 const { evaluateThresholds } = useThresholds()
 
 // Get configuration
@@ -55,29 +52,24 @@ const latestValue = computed(() => {
 })
 
 /**
- * Default color - FIXED to be theme-reactive
- * If config color is a CSS variable or undefined, use reactive design token
- * Otherwise use the saved color value
+ * Determine effective color
+ * Priority:
+ * 1. Threshold Match
+ * 2. Custom Configured Color
+ * 3. null (Let CSS handle default)
  */
-const defaultColor = computed(() => {
-  const saved = configColor.value
-  
-  // If no color saved, or if it's a CSS variable, use reactive theme color
-  if (!saved || saved.startsWith('var(--')) {
-    return baseColors.value.text
-  }
-  
-  // Otherwise use the saved color (custom color)
-  return saved
-})
-
-// Determine Color (Threshold > Default)
-const currentColor = computed(() => {
+const effectiveColor = computed(() => {
   const val = latestValue.value
-  const thresholdColor = evaluateThresholds(val, thresholds.value)
   
+  // 1. Check Thresholds
+  const thresholdColor = evaluateThresholds(val, thresholds.value)
   if (thresholdColor) return thresholdColor
-  return defaultColor.value
+  
+  // 2. Check Custom Config
+  if (configColor.value) return configColor.value
+  
+  // 3. Default
+  return null
 })
 
 // Format display value
@@ -111,11 +103,19 @@ const timestamp = computed(() => {
 
 const showTimestamp = computed(() => latestMessage.value !== null)
 
-const valueStyle = computed(() => ({
-  fontSize: fontSize.value + 'px',
-  color: currentColor.value,
-  transition: 'color 0.3s ease'
-}))
+const valueStyle = computed(() => {
+  const style: Record<string, string> = {
+    fontSize: `${fontSize.value}px`,
+    transition: 'color 0.3s ease'
+  }
+  
+  // Only apply color if explicitly defined
+  if (effectiveColor.value) {
+    style.color = effectiveColor.value
+  }
+  
+  return style
+})
 </script>
 
 <style scoped>
@@ -138,6 +138,8 @@ const valueStyle = computed(() => ({
   font-family: var(--mono);
   max-height: 100%;
   overflow-y: auto;
+  /* Default color via CSS variable - ensures theme reactivity */
+  color: var(--text); 
 }
 
 .timestamp {

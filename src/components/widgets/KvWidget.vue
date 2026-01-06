@@ -67,17 +67,12 @@ import { useNatsStore } from '@/stores/nats'
 import { Kvm } from '@nats-io/kv'
 import { JSONPath } from 'jsonpath-plus'
 import LoadingState from '@/components/common/LoadingState.vue'
-import { useDesignTokens } from '@/composables/useDesignTokens'
 import { useThresholds } from '@/composables/useThresholds'
 import type { WidgetConfig } from '@/types/dashboard'
 import { decodeBytes } from '@/utils/encoding'
 
 /**
  * KV Widget Component
- * 
- * Grug say: Watch key-value store. Show value. Update when change.
- * 
- * FIXED: Now watches for NATS connection and loads when connected
  */
 
 const props = defineProps<{
@@ -85,7 +80,6 @@ const props = defineProps<{
 }>()
 
 const natsStore = useNatsStore()
-const { baseColors } = useDesignTokens()
 const { evaluateThresholds } = useThresholds()
 
 // State
@@ -138,20 +132,19 @@ const displayContent = computed(() => {
 })
 
 // Apply Thresholds
+// FIXED: Use CSS variable as fallback for better theme support
 const valueColor = computed(() => {
-  if (!isSingleValue.value) return baseColors.value.text
+  if (!isSingleValue.value) return 'var(--text)'
   
   const val = processedValue.value
   const rules = props.config.kvConfig?.thresholds || []
   
   const color = evaluateThresholds(val, rules)
-  return color || baseColors.value.text
+  return color || 'var(--text)'
 })
 
-/**
- * Load KV value from NATS
- * Grug say: Get value from bucket, watch for changes
- */
+// ... (Rest of logic remains the same) ...
+
 async function loadKvValue() {
   const bucket = props.config.dataSource.kvBucket
   const key = props.config.dataSource.kvKey
@@ -221,10 +214,6 @@ async function loadKvValue() {
   }
 }
 
-/**
- * Cleanup watcher
- * Grug say: Stop watching when widget destroyed
- */
 function cleanup() {
   if (watcher) {
     try { 
@@ -234,19 +223,16 @@ function cleanup() {
   }
 }
 
-// Initial load
 onMounted(() => {
   if (natsStore.isConnected) {
     loadKvValue()
   }
 })
 
-// Cleanup on unmount
 onUnmounted(() => {
   cleanup()
 })
 
-// Watch for config changes (bucket, key, jsonPath)
 watch(
   () => [props.config.dataSource.kvBucket, props.config.dataSource.kvKey, props.config.jsonPath],
   () => { 
@@ -255,8 +241,6 @@ watch(
   }
 )
 
-// FIXED: Watch for NATS connection status
-// Grug say: When NATS connect, load KV value. Simple.
 watch(
   () => natsStore.isConnected,
   (isConnected) => {
@@ -329,11 +313,11 @@ watch(
   min-height: 0;
   overflow: auto;
   position: relative;
-  display: flex;
-  flex-direction: column;
 }
 
 .single-value-mode .kv-value {
+  display: flex;
+  flex-direction: column;
   justify-content: center;
   overflow: hidden;
 }
@@ -345,7 +329,6 @@ watch(
   word-break: break-word;
   line-height: 1.3;
   font-family: var(--mono);
-  /* Color set via style binding now */
   transition: color 0.3s ease;
 }
 
