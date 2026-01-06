@@ -1,5 +1,5 @@
 // src/composables/useDesignTokens.ts
-import { computed, watch } from 'vue'
+import { computed } from 'vue'
 import { useTheme } from './useTheme'
 
 /**
