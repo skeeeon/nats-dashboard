@@ -199,6 +199,22 @@
               {{ errors.buttonLabel }}
             </div>
           </div>
+
+          <div class="form-group">
+            <label>Button Color</label>
+            <select 
+              v-model="form.buttonColor" 
+              class="form-input" 
+              :style="{ color: form.buttonColor || 'inherit' }"
+            >
+              <option value="">Default (Primary)</option>
+              <option value="var(--color-secondary)" style="color: var(--color-secondary)">Secondary (Blue)</option>
+              <option value="var(--color-success)" style="color: var(--color-success)">Success (Green)</option>
+              <option value="var(--color-warning)" style="color: var(--color-warning)">Warning (Orange)</option>
+              <option value="var(--color-error)" style="color: var(--color-error)">Danger (Red)</option>
+              <option value="var(--panel)" style="color: var(--text); background: var(--panel)">Neutral (Gray)</option>
+            </select>
+          </div>
           
           <div class="form-group">
             <label>Publish Subject</label>
@@ -425,16 +441,106 @@
         <!-- Slider Widget Config -->
         <template v-if="widgetType === 'slider'">
           <div class="form-group">
-            <label>Publish Subject</label>
+            <label>Mode</label>
+            <select v-model="form.sliderMode" class="form-input">
+              <option value="core">CORE (Pub/Sub)</option>
+              <option value="kv">KV (Stateful)</option>
+            </select>
+            <div class="help-text">
+              KV mode writes directly to KV store. CORE mode uses pub/sub messaging.
+            </div>
+          </div>
+
+          <!-- KV Mode Fields -->
+          <template v-if="form.sliderMode === 'kv'">
+            <div class="form-group">
+              <label>KV Bucket</label>
+              <input 
+                v-model="form.kvBucket" 
+                type="text" 
+                class="form-input"
+                :class="{ 'has-error': errors.kvBucket }"
+                placeholder="device-config"
+              />
+              <div v-if="errors.kvBucket" class="error-text">
+                {{ errors.kvBucket }}
+              </div>
+            </div>
+            <div class="form-group">
+              <label>KV Key</label>
+              <input 
+                v-model="form.kvKey" 
+                type="text" 
+                class="form-input"
+                :class="{ 'has-error': errors.kvKey }"
+                placeholder="device.brightness"
+              />
+              <div v-if="errors.kvKey" class="error-text">
+                {{ errors.kvKey }}
+              </div>
+            </div>
+          </template>
+
+          <!-- CORE Mode Fields -->
+          <template v-if="form.sliderMode === 'core'">
+            <div class="form-group">
+              <label>Publish Subject</label>
+              <input 
+                v-model="form.subject" 
+                type="text" 
+                class="form-input"
+                :class="{ 'has-error': errors.subject }"
+                placeholder="device.set_brightness"
+              />
+              <div v-if="errors.subject" class="error-text">
+                {{ errors.subject }}
+              </div>
+              <div class="help-text">
+                Subject to publish value to
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>State Subject (optional)</label>
+              <input 
+                v-model="form.sliderStateSubject" 
+                type="text" 
+                class="form-input"
+                placeholder="device.brightness_changed"
+              />
+              <div class="help-text">
+                Subject to listen to for updates. Defaults to Publish Subject if empty.
+              </div>
+            </div>
+          </template>
+
+          <div class="form-group">
+            <label>Value Template</label>
             <input 
-              v-model="form.subject" 
+              v-model="form.sliderValueTemplate" 
               type="text" 
               class="form-input"
-              :class="{ 'has-error': errors.subject }"
-              placeholder="device.slider"
+              placeholder="{{value}}"
             />
-            <div v-if="errors.subject" class="error-text">
-              {{ errors.subject }}
+            <div class="help-text">
+              Use <span v-pre>{{value}}</span> as placeholder. Example: <span v-pre>{"brightness": {{value}}}</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>JSONPath Extraction (optional)</label>
+            <input 
+              v-model="form.jsonPath" 
+              type="text" 
+              class="form-input"
+              :class="{ 'has-error': errors.jsonPath }"
+              placeholder="$.brightness"
+            />
+            <div v-if="errors.jsonPath" class="error-text">
+              {{ errors.jsonPath }}
+            </div>
+            <div class="help-text">
+              Extract value from incoming JSON messages
             </div>
           </div>
 
@@ -531,8 +637,6 @@ import type { WidgetType, ThresholdRule } from '@/types/dashboard'
  * Grug say: Big modal with forms for configuring all 8 widget types.
  * Each widget type has different fields.
  * Validate before saving.
- * 
- * FIXED: Now uses useWidgetOperations to handle safe updates (unsubscribe -> update -> subscribe)
  */
 
 interface Props {
@@ -566,6 +670,7 @@ interface FormState {
   // Button Widget
   buttonLabel: string
   buttonPayload: string
+  buttonColor: string
   
   // Thresholds (Text, KV, Stat)
   thresholds: ThresholdRule[]
@@ -581,6 +686,9 @@ interface FormState {
   switchConfirm: boolean
   
   // Slider Widget
+  sliderMode: 'kv' | 'core'
+  sliderStateSubject: string
+  sliderValueTemplate: string
   sliderMin: number
   sliderMax: number
   sliderStep: number
@@ -610,6 +718,7 @@ const form = ref<FormState>({
   kvKey: '',
   buttonLabel: '',
   buttonPayload: '',
+  buttonColor: '',
   thresholds: [],
   switchMode: 'kv',
   switchDefaultState: 'off',
@@ -619,6 +728,9 @@ const form = ref<FormState>({
   switchLabelOn: 'ON',
   switchLabelOff: 'OFF',
   switchConfirm: false,
+  sliderMode: 'core',
+  sliderStateSubject: '',
+  sliderValueTemplate: '{{value}}',
   sliderMin: 0,
   sliderMax: 100,
   sliderStep: 1,
@@ -659,8 +771,10 @@ watch(() => props.widgetId, (widgetId) => {
   let currentSubject = ''
   if (widget.type === 'button') {
     currentSubject = widget.buttonConfig?.publishSubject || ''
-  } else if (widget.type === 'switch' || widget.type === 'slider') {
-    currentSubject = widget.switchConfig?.publishSubject || widget.sliderConfig?.publishSubject || ''
+  } else if (widget.type === 'switch') {
+    currentSubject = widget.switchConfig?.publishSubject || ''
+  } else if (widget.type === 'slider') {
+    currentSubject = widget.sliderConfig?.publishSubject || ''
   } else {
     currentSubject = widget.dataSource.subject || ''
   }
@@ -680,11 +794,12 @@ watch(() => props.widgetId, (widgetId) => {
   let currentKvKey = ''
   
   if (widget.type === 'switch' && widget.switchConfig?.mode === 'kv') {
-    // For switch in KV mode, load from switchConfig
     currentKvBucket = widget.switchConfig.kvBucket || ''
     currentKvKey = widget.switchConfig.kvKey || ''
+  } else if (widget.type === 'slider' && widget.sliderConfig?.mode === 'kv') {
+    currentKvBucket = widget.sliderConfig.kvBucket || ''
+    currentKvKey = widget.sliderConfig.kvKey || ''
   } else if (widget.type === 'kv') {
-    // For KV widget, load from dataSource
     currentKvBucket = widget.dataSource.kvBucket || ''
     currentKvKey = widget.dataSource.kvKey || ''
   }
@@ -699,6 +814,7 @@ watch(() => props.widgetId, (widgetId) => {
     kvKey: currentKvKey,
     buttonLabel: widget.buttonConfig?.label || '',
     buttonPayload: widget.buttonConfig?.payload || '',
+    buttonColor: widget.buttonConfig?.color || '',
     thresholds: currentThresholds,
     
     // Switch
@@ -712,6 +828,9 @@ watch(() => props.widgetId, (widgetId) => {
     switchConfirm: widget.switchConfig?.confirmOnChange || false,
     
     // Slider
+    sliderMode: widget.sliderConfig?.mode || 'core',
+    sliderStateSubject: widget.sliderConfig?.stateSubject || '',
+    sliderValueTemplate: widget.sliderConfig?.valueTemplate || '{{value}}',
     sliderMin: widget.sliderConfig?.min || 0,
     sliderMax: widget.sliderConfig?.max || 100,
     sliderStep: widget.sliderConfig?.step || 1,
@@ -800,8 +919,22 @@ function validate(): boolean {
     }
     
   } else if (widget.type === 'slider') {
-    const subjectResult = validator.validateSubject(form.value.subject)
-    if (!subjectResult.valid) errors.value.subject = subjectResult.error!
+    if (form.value.sliderMode === 'kv') {
+      const bucketResult = validator.validateKvBucket(form.value.kvBucket)
+      if (!bucketResult.valid) errors.value.kvBucket = bucketResult.error!
+      
+      const keyResult = validator.validateKvKey(form.value.kvKey)
+      if (!keyResult.valid) errors.value.kvKey = keyResult.error!
+    } else {
+      // CORE mode requires publish subject
+      const subjectResult = validator.validateSubject(form.value.subject)
+      if (!subjectResult.valid) errors.value.subject = subjectResult.error!
+    }
+    
+    if (form.value.jsonPath) {
+      const jsonResult = validator.validateJsonPath(form.value.jsonPath)
+      if (!jsonResult.valid) errors.value.jsonPath = jsonResult.error!
+    }
   }
   
   return Object.keys(errors.value).length === 0
@@ -838,6 +971,7 @@ function save() {
       label: form.value.buttonLabel.trim(),
       publishSubject: form.value.subject.trim(),
       payload: form.value.buttonPayload.trim() || '{}',
+      color: form.value.buttonColor || undefined,
     }
   } else if (widget.type === 'kv') {
     updates.dataSource = {
@@ -872,8 +1006,17 @@ function save() {
       confirmOnChange: form.value.switchConfirm,
     }
   } else if (widget.type === 'slider') {
+    updates.jsonPath = form.value.jsonPath.trim() || undefined
     updates.sliderConfig = {
-      publishSubject: form.value.subject.trim(),
+      mode: form.value.sliderMode,
+      ...(form.value.sliderMode === 'kv' ? {
+        kvBucket: form.value.kvBucket.trim(),
+        kvKey: form.value.kvKey.trim(),
+      } : {
+        publishSubject: form.value.subject.trim(),
+        stateSubject: form.value.sliderStateSubject.trim() || undefined,
+      }),
+      valueTemplate: form.value.sliderValueTemplate.trim() || '{{value}}',
       min: form.value.sliderMin,
       max: form.value.sliderMax,
       step: form.value.sliderStep,

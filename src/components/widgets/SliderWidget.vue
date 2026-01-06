@@ -17,15 +17,16 @@
       >
         <input
           type="range"
-          v-model.number="currentValue"
+          v-model.number="localValue"
           :min="cfg.min"
           :max="cfg.max"
           :step="cfg.step"
           :disabled="isDisabled"
-          @mousedown.stop
-          @touchstart.stop
+          @mousedown="isDragging = true"
+          @touchstart="isDragging = true"
           @mouseup="handleRelease"
           @touchend="handleRelease"
+          @input="handleInput"
           class="slider-input"
           :style="sliderStyle"
         />
@@ -72,24 +73,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useNatsStore } from '@/stores/nats'
+import { Kvm } from '@nats-io/kv'
+import { JSONPath } from 'jsonpath-plus'
 import type { WidgetConfig } from '@/types/dashboard'
-import { encodeString } from '@/utils/encoding'
+import { encodeString, decodeBytes } from '@/utils/encoding'
 
 /**
  * Slider Widget Component
  * 
  * Grug say: Drag slider, publish value when release.
- * Simple range control for IoT devices.
- * 
- * FIXED: Grid drag conflict resolution (heavy-handed but works)
- * - Added .vue-grid-item-no-drag class to slider-wrapper
- * - Added @mousedown.stop, @touchstart.stop on wrapper to stop event bubbling
- * - Added @mousedown.stop, @touchstart.stop on input as extra safety
- * 
- * Belt and suspenders approach: stops events at multiple levels to ensure
- * the grid system never captures slider drag gestures. A bit ugly but reliable.
+ * Now smarter: Listens for updates (CORE or KV) and syncs position.
+ * Doesn't jump while user is dragging.
  */
 
 const props = defineProps<{
@@ -99,22 +95,28 @@ const props = defineProps<{
 const natsStore = useNatsStore()
 
 // Component state
-const currentValue = ref(0)
-const lastPublishedValue = ref(0)
+const localValue = ref(0)
+const isDragging = ref(false) // Critical: prevents remote updates while user interacts
 const error = ref<string | null>(null)
 const publishStatus = ref<string | null>(null)
 const showConfirm = ref(false)
 const pendingValue = ref<number | null>(null)
 
-// Configuration shortcut
+// NATS/KV references
+let kvWatcher: any = null
+let kvInstance: any = null
+let subscription: any = null
+
+// Configuration shortcuts
 const cfg = computed(() => props.config.sliderConfig!)
+const mode = computed(() => cfg.value.mode || 'core')
 const isDisabled = computed(() => !natsStore.isConnected)
 
 /**
  * Display value with formatting
  */
 const displayValue = computed(() => {
-  return currentValue.value.toFixed(getDecimalPlaces(cfg.value.step))
+  return localValue.value.toFixed(getDecimalPlaces(cfg.value.step))
 })
 
 /**
@@ -131,7 +133,7 @@ function getDecimalPlaces(step: number): number {
  */
 const fillPercent = computed(() => {
   const range = cfg.value.max - cfg.value.min
-  const value = currentValue.value - cfg.value.min
+  const value = localValue.value - cfg.value.min
   return (value / range) * 100
 })
 
@@ -161,26 +163,137 @@ const confirmMessage = computed(() => {
   return `Set value to ${displayValue.value}${cfg.value.unit || ''}?`
 })
 
-/**
- * Handle slider release
- */
-function handleRelease() {
-  // Only publish if value changed
-  if (currentValue.value === lastPublishedValue.value) {
-    return
-  }
+// --- Initialization ---
+
+async function initialize() {
+  if (!natsStore.isConnected) return
   
-  if (cfg.value.confirmOnChange) {
-    pendingValue.value = currentValue.value
-    showConfirm.value = true
+  error.value = null
+  
+  if (mode.value === 'kv') {
+    await initializeKv()
   } else {
-    publishValue(currentValue.value)
+    await initializeCore()
   }
 }
 
+async function initializeKv() {
+  const bucket = cfg.value.kvBucket
+  const key = cfg.value.kvKey
+  
+  if (!bucket || !key) {
+    error.value = 'KV Bucket/Key required'
+    return
+  }
+
+  try {
+    const kvm = new Kvm(natsStore.nc!)
+    const kv = await kvm.open(bucket)
+    kvInstance = kv
+
+    // Get initial value
+    try {
+      const entry = await kv.get(key)
+      if (entry) processIncomingData(decodeBytes(entry.value))
+    } catch (e: any) {
+      if (!e.message?.includes('key not found')) throw e
+    }
+
+    // Watch for changes
+    const iter = await kv.watch({ key })
+    kvWatcher = iter
+    ;(async () => {
+      try {
+        for await (const e of iter) {
+          if (e.key === key && e.operation === 'PUT') {
+            processIncomingData(decodeBytes(e.value!))
+          }
+        }
+      } catch (err) {
+        // Ignore watch stop errors
+      }
+    })()
+  } catch (err: any) {
+    console.error('[Slider] KV Error:', err)
+    if (err.message.includes('stream not found')) {
+      error.value = `Bucket "${bucket}" not found`
+    } else {
+      error.value = err.message
+    }
+  }
+}
+
+async function initializeCore() {
+  // Determine subject to listen to (State Subject > Publish Subject)
+  const subject = cfg.value.stateSubject || cfg.value.publishSubject
+  if (!subject) return
+
+  try {
+    subscription = natsStore.nc!.subscribe(subject)
+    ;(async () => {
+      try {
+        for await (const msg of subscription) {
+          processIncomingData(decodeBytes(msg.data))
+        }
+      } catch (err) {
+        // Ignore unsubscribe errors
+      }
+    })()
+  } catch (err: any) {
+    console.error('[Slider] Sub Error:', err)
+    error.value = err.message
+  }
+}
+
+// --- Data Processing ---
+
 /**
- * Confirm action
+ * Handles data coming FROM NATS/KV
  */
+function processIncomingData(text: string) {
+  // If user is dragging, IGNORE remote updates to prevent fighting
+  if (isDragging.value) return
+
+  try {
+    let val: any = text
+    
+    // 1. Try to parse JSON
+    try { val = JSON.parse(text) } catch {}
+
+    // 2. Extract via JSONPath if configured
+    if (props.config.jsonPath && typeof val === 'object') {
+      const extracted = JSONPath({ path: props.config.jsonPath, json: val, wrap: false })
+      if (extracted !== undefined) val = extracted
+    }
+
+    // 3. Convert to number
+    const num = Number(val)
+    if (!isNaN(num)) {
+      localValue.value = num
+    }
+  } catch (err) {
+    console.warn('[Slider] Failed to process incoming data', err)
+  }
+}
+
+// --- User Interaction ---
+
+function handleInput() {
+  // Called while dragging - just updates local visual state
+  isDragging.value = true
+}
+
+function handleRelease() {
+  isDragging.value = false
+  
+  if (cfg.value.confirmOnChange) {
+    pendingValue.value = localValue.value
+    showConfirm.value = true
+  } else {
+    publishValue(localValue.value)
+  }
+}
+
 function confirmAction() {
   if (pendingValue.value !== null) {
     publishValue(pendingValue.value)
@@ -188,67 +301,100 @@ function confirmAction() {
   cancelConfirm()
 }
 
-/**
- * Cancel confirmation
- */
 function cancelConfirm() {
   showConfirm.value = false
-  if (pendingValue.value !== null) {
-    // Revert to last published value
-    currentValue.value = lastPublishedValue.value
-    pendingValue.value = null
-  }
+  pendingValue.value = null
+  // We don't revert localValue here because the user might want to adjust slightly
+  // But if a remote update comes in, it will overwrite the unconfirmed value
 }
 
-/**
- * Publish value to NATS
- */
-function publishValue(value: number) {
-  if (!natsStore.nc) {
-    error.value = 'Not connected to NATS'
+async function publishValue(val: number) {
+  if (!natsStore.isConnected) {
+    error.value = 'Not connected'
     return
   }
-  
+
   error.value = null
   publishStatus.value = 'Publishing...'
+
+  // 1. Format Payload
+  let payloadStr = String(val)
   
+  // Apply template if exists (e.g. '{"brightness": {{value}}}')
+  if (cfg.value.valueTemplate) {
+    payloadStr = cfg.value.valueTemplate.replace('{{value}}', String(val))
+  }
+
+  // Validate JSON if it looks like JSON
+  if (payloadStr.trim().startsWith('{') || payloadStr.trim().startsWith('[')) {
+    try {
+      // Minify/Validate
+      payloadStr = JSON.stringify(JSON.parse(payloadStr))
+    } catch (e) {
+      error.value = "Invalid JSON Template"
+      publishStatus.value = '⚠️ Error'
+      return
+    }
+  }
+
+  const data = encodeString(payloadStr)
+
   try {
-    const payload = encodeString(JSON.stringify({ value }))
+    if (mode.value === 'kv') {
+      if (!kvInstance || !cfg.value.kvKey) throw new Error('KV not initialized')
+      await kvInstance.put(cfg.value.kvKey, data)
+    } else {
+      natsStore.nc!.publish(cfg.value.publishSubject, data)
+    }
     
-    natsStore.nc.publish(cfg.value.publishSubject, payload)
-    
-    lastPublishedValue.value = value
-    publishStatus.value = `✓ Published: ${displayValue.value}${cfg.value.unit || ''}`
-    
-    console.log(`[Slider] Published ${value} to ${cfg.value.publishSubject}`)
-    
-    // Clear status after 2 seconds
+    publishStatus.value = `✓ Sent: ${val}${cfg.value.unit || ''}`
     setTimeout(() => {
-      publishStatus.value = null
+      if (publishStatus.value?.includes('✓')) publishStatus.value = null
     }, 2000)
-    
   } catch (err: any) {
-    console.error('[Slider] Publish error:', err)
-    error.value = err.message || 'Failed to publish'
-    publishStatus.value = '⚠️ Publish failed'
+    console.error('[Slider] Publish Error:', err)
+    error.value = err.message
+    publishStatus.value = '⚠️ Failed'
   }
 }
 
-/**
- * Retry after error
- */
 function retry() {
   error.value = null
-  publishStatus.value = null
-  publishValue(currentValue.value)
+  initialize()
 }
 
-/**
- * Initialize
- */
+// --- Lifecycle ---
+
+function cleanup() {
+  if (kvWatcher) { try { kvWatcher.stop() } catch {} }
+  if (subscription) { try { subscription.unsubscribe() } catch {} }
+  kvWatcher = null
+  subscription = null
+  kvInstance = null
+}
+
 onMounted(() => {
-  currentValue.value = cfg.value.defaultValue
-  lastPublishedValue.value = cfg.value.defaultValue
+  localValue.value = cfg.value.defaultValue
+  if (natsStore.isConnected) initialize()
+})
+
+onUnmounted(cleanup)
+
+watch(() => natsStore.isConnected, (connected) => {
+  if (connected) initialize()
+  else cleanup()
+})
+
+// Re-init if config changes significantly
+watch(() => [
+  cfg.value.mode, 
+  cfg.value.kvBucket, 
+  cfg.value.kvKey, 
+  cfg.value.stateSubject, 
+  cfg.value.publishSubject
+], () => {
+  cleanup()
+  if (natsStore.isConnected) initialize()
 })
 </script>
 

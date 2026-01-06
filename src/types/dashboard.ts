@@ -95,12 +95,23 @@ export interface SwitchWidgetConfig {
  * Grug say: Publish value when user release slider. Simple.
  */
 export interface SliderWidgetConfig {
+  mode: 'core' | 'kv'
+
   publishSubject: string
+  stateSubject?: string
+  
+  kvBucket?: string
+  kvKey?: string
+
   min: number
   max: number
   step: number
   defaultValue: number
   unit?: string  // e.g., "%", "°C", "dB"
+  valueTemplate?: string
+
+  jsonPath?: string
+  
   confirmOnChange?: boolean
   confirmMessage?: string
 }
@@ -223,11 +234,13 @@ export function createDefaultWidget(type: WidgetType, position: { x: number; y: 
       break
     case 'slider':
       base.sliderConfig = {
-        publishSubject: 'device.slider',
+        mode: 'core',
+	publishSubject: 'device.slider',
         min: 0,
         max: 100,
         step: 1,
         defaultValue: 50,
+	valueTemplate: '{{value}}',
         unit: '%'
       }
       break

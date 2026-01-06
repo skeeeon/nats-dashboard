@@ -64,7 +64,7 @@ const currentIcon = computed(() => {
   if (!natsStore.isConnected) return ''
   if (showSuccess.value) return '✓'
   if (showError.value) return '✕'
-  return '📤' // Default icon
+  return null // Default: No icon
 })
 
 // Dynamic styling
