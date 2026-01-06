@@ -1,141 +1,64 @@
+// src/composables/useKeyboardShortcuts.ts
 import { onMounted, onUnmounted } from 'vue'
 
-/**
- * Keyboard Shortcut Handler
- * Grug say: Function that runs when key pressed
- */
 type ShortcutHandler = (event: KeyboardEvent) => void
 
-/**
- * Shortcut Definition
- * Grug say: What keys to press and what happens
- */
-interface ShortcutDefinition {
-  key: string           // The key (e.g., 's', 'n', 'Delete')
-  ctrl?: boolean        // Requires Ctrl/Cmd key
-  shift?: boolean       // Requires Shift key
-  alt?: boolean         // Requires Alt key
+export interface ShortcutDefinition {
+  key: string
+  description: string
   handler: ShortcutHandler
-  description: string   // For help menu
 }
 
-/**
- * Keyboard Shortcuts Composable
- * 
- * Grug say: Listen for keyboard. Run functions when keys pressed.
- * Clean up when component destroyed. Simple.
- * 
- * Shortcuts:
- * - Cmd/Ctrl + S: Save dashboard
- * - Cmd/Ctrl + N: New widget
- * - Delete/Backspace: Delete selected widget
- * - Escape: Close modal / Exit full screen
- * - Cmd/Ctrl + D: Duplicate widget
- * - F: Toggle full screen on selected widget
- */
 export function useKeyboardShortcuts(shortcuts: ShortcutDefinition[]) {
   
-  /**
-   * Check if event matches shortcut definition
-   * Grug say: Compare pressed keys with what we want
-   */
-  function matchesShortcut(event: KeyboardEvent, shortcut: ShortcutDefinition): boolean {
-    // Check key match (case insensitive)
-    const keyMatches = event.key.toLowerCase() === shortcut.key.toLowerCase()
-    
-    // Check modifiers
-    const ctrlMatches = !!shortcut.ctrl === (event.ctrlKey || event.metaKey) // Meta is Cmd on Mac
-    const shiftMatches = !!shortcut.shift === event.shiftKey
-    const altMatches = !!shortcut.alt === event.altKey
-    
-    return keyMatches && ctrlMatches && shiftMatches && altMatches
-  }
-  
-  /**
-   * Handle keyboard event
-   * Grug say: Check all shortcuts. Run handler if match.
-   */
   function handleKeyDown(event: KeyboardEvent) {
-    // Don't trigger shortcuts when typing in input/textarea
+    // 1. Safety Check: Never trigger if user is typing in an input
     const target = event.target as HTMLElement
     if (target.tagName === 'INPUT' || 
         target.tagName === 'TEXTAREA' || 
         target.isContentEditable) {
       return
     }
+
+    // 2. Global Help Shortcut (?)
+    if (event.key === '?' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      window.dispatchEvent(new CustomEvent('show-shortcuts-help'))
+      return
+    }
     
-    // Check each shortcut
-    for (const shortcut of shortcuts) {
-      if (matchesShortcut(event, shortcut)) {
-        // Prevent default browser behavior
+    // 3. Check defined shortcuts
+    for (const s of shortcuts) {
+      // Case insensitive match
+      const keyMatch = event.key.toLowerCase() === s.key.toLowerCase()
+      
+      // Strict Modifier Check: 
+      // We only want to trigger if NO modifiers are pressed.
+      // This prevents 's' logic from firing when user hits 'Ctrl+S'
+      const noModifiers = !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
+
+      // Exception: 'Escape' usually works regardless of modifiers, but let's keep it simple
+      // Exception: If the key itself is uppercase (like 'S'), shift might be implied, 
+      // but usually event.key handles that. We'll stick to strict no-modifiers for safety.
+      
+      if (keyMatch && noModifiers) {
         event.preventDefault()
-        
-        // Run handler
-        shortcut.handler(event)
-        
-        // Stop after first match
-        break
+        s.handler(event)
+        return
+      }
+      
+      // Special case for Escape (often doesn't care about modifiers)
+      if (s.key.toLowerCase() === 'escape' && event.key === 'Escape') {
+        event.preventDefault()
+        s.handler(event)
+        return
       }
     }
   }
   
-  /**
-   * Register keyboard listener
-   */
-  onMounted(() => {
-    window.addEventListener('keydown', handleKeyDown)
-    console.log(`[Shortcuts] Registered ${shortcuts.length} keyboard shortcuts`)
-  })
-  
-  /**
-   * Cleanup listener
-   */
-  onUnmounted(() => {
-    window.removeEventListener('keydown', handleKeyDown)
-    console.log('[Shortcuts] Unregistered keyboard shortcuts')
-  })
-  
-  /**
-   * Get list of shortcuts for help menu
-   */
-  function getShortcutsList(): string[] {
-    return shortcuts.map(s => {
-      const keys: string[] = []
-      if (s.ctrl) keys.push('Ctrl/Cmd')
-      if (s.shift) keys.push('Shift')
-      if (s.alt) keys.push('Alt')
-      keys.push(s.key.toUpperCase())
-      
-      return `${keys.join(' + ')}: ${s.description}`
-    })
-  }
+  onMounted(() => window.addEventListener('keydown', handleKeyDown))
+  onUnmounted(() => window.removeEventListener('keydown', handleKeyDown))
   
   return {
-    getShortcutsList,
+    shortcuts
   }
-}
-
-/**
- * Format shortcut for display
- * Grug say: Make nice string like "Cmd+S" for UI
- */
-export function formatShortcut(shortcut: ShortcutDefinition): string {
-  const keys: string[] = []
-  
-  // Use Mac symbols if on Mac
-  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
-  
-  if (shortcut.ctrl) {
-    keys.push(isMac ? '⌘' : 'Ctrl')
-  }
-  if (shortcut.shift) {
-    keys.push(isMac ? '⇧' : 'Shift')
-  }
-  if (shortcut.alt) {
-    keys.push(isMac ? '⌥' : 'Alt')
-  }
-  
-  keys.push(shortcut.key.toUpperCase())
-  
-  return keys.join(isMac ? '' : '+')
 }

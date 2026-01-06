@@ -12,7 +12,7 @@
           <button 
             class="hamburger-btn"
             @click="toggleSidebar"
-            title="Toggle sidebar (Ctrl+B)"
+            title="Toggle sidebar (B)"
           >
             ☰
           </button>
@@ -44,7 +44,7 @@
           </button>
           
           <!-- Add Widget -->
-          <button class="btn-primary" @click="showAddWidget = true" title="Add Widget">
+          <button class="btn-primary" @click="showAddWidget = true" title="Add Widget (N)">
             <span class="btn-text">+ Add Widget</span>
             <span class="btn-icon-only">+</span>
           </button>
@@ -86,6 +86,12 @@
       v-model="showConfigWidget"
       :widget-id="configWidgetId"
       @saved="handleWidgetConfigSaved"
+    />
+
+    <!-- Keyboard Shortcuts Modal -->
+    <KeyboardShortcutsModal 
+      v-model="showShortcutsModal" 
+      :shortcuts="shortcuts" 
     />
     
     <!-- Full-Screen Widget Modal -->
@@ -161,6 +167,7 @@ import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import DashboardGrid from '@/components/dashboard/DashboardGrid.vue'
 import AddWidgetModal from '@/components/dashboard/AddWidgetModal.vue'
 import ConfigureWidgetModal from '@/components/dashboard/ConfigureWidgetModal.vue'
+import KeyboardShortcutsModal from '@/components/common/KeyboardShortcutsModal.vue'
 import DebugPanel from '@/components/common/DebugPanel.vue'
 import TextWidget from '@/components/widgets/TextWidget.vue'
 import ChartWidget from '@/components/widgets/ChartWidget.vue'
@@ -173,16 +180,9 @@ import GaugeWidget from '@/components/widgets/GaugeWidget.vue'
 import type { WidgetType } from '@/types/dashboard'
 
 /**
- * Dashboard View (Refactored)
+ * Dashboard View
  * 
- * Grug say: Much cleaner now! Extracted modals and operations to separate files.
- * This component just orchestrates everything, doesn't do heavy lifting.
- * 
- * REFACTORED:
- * - Widget operations moved to useWidgetOperations composable
- * - Add widget modal extracted to AddWidgetModal component
- * - Configure modal extracted to ConfigureWidgetModal component
- * - Result: ~400 lines shorter, much easier to read and maintain!
+ * Orchestrates the main dashboard layout, modals, and widget interactions.
  */
 
 const router = useRouter()
@@ -206,6 +206,7 @@ const sidebarRef = ref<InstanceType<typeof DashboardSidebar> | null>(null)
 // Modal states
 const showAddWidget = ref(false)
 const showConfigWidget = ref(false)
+const showShortcutsModal = ref(false)
 const configWidgetId = ref<string | null>(null)
 
 // Fullscreen state
@@ -276,21 +277,56 @@ function exitFullScreen() {
 }
 
 /**
- * Setup keyboard shortcuts
+ * Handle global help shortcut event
  */
-useKeyboardShortcuts([
-  { key: 's', ctrl: true, description: 'Save', handler: () => dashboardStore.saveToStorage() },
-  { key: 'n', ctrl: true, description: 'New widget', handler: () => showAddWidget.value = true },
-  { key: 't', ctrl: true, description: 'New dashboard', handler: () => {
-    const name = prompt('Dashboard name:', 'New Dashboard')
-    if (name) dashboardStore.createDashboard(name)
-  }},
-  { key: 'b', ctrl: true, description: 'Toggle sidebar', handler: toggleSidebar },
-  { key: 'Escape', description: 'Close/Exit', handler: () => {
-    if (fullScreenWidgetId.value) exitFullScreen()
-    else showConfigWidget.value = false
-    showAddWidget.value = false
-  }}
+function handleShowShortcuts() {
+  showShortcutsModal.value = true
+}
+
+/**
+ * Setup keyboard shortcuts
+ * Grug say: Simple keys. No modifiers.
+ */
+const { shortcuts } = useKeyboardShortcuts([
+  { 
+    key: 's', 
+    description: 'Save Dashboard', 
+    handler: () => {
+      dashboardStore.saveToStorage()
+      // Optional: Show a toast notification here
+      console.log('Dashboard saved via shortcut')
+    } 
+  },
+  { 
+    key: 'n', 
+    description: 'Add New Widget', 
+    handler: () => showAddWidget.value = true 
+  },
+  { 
+    key: 't', 
+    description: 'New Dashboard', 
+    handler: () => {
+      const name = prompt('Dashboard name:', 'New Dashboard')
+      if (name) dashboardStore.createDashboard(name)
+    }
+  },
+  { 
+    key: 'b', 
+    description: 'Toggle Sidebar', 
+    handler: toggleSidebar 
+  },
+  { 
+    key: 'Escape', 
+    description: 'Close Modals / Exit Full Screen', 
+    handler: () => {
+      if (fullScreenWidgetId.value) exitFullScreen()
+      else {
+        showConfigWidget.value = false
+        showAddWidget.value = false
+        showShortcutsModal.value = false
+      }
+    }
+  }
 ])
 
 /**
@@ -298,6 +334,9 @@ useKeyboardShortcuts([
  */
 onMounted(() => {
   dashboardStore.loadFromStorage()
+  
+  // Listen for the '?' key event dispatched by the composable
+  window.addEventListener('show-shortcuts-help', handleShowShortcuts)
   
   // Redirect to settings if not connected and no saved settings
   if (!natsStore.isConnected && !natsStore.autoConnect) {
@@ -316,6 +355,7 @@ onMounted(() => {
  */
 onUnmounted(() => {
   unsubscribeAllWidgets()
+  window.removeEventListener('show-shortcuts-help', handleShowShortcuts)
 })
 
 /**
