@@ -68,6 +68,7 @@ onMounted(() => {
 <style>
 /* Import design tokens first - these define all theme colors */
 @import './styles/design-tokens.css';
+@import './styles/forms.css';
 
 /* Global Resets */
 *, *::before, *::after {
