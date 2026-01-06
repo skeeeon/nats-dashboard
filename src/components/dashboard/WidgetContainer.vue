@@ -11,6 +11,7 @@
       <div class="widget-header vue-draggable-handle">
         <div class="widget-title" :title="config.title">{{ config.title }}</div>
         <div class="widget-actions">
+          <!-- Full screen is always available -->
           <button 
             class="icon-btn" 
             title="Full Screen (F)"
@@ -18,27 +19,31 @@
           >
             ⛶
           </button>
-          <button 
-            class="icon-btn" 
-            title="Duplicate Widget"
-            @click="$emit('duplicate')"
-          >
-            📋
-          </button>
-          <button 
-            class="icon-btn" 
-            title="Configure Widget"
-            @click="$emit('configure')"
-          >
-            ⚙️
-          </button>
-          <button 
-            class="icon-btn danger" 
-            title="Delete Widget"
-            @click="handleDelete"
-          >
-            ✕
-          </button>
+
+          <!-- Admin controls: Hidden when dashboard is locked -->
+          <template v-if="!dashboardStore.isLocked">
+            <button 
+              class="icon-btn" 
+              title="Duplicate Widget"
+              @click="$emit('duplicate')"
+            >
+              📋
+            </button>
+            <button 
+              class="icon-btn" 
+              title="Configure Widget"
+              @click="$emit('configure')"
+            >
+              ⚙️
+            </button>
+            <button 
+              class="icon-btn danger" 
+              title="Delete Widget"
+              @click="handleDelete"
+            >
+              ✕
+            </button>
+          </template>
         </div>
       </div>
       
@@ -60,6 +65,7 @@
 
 <script setup lang="ts">
 import { computed, ref, onErrorCaptured } from 'vue'
+import { useDashboardStore } from '@/stores/dashboard'
 import type { WidgetConfig } from '@/types/dashboard'
 import TextWidget from '@/components/widgets/TextWidget.vue'
 import ChartWidget from '@/components/widgets/ChartWidget.vue'
@@ -74,12 +80,6 @@ import GaugeWidget from '@/components/widgets/GaugeWidget.vue'
  * Widget Container Component
  * 
  * Grug say: Box around widget. Has title and buttons.
- * 
- * FIXED: Now handles all 8 widget types including the new ones!
- * - switch: Toggle control widget
- * - slider: Range control widget
- * - stat: KPI card with trend
- * - gauge: Circular meter widget
  */
 
 const props = defineProps<{
@@ -93,7 +93,7 @@ const emit = defineEmits<{
   fullscreen: []
 }>()
 
-// Error state for error boundary
+const dashboardStore = useDashboardStore()
 const error = ref<string | null>(null)
 
 // Map widget type to component

@@ -38,11 +38,14 @@
     <div v-if="widgets.length === 0" class="empty-state">
       <div class="empty-icon">📊</div>
       <div class="empty-message">No widgets yet</div>
-      <div class="empty-hint">Click "Add Widget" to get started</div>
+      <div class="empty-hint">
+        <template v-if="!dashboardStore.isLocked">Click "Add Widget" to get started</template>
+        <template v-else>Dashboard is locked</template>
+      </div>
     </div>
     
     <!-- Mobile drag disabled indicator -->
-    <div v-if="isMobile && widgets.length > 0" class="mobile-hint">
+    <div v-if="isMobile && widgets.length > 0 && !dashboardStore.isLocked" class="mobile-hint">
       💡 Switch to desktop to rearrange widgets
     </div>
   </div>
@@ -59,7 +62,6 @@ import type { WidgetConfig } from '@/types/dashboard'
  * Dashboard Grid Component
  * 
  * Grug say: Grid hold widgets. Drag and drop on desktop.
- * Stack nice on mobile. No drag on mobile - too hard to use.
  */
 
 const props = defineProps<{
@@ -90,10 +92,10 @@ const isMobile = computed(() => {
 })
 
 /**
- * Conditionally enable drag/resize based on breakpoint
+ * Conditionally enable drag/resize based on breakpoint AND lock state
  */
-const isDraggable = computed(() => !isMobile.value)
-const isResizable = computed(() => !isMobile.value)
+const isDraggable = computed(() => !isMobile.value && !dashboardStore.isLocked)
+const isResizable = computed(() => !isMobile.value && !dashboardStore.isLocked)
 
 /**
  * Helper to map store widgets to grid layout items
@@ -180,10 +182,11 @@ function handleBreakpointChange(breakpoint: string, newLayout: any[]) {
 
 /**
  * Handle layout changes (drag/resize)
- * 
- * UPDATED: Now uses batchUpdateLayout to save only once
  */
 function handleLayoutUpdate(newLayout: Array<{ i: string; x: number; y: number; w: number; h: number }>) {
+  // Ignore updates if locked (double safety)
+  if (dashboardStore.isLocked) return
+
   layoutItems.value = newLayout
 
   // Only save to store when on desktop

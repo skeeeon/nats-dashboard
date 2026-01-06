@@ -34,6 +34,16 @@
         </div>
         
         <div class="toolbar-right">
+          <!-- Lock Toggle -->
+          <button 
+            class="btn-icon" 
+            :title="dashboardStore.isLocked ? 'Unlock Dashboard (U)' : 'Lock Dashboard (L)'"
+            @click="dashboardStore.toggleLock()"
+            :class="{ 'lock-active': dashboardStore.isLocked }"
+          >
+            {{ dashboardStore.isLocked ? '🔒' : '🔓' }}
+          </button>
+
           <!-- Theme Toggle -->
           <button 
             class="btn-icon" 
@@ -43,8 +53,13 @@
             {{ theme === 'dark' ? '☀️' : '🌙' }}
           </button>
           
-          <!-- Add Widget -->
-          <button class="btn-primary" @click="showAddWidget = true" title="Add Widget (N)">
+          <!-- Add Widget: Hidden when locked -->
+          <button 
+            v-if="!dashboardStore.isLocked"
+            class="btn-primary" 
+            @click="showAddWidget = true" 
+            title="Add Widget (N)"
+          >
             <span class="btn-text">+ Add Widget</span>
             <span class="btn-icon-only">+</span>
           </button>
@@ -70,7 +85,10 @@
         <div v-else class="no-widgets-state">
           <div class="no-widgets-icon">📊</div>
           <div class="no-widgets-text">No widgets in this dashboard</div>
-          <div class="no-widgets-hint">Click "+ Add Widget" to get started</div>
+          <div class="no-widgets-hint">
+            <template v-if="!dashboardStore.isLocked">Click "+ Add Widget" to get started</template>
+            <template v-else>Dashboard is locked. Unlock (U) to add widgets.</template>
+          </div>
         </div>
       </div>
     </div>
@@ -285,7 +303,6 @@ function handleShowShortcuts() {
 
 /**
  * Setup keyboard shortcuts
- * Grug say: Simple keys. No modifiers.
  */
 const { shortcuts } = useKeyboardShortcuts([
   { 
@@ -293,19 +310,25 @@ const { shortcuts } = useKeyboardShortcuts([
     description: 'Save Dashboard', 
     handler: () => {
       dashboardStore.saveToStorage()
-      // Optional: Show a toast notification here
       console.log('Dashboard saved via shortcut')
     } 
   },
   { 
     key: 'n', 
     description: 'Add New Widget', 
-    handler: () => showAddWidget.value = true 
+    handler: () => {
+      // Only allow adding if not locked
+      if (!dashboardStore.isLocked) {
+        showAddWidget.value = true 
+      }
+    }
   },
   { 
     key: 't', 
     description: 'New Dashboard', 
     handler: () => {
+      // New dashboard creation shouldn't be blocked by lock,
+      // as lock is per-dashboard, but let's allow it as it's a "sidebar" action essentially
       const name = prompt('Dashboard name:', 'New Dashboard')
       if (name) dashboardStore.createDashboard(name)
     }
@@ -314,6 +337,24 @@ const { shortcuts } = useKeyboardShortcuts([
     key: 'b', 
     description: 'Toggle Sidebar', 
     handler: toggleSidebar 
+  },
+  { 
+    key: 'l', 
+    description: 'Lock Dashboard', 
+    handler: () => {
+      if (!dashboardStore.isLocked) {
+        dashboardStore.toggleLock()
+      }
+    } 
+  },
+  { 
+    key: 'u', 
+    description: 'Unlock Dashboard', 
+    handler: () => {
+      if (dashboardStore.isLocked) {
+        dashboardStore.toggleLock()
+      }
+    } 
   },
   { 
     key: 'Escape', 
@@ -536,6 +577,12 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 .btn-icon:hover {
   background: rgba(255, 255, 255, 0.15);
   transform: scale(1.1);
+}
+
+/* Lock Active State */
+.lock-active {
+  background: rgba(210, 153, 34, 0.2); /* Warning-ish tint */
+  border: 1px solid var(--color-warning);
 }
 
 .btn-primary {

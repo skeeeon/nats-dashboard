@@ -28,7 +28,7 @@ const MEMORY_LIMITS = {
   MAX_TOTAL_MESSAGES: 10000,
   MAX_BUFFER_SIZE_MB: 50,
   MAX_SINGLE_BUFFER: 1000,
-  BYTES_PER_MESSAGE_ESTIMATE: 100
+  BYTES_PER_MESSAGE_ESTIMATE: 2048
 }
 
 export const useWidgetDataStore = defineStore('widgetData', () => {

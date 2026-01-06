@@ -30,6 +30,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const dashboards = ref<Dashboard[]>([])
   const activeDashboardId = ref<string | null>(null)
   const storageError = ref<string | null>(null)
+  const isLocked = ref(false) // New Lock State
   const MAX_DASHBOARDS = 25
   
   // ============================================================================
@@ -100,6 +101,8 @@ export const useDashboardStore = defineStore('dashboard', () => {
         const parsed = JSON.parse(stored)
         dashboards.value = parsed.dashboards || []
         activeDashboardId.value = parsed.activeDashboardId || null
+        // Load lock state, default to false if not present
+        isLocked.value = parsed.isLocked || false 
         console.log(`[Dashboard] Loaded ${dashboards.value.length} dashboards from storage`)
       } else {
         const defaultDash = createDefaultDashboard('My Dashboard')
@@ -122,6 +125,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
       const data = {
         dashboards: dashboards.value,
         activeDashboardId: activeDashboardId.value,
+        isLocked: isLocked.value, // Persist lock state
       }
       const json = JSON.stringify(data)
       const sizeKB = new Blob([json]).size / 1024
@@ -135,7 +139,11 @@ export const useDashboardStore = defineStore('dashboard', () => {
   
   function getStorageSize(): { sizeKB: number; sizePercent: number } {
     try {
-      const data = { dashboards: dashboards.value, activeDashboardId: activeDashboardId.value }
+      const data = { 
+        dashboards: dashboards.value, 
+        activeDashboardId: activeDashboardId.value,
+        isLocked: isLocked.value
+      }
       const json = JSON.stringify(data)
       const sizeKB = new Blob([json]).size / 1024
       const estimatedQuotaKB = 5 * 1024
@@ -149,6 +157,15 @@ export const useDashboardStore = defineStore('dashboard', () => {
     storageError.value = null
   }
   
+  // ============================================================================
+  // DASHBOARD ACTIONS
+  // ============================================================================
+  
+  function toggleLock() {
+    isLocked.value = !isLocked.value
+    saveToStorage()
+  }
+
   // ============================================================================
   // DASHBOARD CRUD
   // ============================================================================
@@ -413,6 +430,8 @@ export const useDashboardStore = defineStore('dashboard', () => {
     dashboardCount,
     isAtLimit,
     isApproachingLimit,
+    isLocked, // New
+    toggleLock, // New
     MAX_DASHBOARDS,
     loadFromStorage,
     saveToStorage,
@@ -429,7 +448,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     removeWidget,
     getWidget,
     updateWidgetLayout,
-    batchUpdateLayout, // <--- Exported
+    batchUpdateLayout,
     exportDashboard,
     exportDashboards,
     exportAllDashboards,
