@@ -64,9 +64,22 @@
               @change="handleCredsFile"
               :disabled="natsStore.isConnected"
               class="file-input"
+              ref="fileInputRef"
             />
-            <div v-if="hasStoredCreds" class="stored-creds-indicator">
-              ✓ Credentials file stored
+            
+            <!-- Stored Creds Indicator with Remove Button -->
+            <div v-if="hasStoredCreds" class="stored-creds-row">
+              <span class="stored-creds-indicator">
+                ✓ Credentials loaded
+              </span>
+              <button 
+                class="btn-icon-small danger" 
+                @click="handleClearCreds"
+                :disabled="natsStore.isConnected"
+                title="Remove stored credentials"
+              >
+                ✕ Remove
+              </button>
             </div>
           </div>
           
@@ -102,8 +115,23 @@
               />
             </div>
           </div>
+
+          <!-- Persistence Option -->
+          <div v-if="credsContent" class="auth-method persistence-option">
+             <label class="checkbox-label warning">
+              <input 
+                v-model="rememberCreds"
+                type="checkbox"
+                :disabled="natsStore.isConnected"
+              />
+              <span>Remember credentials (unsafe on shared devices)</span>
+            </label>
+            <div class="help-text">
+              If checked, .creds are stored in LocalStorage. If unchecked, they are cleared when you close the tab.
+            </div>
+          </div>
           
-          <div class="help-text">
+          <div class="help-text" v-if="!credsContent">
             Choose one authentication method. Credentials file recommended for production.
           </div>
         </div>
@@ -152,15 +180,6 @@ import { useRouter } from 'vue-router'
 import { useNatsStore } from '@/stores/nats'
 import LoadingState from '@/components/common/LoadingState.vue'
 
-/**
- * Settings View
- * 
- * Grug say: Configure NATS connection. Simple form.
- * Connect button. Disconnect button. That's it.
- * 
- * NEW: Now with loading states and design token colors!
- */
-
 const router = useRouter()
 const natsStore = useNatsStore()
 
@@ -170,6 +189,8 @@ const token = ref('')
 const username = ref('')
 const password = ref('')
 const credsContent = ref<string | null>(null)
+const rememberCreds = ref(false)
+const fileInputRef = ref<HTMLInputElement | null>(null)
 
 const connecting = ref(false)
 
@@ -178,42 +199,26 @@ const hasStoredCreds = computed(() => {
   return credsContent.value !== null || natsStore.getStoredCreds() !== null
 })
 
-/**
- * Status text based on connection state
- */
 const statusText = computed(() => {
   switch (natsStore.status) {
-    case 'connected':
-      return 'Connected'
-    case 'connecting':
-      return 'Connecting...'
-    case 'reconnecting':
-      return 'Reconnecting...'
+    case 'connected': return 'Connected'
+    case 'connecting': return 'Connecting...'
+    case 'reconnecting': return 'Reconnecting...'
     case 'disconnected':
-    default:
-      return 'Disconnected'
+    default: return 'Disconnected'
   }
 })
 
-/**
- * CSS class for status card based on connection state
- */
 const statusClass = computed(() => {
   switch (natsStore.status) {
-    case 'connected':
-      return 'status-connected'
+    case 'connected': return 'status-connected'
     case 'connecting':
-    case 'reconnecting':
-      return 'status-connecting'
+    case 'reconnecting': return 'status-connecting'
     case 'disconnected':
-    default:
-      return 'status-disconnected'
+    default: return 'status-disconnected'
   }
 })
 
-/**
- * Handle credentials file upload
- */
 async function handleCredsFile(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
@@ -230,9 +235,17 @@ async function handleCredsFile(event: Event) {
   }
 }
 
-/**
- * Connect to NATS
- */
+function handleClearCreds() {
+  if (confirm('Are you sure you want to remove the stored credentials?')) {
+    natsStore.clearStoredCreds()
+    credsContent.value = null
+    rememberCreds.value = false
+    if (fileInputRef.value) {
+      fileInputRef.value.value = ''
+    }
+  }
+}
+
 async function handleConnect() {
   if (!serverUrl.value) {
     alert('Please enter a server URL')
@@ -242,7 +255,6 @@ async function handleConnect() {
   connecting.value = true
   
   try {
-    // Build auth options
     const authOptions: any = {}
     
     if (credsContent.value) {
@@ -254,17 +266,13 @@ async function handleConnect() {
       authOptions.pass = password.value
     }
     
-    // Connect
-    await natsStore.connect(serverUrl.value, authOptions)
+    // Connect with remember flag
+    await natsStore.connect(serverUrl.value, authOptions, rememberCreds.value)
     
-    // Save URL to history
     natsStore.addUrl(serverUrl.value)
     natsStore.saveSettings()
     
-    // Small delay to show success state
     await new Promise(resolve => setTimeout(resolve, 500))
-    
-    // Navigate to dashboard
     router.push('/')
     
   } catch (err: any) {
@@ -275,9 +283,6 @@ async function handleConnect() {
   }
 }
 
-/**
- * Disconnect from NATS
- */
 async function handleDisconnect() {
   try {
     await natsStore.disconnect()
@@ -286,32 +291,27 @@ async function handleDisconnect() {
   }
 }
 
-/**
- * Load settings on mount
- */
 onMounted(() => {
   natsStore.loadSettings()
   
-  // Load last URL
   if (natsStore.serverUrls.length > 0) {
     serverUrl.value = natsStore.serverUrls[0]
   } else {
     serverUrl.value = 'ws://localhost:9222'
   }
   
-  // Load stored credentials if available
   const stored = natsStore.getStoredCreds()
   if (stored) {
     credsContent.value = stored
+    // If it was stored in localStorage (persistent), check the box
+    if (localStorage.getItem('nats_dashboard_creds')) {
+      rememberCreds.value = true
+    }
   }
 })
 
-/**
- * Watch server URL changes and save to history
- */
 watch(serverUrl, (newUrl) => {
   if (newUrl && !natsStore.isConnected) {
-    // Save URL as it's typed (debounced by watch)
     if (natsStore.serverUrls[0] !== newUrl) {
       natsStore.serverUrls[0] = newUrl
       natsStore.saveSettings()
@@ -322,8 +322,10 @@ watch(serverUrl, (newUrl) => {
 
 <style scoped>
 .settings-view {
+  /* Dynamic viewport height for mobile responsiveness */
+  height: 100dvh; 
+  /* Fallback */
   min-height: 100vh;
-  height: 100vh;
   background: var(--bg);
   color: var(--text);
   padding: 24px;
@@ -335,6 +337,8 @@ watch(serverUrl, (newUrl) => {
   max-width: 800px;
   margin: 0 auto;
   position: relative;
+  /* Extra padding at bottom to ensure connect button is visible on mobile */
+  padding-bottom: 120px; 
 }
 
 .settings-header {
@@ -350,7 +354,6 @@ watch(serverUrl, (newUrl) => {
   font-weight: 600;
 }
 
-/* Loading overlay */
 .loading-overlay {
   position: absolute;
   top: 0;
@@ -376,7 +379,6 @@ watch(serverUrl, (newUrl) => {
   gap: 32px;
 }
 
-/* Setting Sections */
 .setting-section {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -393,7 +395,6 @@ watch(serverUrl, (newUrl) => {
   color: var(--muted);
 }
 
-/* Status Card - now using design tokens! */
 .status-card {
   padding: 16px;
   border-radius: 6px;
@@ -429,17 +430,9 @@ watch(serverUrl, (newUrl) => {
   animation: pulse 2s ease-in-out infinite;
 }
 
-.status-card.status-connected .status-dot {
-  background: var(--color-success);
-}
-
-.status-card.status-connecting .status-dot {
-  background: var(--color-info);
-}
-
-.status-card.status-disconnected .status-dot {
-  background: var(--color-error);
-}
+.status-card.status-connected .status-dot { background: var(--color-success); }
+.status-card.status-connecting .status-dot { background: var(--color-info); }
+.status-card.status-disconnected .status-dot { background: var(--color-error); }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
@@ -468,7 +461,6 @@ watch(serverUrl, (newUrl) => {
   line-height: 1.4;
 }
 
-/* Form Inputs */
 .input-field {
   width: 100%;
   padding: 12px;
@@ -520,13 +512,14 @@ watch(serverUrl, (newUrl) => {
   line-height: 1.4;
 }
 
-/* Auth Methods */
 .auth-method {
   margin-bottom: 20px;
 }
 
-.auth-method:last-child {
-  margin-bottom: 0;
+.auth-method.persistence-option {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
 }
 
 .method-label {
@@ -543,20 +536,64 @@ watch(serverUrl, (newUrl) => {
   gap: 12px;
 }
 
-.stored-creds-indicator {
+/* Stored Creds UI */
+.stored-creds-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--color-success-bg);
+  border-radius: 6px;
+  border: 1px solid var(--color-success-border);
+}
+
+.stored-creds-indicator {
   color: var(--color-success);
   font-size: 13px;
   font-weight: 500;
 }
 
-/* Checkbox */
+.btn-icon-small {
+  background: transparent;
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
+}
+
+.btn-icon-small.danger {
+  color: var(--color-error);
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+}
+
+.btn-icon-small.danger:hover:not(:disabled) {
+  background: var(--color-error);
+  color: white;
+}
+
+.btn-icon-small:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .checkbox-label {
   display: flex;
   align-items: center;
   gap: 12px;
   cursor: pointer;
   font-size: 14px;
+  user-select: none;
+}
+
+.checkbox-label.warning {
+  color: var(--color-warning);
 }
 
 .checkbox-label input[type="checkbox"] {
@@ -566,7 +603,6 @@ watch(serverUrl, (newUrl) => {
   accent-color: var(--color-primary);
 }
 
-/* Buttons */
 .btn-primary,
 .btn-secondary,
 .btn-danger {
@@ -632,5 +668,24 @@ watch(serverUrl, (newUrl) => {
 .action-buttons {
   display: flex;
   gap: 12px;
+}
+
+/* Mobile Adjustments */
+@media (max-width: 600px) {
+  .settings-view {
+    padding: 16px;
+  }
+  
+  .settings-container {
+    padding-bottom: 140px;
+  }
+
+  .settings-header h1 {
+    font-size: 24px;
+  }
+
+  .input-group {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

@@ -10,7 +10,7 @@ import {
  * NATS Connection Store
  * 
  * Manages connection to NATS server with WebSocket support
- * Stores connection settings in localStorage
+ * Stores connection settings in localStorage/sessionStorage
  * Handles authentication via .creds file, token, or user/pass
  */
 export const useNatsStore = defineStore('nats', () => {
@@ -35,7 +35,7 @@ export const useNatsStore = defineStore('nats', () => {
   const isConnected = computed(() => status.value === 'connected')
 
   // ============================================================================
-  // SETTINGS PERSISTENCE (localStorage)
+  // SETTINGS PERSISTENCE
   // ============================================================================
   
   const STORAGE_KEYS = {
@@ -67,16 +67,31 @@ export const useNatsStore = defineStore('nats', () => {
     localStorage.setItem(STORAGE_KEYS.AUTO_CONNECT, String(autoConnect.value))
   }
 
-  function saveCredsFile(content: string) {
-    localStorage.setItem(STORAGE_KEYS.CREDS, content)
+  /**
+   * Save credentials to storage
+   * @param content The .creds file content
+   * @param remember If true, save to localStorage (persistent). If false, sessionStorage (session only).
+   */
+  function saveCredsFile(content: string, remember: boolean) {
+    // Clear old entries to prevent duplicates/confusion
+    localStorage.removeItem(STORAGE_KEYS.CREDS)
+    sessionStorage.removeItem(STORAGE_KEYS.CREDS)
+
+    if (remember) {
+      localStorage.setItem(STORAGE_KEYS.CREDS, content)
+    } else {
+      sessionStorage.setItem(STORAGE_KEYS.CREDS, content)
+    }
   }
 
   function getStoredCreds(): string | null {
-    return localStorage.getItem(STORAGE_KEYS.CREDS)
+    // Check session first (safer), then local
+    return sessionStorage.getItem(STORAGE_KEYS.CREDS) || localStorage.getItem(STORAGE_KEYS.CREDS)
   }
 
   function clearStoredCreds() {
     localStorage.removeItem(STORAGE_KEYS.CREDS)
+    sessionStorage.removeItem(STORAGE_KEYS.CREDS)
   }
 
   function addUrl(url: string) {
@@ -100,16 +115,18 @@ export const useNatsStore = defineStore('nats', () => {
    * Connect to NATS server
    * 
    * @param specificUrl - Optional specific URL to connect to
-   * @param authOptions - Authentication options (creds file, token, or user/pass)
+   * @param authOptions - Authentication options
+   * @param rememberCreds - If true, persist credentials to localStorage
    */
   async function connect(
     specificUrl?: string,
     authOptions?: {
-      credsContent?: string  // Content of .creds file
+      credsContent?: string
       token?: string
       user?: string
       pass?: string
-    }
+    },
+    rememberCreds: boolean = false
   ) {
     if (nc.value) await disconnect()
 
@@ -130,13 +147,12 @@ export const useNatsStore = defineStore('nats', () => {
 
       // Setup authentication
       if (authOptions?.credsContent) {
-        // Process .creds file content (same logic as working implementation)
+        // Process .creds file content
         let rawText = authOptions.credsContent
         
         // Check if JWT section exists and strip any content before it
         const jwtIndex = rawText.indexOf("-----BEGIN NATS USER JWT-----")
         if (jwtIndex > 0) {
-          // Strip content before JWT section
           rawText = rawText.substring(jwtIndex)
         } else if (jwtIndex === -1) {
           throw new Error("Invalid .creds file: JWT section not found")
@@ -149,8 +165,8 @@ export const useNatsStore = defineStore('nats', () => {
         const credsBytes = encoder.encode(rawText)
         opts.authenticator = credsAuthenticator(credsBytes)
         
-        // Save creds for auto-reconnect
-        saveCredsFile(authOptions.credsContent)
+        // Save creds based on user preference
+        saveCredsFile(authOptions.credsContent, rememberCreds)
       } else if (authOptions?.token) {
         opts.token = authOptions.token
       } else if (authOptions?.user) {
@@ -173,7 +189,6 @@ export const useNatsStore = defineStore('nats', () => {
       status.value = 'disconnected'
       lastError.value = err.message
       
-      // Provide user-friendly error messages
       if (err.message.includes('ECONNREFUSED') || err.message.includes('Failed to fetch')) {
         throw new Error('Cannot reach NATS server. Check URL and ensure WebSocket is enabled.')
       } else if (err.message.includes('Authorization')) {
@@ -198,10 +213,6 @@ export const useNatsStore = defineStore('nats', () => {
     rtt.value = null
   }
 
-  /**
-   * Monitor connection status changes
-   * Handles reconnection attempts automatically
-   */
   async function monitorConnection() {
     if (!nc.value) return
     
@@ -224,24 +235,18 @@ export const useNatsStore = defineStore('nats', () => {
     }
   }
 
-  /**
-   * Start polling server stats (RTT/latency)
-   */
   function startStatsLoop() {
     statsInterval = setInterval(async () => {
       if (nc.value && !nc.value.isClosed()) {
         try {
           rtt.value = await nc.value.rtt()
-        } catch { 
-          // Ignore - server might be temporarily unavailable
-        }
+        } catch { }
       }
     }, 10000) as unknown as number
   }
 
   /**
    * Attempt auto-connect on app load
-   * Only if auto-connect is enabled and we have stored credentials
    */
   async function tryAutoConnect() {
     loadSettings()
@@ -252,21 +257,17 @@ export const useNatsStore = defineStore('nats', () => {
 
     const storedCreds = getStoredCreds()
     if (storedCreds) {
+      // If we found creds in storage (session or local), we assume the user wanted them remembered
+      // for the duration of that context
       try {
-        await connect(undefined, { credsContent: storedCreds })
+        await connect(undefined, { credsContent: storedCreds }, !!localStorage.getItem(STORAGE_KEYS.CREDS))
       } catch (err) {
         console.error('Auto-connect failed:', err)
-        // Don't throw - let user manually connect
       }
     }
   }
 
-  // ============================================================================
-  // RETURN PUBLIC API
-  // ============================================================================
-
   return {
-    // State
     nc,
     status,
     lastError,
@@ -274,8 +275,6 @@ export const useNatsStore = defineStore('nats', () => {
     autoConnect,
     rtt,
     isConnected,
-    
-    // Settings
     loadSettings,
     saveSettings,
     addUrl,
@@ -283,8 +282,6 @@ export const useNatsStore = defineStore('nats', () => {
     saveCredsFile,
     getStoredCreds,
     clearStoredCreds,
-    
-    // Connection
     connect,
     disconnect,
     tryAutoConnect,
