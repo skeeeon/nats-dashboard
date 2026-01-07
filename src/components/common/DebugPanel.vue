@@ -26,6 +26,43 @@
           </div>
         </div>
         
+        <!-- Throughput & Queue -->
+        <div class="debug-section">
+          <div class="section-title">Throughput</div>
+          <div class="stat-row">
+            <span class="stat-label">Msgs/sec:</span>
+            <span class="stat-value">{{ messagesPerSecond }}</span>
+          </div>
+          <div class="throughput-chart">
+            <div 
+              v-for="(count, i) in throughputHistory"
+              :key="i"
+              class="throughput-bar"
+              :style="{ height: (count / maxThroughput * 100) + '%' }"
+            />
+          </div>
+          
+          <!-- NEW: Processing Queue Stats -->
+          <div class="queue-stats">
+            <div class="stat-row">
+              <span class="stat-label">Processing Queue:</span>
+              <span class="stat-value" :class="queueHealthClass">
+                {{ subStats.queueSize }} / {{ subStats.maxQueueSize }}
+              </span>
+            </div>
+            <div class="queue-bar-bg">
+              <div 
+                class="queue-bar-fill"
+                :class="queueHealthClass"
+                :style="{ width: queuePercent + '%' }"
+              ></div>
+            </div>
+            <div class="help-text" v-if="queuePercent > 50">
+              High queue indicates main thread is blocked.
+            </div>
+          </div>
+        </div>
+        
         <!-- Subscription Stats -->
         <div class="debug-section">
           <div class="section-title">Subscriptions</div>
@@ -86,23 +123,6 @@
             </div>
           </div>
         </div>
-        
-        <!-- Message Throughput -->
-        <div class="debug-section">
-          <div class="section-title">Throughput</div>
-          <div class="stat-row">
-            <span class="stat-label">Msgs/sec:</span>
-            <span class="stat-value">{{ messagesPerSecond }}</span>
-          </div>
-          <div class="throughput-chart">
-            <div 
-              v-for="(count, i) in throughputHistory"
-              :key="i"
-              class="throughput-bar"
-              :style="{ height: (count / maxThroughput * 100) + '%' }"
-            />
-          </div>
-        </div>
       </div>
       
       <div class="modal-actions">
@@ -140,6 +160,7 @@ const subManager = getSubscriptionManager()
 const lastMessageCount = ref(0)
 const messagesPerSecond = ref(0)
 const throughputHistory = ref<number[]>(new Array(20).fill(0))
+const currentSubStats = ref(subManager.getStats())
 
 // Update interval
 let updateInterval: number | null = null
@@ -158,16 +179,19 @@ const memoryPercentClass = computed(() => {
   return ''
 })
 
-const subStats = computed(() => {
-  const stats = subManager.getStats()
-  return {
-    subscriptionCount: stats.subscriptionCount,
-    subscriptions: stats.subscriptions.map((sub: any) => ({
-      subject: sub.subject,
-      listenerCount: sub.listenerCount,
-      isActive: sub.isActive,
-    }))
-  }
+const subStats = computed(() => currentSubStats.value)
+
+// Queue Health Logic
+const queuePercent = computed(() => {
+  const size = subStats.value.queueSize
+  const max = subStats.value.maxQueueSize || 1000
+  return Math.min((size / max) * 100, 100)
+})
+
+const queueHealthClass = computed(() => {
+  if (queuePercent.value > 80) return 'memory-critical' // Red
+  if (queuePercent.value > 40) return 'memory-warning'  // Orange
+  return 'status-connected' // Green
 })
 
 const memoryMB = computed(() => (dataStore.memoryEstimate / 1024 / 1024).toFixed(2))
@@ -183,7 +207,8 @@ const widgetTypeCount = computed(() => {
 
 const maxThroughput = computed(() => Math.max(...throughputHistory.value, 10))
 
-function updateThroughput() {
+function updateStats() {
+  // Throughput
   const currentCount = dataStore.totalMessageCount
   const newMessages = currentCount - lastMessageCount.value
   
@@ -194,6 +219,9 @@ function updateThroughput() {
   if (throughputHistory.value.length > 20) {
     throughputHistory.value.shift()
   }
+
+  // Live Queue & Sub Stats
+  currentSubStats.value = subManager.getStats()
 }
 
 function clearAllBuffers() {
@@ -203,14 +231,17 @@ function clearAllBuffers() {
 }
 
 function refreshStats() {
-  updateThroughput()
+  updateStats()
 }
 
 // Only run stats loop when modal is open
 watch(() => props.modelValue, (isOpen) => {
   if (isOpen) {
     lastMessageCount.value = dataStore.totalMessageCount
-    updateInterval = setInterval(updateThroughput, 1000) as unknown as number
+    // Update every 1s
+    updateInterval = setInterval(updateStats, 1000) as unknown as number
+    // Also run immediately
+    updateStats()
   } else {
     if (updateInterval) {
       clearInterval(updateInterval)
@@ -387,6 +418,37 @@ onUnmounted(() => {
   border-radius: 2px 2px 0 0;
   min-height: 2px;
   transition: height 0.3s ease;
+}
+
+/* Queue Stats */
+.queue-stats {
+  margin-top: 12px;
+  background: rgba(0, 0, 0, 0.1);
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.queue-bar-bg {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.queue-bar-fill {
+  height: 100%;
+  background: var(--connection-connected);
+  transition: width 0.3s ease;
+}
+
+.queue-bar-fill.memory-warning { background: var(--color-warning); }
+.queue-bar-fill.memory-critical { background: var(--color-error); }
+
+.help-text {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--color-warning);
 }
 
 .modal-actions {

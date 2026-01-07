@@ -26,7 +26,7 @@ export function useWidgetOperations() {
     const widget = dashboardStore.getWidget(widgetId)
     if (!widget) return
     
-    // Initialize data buffer
+    // Initialize data buffer (idempotent: if buffer exists, it keeps data)
     dataStore.initializeBuffer(widgetId, widget.buffer.maxCount, widget.buffer.maxAge)
     
     // Subscribe to NATS if it's a subscription-based widget
@@ -39,9 +39,12 @@ export function useWidgetOperations() {
 
   /**
    * Unsubscribe widget from its data source
-   * Grug say: Stop listening, clean up memory
+   * Grug say: Stop listening.
+   * 
+   * @param widgetId - ID of widget
+   * @param keepData - Quick Win B: If true, keep buffer in memory (stale state)
    */
-  function unsubscribeWidget(widgetId: string) {
+  function unsubscribeWidget(widgetId: string, keepData: boolean = false) {
     const widget = dashboardStore.getWidget(widgetId)
     if (!widget) return
     
@@ -50,8 +53,10 @@ export function useWidgetOperations() {
       subManager.unsubscribe(widgetId, widget.dataSource.subject)
     }
     
-    // Remove data buffer
-    dataStore.removeBuffer(widgetId)
+    // Remove data buffer ONLY if we are not keeping data
+    if (!keepData) {
+      dataStore.removeBuffer(widgetId)
+    }
   }
 
   /**
@@ -64,10 +69,12 @@ export function useWidgetOperations() {
 
   /**
    * Unsubscribe all widgets
-   * Grug say: Disconnect everything when switching dashboards or disconnecting
+   * Grug say: Disconnect everything
+   * 
+   * @param keepData - If true, keep visual data (offline mode)
    */
-  function unsubscribeAllWidgets() {
-    dashboardStore.activeWidgets.forEach(widget => unsubscribeWidget(widget.id))
+  function unsubscribeAllWidgets(keepData: boolean = false) {
+    dashboardStore.activeWidgets.forEach(widget => unsubscribeWidget(widget.id, keepData))
   }
 
   /**
@@ -153,7 +160,7 @@ export function useWidgetOperations() {
    * Grug say: Unsubscribe first, then remove from dashboard
    */
   function deleteWidget(widgetId: string) {
-    unsubscribeWidget(widgetId)
+    unsubscribeWidget(widgetId, false) // Always clear data on delete
     dashboardStore.removeWidget(widgetId)
   }
 
@@ -196,8 +203,9 @@ export function useWidgetOperations() {
     if (!widget) return
 
     // 1. Unsubscribe using CURRENT (old) configuration
+    // Don't keep data, we are changing definition, new data coming
     if (needsSubscription(widget.type)) {
-      unsubscribeWidget(widgetId)
+      unsubscribeWidget(widgetId, false) 
     }
 
     // 2. Update the blueprint in the store
@@ -218,7 +226,7 @@ export function useWidgetOperations() {
     if (!widget || !natsStore.isConnected) return
     
     if (needsSubscription(widget.type)) {
-      unsubscribeWidget(widgetId)
+      unsubscribeWidget(widgetId, false)
       subscribeWidget(widgetId)
     }
   }

@@ -25,6 +25,9 @@ interface QueuedMessage {
   timestamp: number
 }
 
+// Quick Win A: Bound the queue to prevent browser crash on high throughput
+const MAX_QUEUE_SIZE = 5000 
+
 export function useSubscriptionManager() {
   const natsStore = useNatsStore()
   const dataStore = useWidgetDataStore()
@@ -57,6 +60,17 @@ export function useSubscriptionManager() {
   }
   
   function queueMessage(widgetId: string, value: any, raw: any) {
+    // Quick Win A: Safety valve.
+    // If NATS sends 100k messages/sec, queue gets too big. Browser die.
+    // We check size. If too big, we drop oldest rocks to make room for new rocks.
+    if (messageQueue.length >= MAX_QUEUE_SIZE) {
+      // Drop oldest 1000 messages
+      messageQueue.splice(0, 1000)
+      if (Math.random() > 0.99) {
+        console.warn(`[SubMgr] High load! Queue full (${MAX_QUEUE_SIZE}). Dropped 1000 oldest messages.`)
+      }
+    }
+
     messageQueue.push({
       widgetId,
       value,
@@ -137,7 +151,7 @@ export function useSubscriptionManager() {
               value = extractJsonPath(data, listener.jsonPath)
             }
             
-            // CHANGED: Queue instead of direct add
+            // Queue instead of direct add
             queueMessage(listener.widgetId, value, data)
             
           } catch (err) {
@@ -175,7 +189,8 @@ export function useSubscriptionManager() {
   function getStats() {
     const stats = {
       subscriptionCount: subscriptions.size,
-      queueSize: messageQueue.length, // Added queue stat
+      queueSize: messageQueue.length,
+      maxQueueSize: MAX_QUEUE_SIZE, // EXPORTED LIMIT
       subscriptions: [] as any[],
     }
     

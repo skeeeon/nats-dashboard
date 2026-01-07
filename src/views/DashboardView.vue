@@ -105,7 +105,8 @@
       </div>
       
       <!-- Grid with widgets -->
-      <div class="dashboard-content">
+      <!-- Quick Win B: Add is-offline class to gray out stale data -->
+      <div class="dashboard-content" :class="{ 'is-offline': !natsStore.isConnected }">
         <DashboardGrid
           v-if="dashboardStore.activeWidgets.length > 0"
           :widgets="dashboardStore.activeWidgets"
@@ -226,7 +227,6 @@ import { ref, onMounted, onUnmounted, watch, computed, nextTick, provide } from 
 import { useRouter } from 'vue-router'
 import { useNatsStore } from '@/stores/nats'
 import { useDashboardStore } from '@/stores/dashboard'
-import { useWidgetDataStore } from '@/stores/widgetData'
 import { useTheme } from '@/composables/useTheme'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
 import { useWidgetOperations } from '@/composables/useWidgetOperations'
@@ -251,7 +251,6 @@ import type { WidgetType } from '@/types/dashboard'
 const router = useRouter()
 const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
-const dataStore = useWidgetDataStore()
 const { theme, toggleTheme } = useTheme()
 
 const {
@@ -452,7 +451,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  unsubscribeAllWidgets()
+  // Disconnect on unmount, but don't clear data immediately if just navigating
+  unsubscribeAllWidgets(false)
   window.removeEventListener('show-shortcuts-help', handleShowShortcuts)
 })
 
@@ -460,13 +460,15 @@ watch(() => natsStore.isConnected, (connected) => {
   if (connected) {
     subscribeAllWidgets()
   } else {
-    unsubscribeAllWidgets()
-    dataStore.clearAllBuffers()
+    // Quick Win B: Don't clear buffers. Keep stale data visible.
+    // Pass true to keep buffer data
+    unsubscribeAllWidgets(true) 
   }
 })
 
 watch(() => dashboardStore.activeDashboardId, async () => {
-  unsubscribeAllWidgets()
+  // Switching dashboards always clears data of old dashboard
+  unsubscribeAllWidgets(false)
   await nextTick()
   if (natsStore.isConnected) {
     subscribeAllWidgets()
@@ -733,6 +735,14 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   min-height: 0;
   overflow: hidden;
   position: relative;
+  transition: filter 0.3s ease;
+}
+
+/* Quick Win B: Visual indicator for stale state */
+.dashboard-content.is-offline {
+  filter: grayscale(0.8) opacity(0.7);
+  pointer-events: none; /* Prevent interaction with stale widgets to avoid confusion */
+  cursor: not-allowed;
 }
 
 .no-widgets-state {
