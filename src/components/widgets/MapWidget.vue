@@ -423,4 +423,177 @@ watch(() => dashboardStore.currentVariableValues, () => {
     transform: translateX(-50%) translateY(0);
   }
 }
+
+/* ==========================================================================
+   Leaflet Popup Styles (Deep Selectors for Dynamic Content)
+   ========================================================================== */
+
+/* Popup Container Overrides */
+:deep(.nats-map-popup .leaflet-popup-content-wrapper) {
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+}
+
+:deep(.nats-map-popup .leaflet-popup-content) {
+  margin: 0;
+  width: 100% !important;
+  line-height: 1.4;
+}
+
+:deep(.nats-map-popup .leaflet-popup-tip) {
+  background: var(--panel);
+  border: 1px solid var(--border); /* Tip border matching */
+  border-top: none;
+  border-left: none;
+}
+
+:deep(.nats-map-popup .leaflet-popup-close-button) {
+  color: var(--muted);
+  padding: 8px;
+  top: 4px;
+  right: 4px;
+  font-size: 16px;
+}
+
+:deep(.nats-map-popup .leaflet-popup-close-button:hover) {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+}
+
+/* Popup Inner Content */
+:deep(.map-popup-content) {
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+}
+
+:deep(.map-popup-header) {
+  padding: 12px 16px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.1);
+  font-size: 14px;
+  padding-right: 32px; /* Space for close button */
+}
+
+:deep(.map-popup-actions) {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+:deep(.map-popup-no-actions) {
+  padding: 16px;
+  text-align: center;
+  color: var(--muted);
+  font-style: italic;
+  font-size: 12px;
+}
+
+/* Action Buttons */
+:deep(.map-popup-action-btn) {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--color-primary);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+  text-align: center;
+}
+
+:deep(.map-popup-action-btn:hover) {
+  background: var(--color-primary-hover);
+  transform: translateY(-1px);
+}
+
+:deep(.map-popup-action-btn:active) {
+  transform: translateY(0);
+}
+
+:deep(.map-popup-action-btn.action-success) {
+  background: var(--color-success);
+  pointer-events: none;
+}
+
+/* Switch Toggle */
+:deep(.map-popup-switch) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+:deep(.switch-label) {
+  font-size: 13px;
+  color: var(--text);
+  flex: 1;
+  font-weight: 500;
+}
+
+:deep(.switch-track) {
+  width: 36px;
+  height: 20px;
+  background: var(--muted);
+  border-radius: 10px;
+  position: relative;
+  border: none;
+  cursor: pointer;
+  transition: background 0.3s;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+:deep(.switch-track:hover) {
+  filter: brightness(1.1);
+}
+
+:deep(.switch-track.state-on) {
+  background: var(--color-success);
+}
+
+:deep(.switch-track.state-pending) {
+  background: var(--color-warning);
+  opacity: 0.7;
+}
+
+:deep(.switch-thumb) {
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+:deep(.switch-track.state-on .switch-thumb) {
+  transform: translateX(16px);
+}
+
+:deep(.switch-state-text) {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--muted);
+  min-width: 24px;
+  text-align: right;
+  font-weight: 600;
+}
+
+:deep(.switch-state-text.state-on) {
+  color: var(--color-success);
+}
 </style>
