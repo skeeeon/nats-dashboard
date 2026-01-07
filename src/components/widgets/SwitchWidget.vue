@@ -5,7 +5,7 @@
       class="switch-container"
       :class="{ 'is-disabled': isDisabled }"
     >
-      <!-- Switch track - FIXED: Added vue-grid-item-no-drag class -->
+      <!-- Switch track -->
       <div 
         class="switch-track vue-grid-item-no-drag"
         :class="switchStateClass"
@@ -18,14 +18,14 @@
           <div v-else class="thumb-icon">{{ thumbIcon }}</div>
         </div>
         
-        <!-- Labels -->
+        <!-- Labels (Hidden on small sizes) -->
         <div class="switch-labels">
           <span class="label-off">{{ offLabel }}</span>
           <span class="label-on">{{ onLabel }}</span>
         </div>
       </div>
       
-      <!-- State text -->
+      <!-- State text (Hidden on small sizes) -->
       <div class="state-text" :class="switchStateClass">
         {{ stateDisplayText }}
       </div>
@@ -40,53 +40,23 @@
     <!-- Disconnected overlay -->
     <div v-if="!natsStore.isConnected" class="disconnected-overlay">
       <span class="disconnect-icon">⚠️</span>
-      <span class="disconnect-text">Not connected</span>
-    </div>
-    
-    <!-- Confirmation Dialog -->
-    <div v-if="showConfirm" class="confirm-overlay" @click.self="cancelConfirm">
-      <div class="confirm-dialog">
-        <div class="confirm-header">Confirm Action</div>
-        <div class="confirm-body">
-          {{ confirmMessage }}
-        </div>
-        <div class="confirm-actions">
-          <button class="btn-cancel" @click="cancelConfirm">Cancel</button>
-          <button class="btn-confirm" @click="confirmAction">Confirm</button>
-        </div>
-      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue'
 import { useNatsStore } from '@/stores/nats'
 import { Kvm } from '@nats-io/kv'
 import type { WidgetConfig } from '@/types/dashboard'
 import { decodeBytes, encodeString } from '@/utils/encoding'
-
-/**
- * Switch Widget Component
- * 
- * Grug say: Toggle switch with two modes:
- * - KV mode: Stateful, uses KV bucket for state (kv.put/get/watch)
- * - CORE mode: Subscribe to state subject (nc.publish/subscribe)
- * 
- * Visual states: unknown, on, off, pending
- * 
- * FIXED: 
- * 1. Grid drag conflict - Added .vue-grid-item-no-drag class to switch-track
- * 2. KV mode now properly uses kv.put() instead of nc.publish()
- *    - KV mode writes directly to KV store with kv.put(key, value)
- *    - CORE mode publishes to subject with nc.publish(subject, payload)
- */
 
 const props = defineProps<{
   config: WidgetConfig
 }>()
 
 const natsStore = useNatsStore()
+const requestConfirm = inject('requestConfirm') as (title: string, message: string, onConfirm: () => void) => void
 
 // Component state
 type SwitchState = 'unknown' | 'on' | 'off' | 'pending'
@@ -94,15 +64,9 @@ const currentState = ref<SwitchState>('unknown')
 const error = ref<string | null>(null)
 const isPending = ref(false)
 
-// Confirmation dialog
-const showConfirm = ref(false)
-const pendingAction = ref<'on' | 'off' | null>(null)
-
 // KV watcher and instance
 let kvWatcher: any = null
-let kvInstance: any = null  // Store KV instance for writes
-
-// CORE subscription
+let kvInstance: any = null
 let subscription: any = null
 
 // Configuration shortcuts
@@ -112,16 +76,8 @@ const onLabel = computed(() => cfg.value.labels?.on || 'ON')
 const offLabel = computed(() => cfg.value.labels?.off || 'OFF')
 const isDisabled = computed(() => !natsStore.isConnected || isPending.value)
 
-/**
- * Switch state CSS class
- */
-const switchStateClass = computed(() => {
-  return `state-${currentState.value}`
-})
+const switchStateClass = computed(() => `state-${currentState.value}`)
 
-/**
- * Thumb icon based on state
- */
 const thumbIcon = computed(() => {
   switch (currentState.value) {
     case 'on': return '✓'
@@ -131,9 +87,6 @@ const thumbIcon = computed(() => {
   }
 })
 
-/**
- * State display text
- */
 const stateDisplayText = computed(() => {
   switch (currentState.value) {
     case 'on': return onLabel.value
@@ -143,28 +96,11 @@ const stateDisplayText = computed(() => {
   }
 })
 
-/**
- * Tooltip text
- */
 const switchTooltip = computed(() => {
   if (isDisabled.value) return 'Disabled'
   return currentState.value === 'on' ? `Turn ${offLabel.value}` : `Turn ${onLabel.value}`
 })
 
-/**
- * Confirmation message
- */
-const confirmMessage = computed(() => {
-  if (cfg.value.confirmMessage) {
-    return cfg.value.confirmMessage
-  }
-  const action = pendingAction.value === 'on' ? onLabel.value : offLabel.value
-  return `Turn ${action}?`
-})
-
-/**
- * Initialize based on mode
- */
 async function initialize() {
   if (!natsStore.nc || !natsStore.isConnected) {
     error.value = 'Not connected to NATS'
@@ -180,9 +116,6 @@ async function initialize() {
   }
 }
 
-/**
- * Initialize KV mode
- */
 async function initializeKvMode() {
   const bucket = cfg.value.kvBucket
   const key = cfg.value.kvKey
@@ -195,20 +128,16 @@ async function initializeKvMode() {
   try {
     const kvm = new Kvm(natsStore.nc!)
     const kv = await kvm.open(bucket)
-    
-    // Store KV instance for writes
     kvInstance = kv
     
-    // Get initial value
     const entry = await kv.get(key)
     if (entry) {
       const value = JSON.parse(decodeBytes(entry.value))
       updateStateFromValue(value)
     } else {
-      currentState.value = 'off' // Default to off if no value
+      currentState.value = 'off'
     }
     
-    // Watch for changes
     const iter = await kv.watch({ key })
     kvWatcher = iter
     
@@ -244,14 +173,8 @@ async function initializeKvMode() {
   }
 }
 
-/**
- * Initialize CORE mode
- */
 async function initializeCoreMode() {
-  // Set default state
   currentState.value = cfg.value.defaultState || 'off'
-  
-  // Subscribe to state subject (defaults to publish subject)
   const stateSubject = cfg.value.stateSubject || cfg.value.publishSubject
   
   try {
@@ -278,81 +201,44 @@ async function initializeCoreMode() {
   }
 }
 
-/**
- * Parse message data
- */
 function parseMessage(data: Uint8Array): any {
   try {
     const text = decodeBytes(data)
-    try {
-      return JSON.parse(text)
-    } catch {
-      return text
-    }
-  } catch {
-    return null
-  }
+    try { return JSON.parse(text) } catch { return text }
+  } catch { return null }
 }
 
-/**
- * Update state from received value
- */
 function updateStateFromValue(value: any) {
   if (matchesPayload(value, cfg.value.onPayload)) {
     currentState.value = 'on'
   } else if (matchesPayload(value, cfg.value.offPayload)) {
     currentState.value = 'off'
   } else {
-    // Value doesn't match either payload - keep current state
     console.warn('[Switch] Received value does not match on/off payloads:', value)
   }
 }
 
-/**
- * Check if value matches payload
- */
 function matchesPayload(value: any, payload: any): boolean {
   return JSON.stringify(value) === JSON.stringify(payload)
 }
 
-/**
- * Handle toggle click
- */
 function handleToggle() {
   if (isDisabled.value) return
   
   const targetState = currentState.value === 'on' ? 'off' : 'on'
   
   if (cfg.value.confirmOnChange) {
-    pendingAction.value = targetState
-    showConfirm.value = true
+    const action = targetState === 'on' ? onLabel.value : offLabel.value
+    const message = cfg.value.confirmMessage || `Turn ${action}?`
+    
+    requestConfirm('Confirm Action', message, () => {
+      executeToggle(targetState)
+    })
   } else {
     executeToggle(targetState)
   }
 }
 
-/**
- * Confirm action
- */
-function confirmAction() {
-  if (pendingAction.value) {
-    executeToggle(pendingAction.value)
-  }
-  cancelConfirm()
-}
-
-/**
- * Cancel confirmation
- */
-function cancelConfirm() {
-  showConfirm.value = false
-  pendingAction.value = null
-}
-
-/**
- * Execute toggle action
- * FIXED: Now properly handles KV mode vs CORE mode
- */
 async function executeToggle(targetState: 'on' | 'off') {
   error.value = null
   isPending.value = true
@@ -362,40 +248,22 @@ async function executeToggle(targetState: 'on' | 'off') {
   
   try {
     if (mode.value === 'kv') {
-      // KV MODE: Write directly to KV store
-      if (!kvInstance) {
-        throw new Error('KV instance not initialized')
-      }
-      
+      if (!kvInstance) throw new Error('KV instance not initialized')
       const key = cfg.value.kvKey!
       const data = encodeString(JSON.stringify(payload))
-      
       await kvInstance.put(key, data)
-      
-      console.log(`[Switch] KV put ${targetState} to ${cfg.value.kvBucket}/${key}`)
-      
-      // State will be updated via the watcher when KV confirms the write
-      
     } else {
-      // CORE MODE: Publish to subject
-      if (!natsStore.nc) {
-        throw new Error('Not connected to NATS')
-      }
-      
+      if (!natsStore.nc) throw new Error('Not connected to NATS')
       const subject = cfg.value.publishSubject
       const data = serializePayload(payload)
       natsStore.nc.publish(subject, data)
       
-      console.log(`[Switch] Published ${targetState} to ${subject}`)
-      
-      // For CORE mode without state subject, update immediately (fire & forget)
       if (!cfg.value.stateSubject) {
         currentState.value = targetState
         isPending.value = false
       }
     }
     
-    // Set timeout for pending state (in case no confirmation)
     setTimeout(() => {
       if (isPending.value) {
         isPending.value = false
@@ -407,77 +275,44 @@ async function executeToggle(targetState: 'on' | 'off') {
     console.error('[Switch] Toggle error:', err)
     error.value = err.message || 'Failed to toggle switch'
     isPending.value = false
-    currentState.value = targetState === 'on' ? 'off' : 'on' // Revert
+    currentState.value = targetState === 'on' ? 'off' : 'on'
   }
 }
 
-/**
- * Serialize payload to Uint8Array
- */
 function serializePayload(payload: any): Uint8Array {
-  
-  if (typeof payload === 'string') {
-    return encodeString(payload)
-  } else if (typeof payload === 'number' || typeof payload === 'boolean') {
-    return encodeString(String(payload))
-  } else {
-    return encodeString(JSON.stringify(payload))
-  }
+  if (typeof payload === 'string') return encodeString(payload)
+  else if (typeof payload === 'number' || typeof payload === 'boolean') return encodeString(String(payload))
+  else return encodeString(JSON.stringify(payload))
 }
 
-/**
- * Retry after error
- */
 function retry() {
   error.value = null
   initialize()
 }
 
-/**
- * Cleanup
- */
 function cleanup() {
-  if (kvWatcher) {
-    try { kvWatcher.stop() } catch {}
-    kvWatcher = null
-  }
-  
-  // Clear KV instance reference
+  if (kvWatcher) { try { kvWatcher.stop() } catch {} kvWatcher = null }
   kvInstance = null
-  
-  if (subscription) {
-    try { subscription.unsubscribe() } catch {}
-    subscription = null
-  }
+  if (subscription) { try { subscription.unsubscribe() } catch {} subscription = null }
 }
 
-// Lifecycle
 onMounted(() => {
-  if (natsStore.isConnected) {
-    initialize()
-  }
+  if (natsStore.isConnected) initialize()
 })
 
-onUnmounted(() => {
-  cleanup()
-})
+onUnmounted(cleanup)
 
-// Watch for connection changes
 watch(() => natsStore.isConnected, (connected) => {
-  if (connected) {
-    initialize()
-  } else {
+  if (connected) initialize()
+  else {
     cleanup()
     currentState.value = 'unknown'
   }
 })
 
-// Watch for config changes
 watch(() => props.config.switchConfig, () => {
   cleanup()
-  if (natsStore.isConnected) {
-    initialize()
-  }
+  if (natsStore.isConnected) initialize()
 }, { deep: true })
 </script>
 
@@ -488,7 +323,7 @@ watch(() => props.config.switchConfig, () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: 8px;
   background: var(--widget-bg);
   position: relative;
 }
@@ -497,8 +332,10 @@ watch(() => props.config.switchConfig, () => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  justify-content: center;
+  gap: 12px;
   width: 100%;
+  height: 100%;
 }
 
 .switch-container.is-disabled {
@@ -506,13 +343,16 @@ watch(() => props.config.switchConfig, () => {
   pointer-events: none;
 }
 
-/* Switch Track - Grid drag prevention handled by .vue-grid-item-no-drag class */
+/* Switch Track - Responsive Sizing */
 .switch-track {
   position: relative;
-  width: 120px;
-  height: 56px;
+  width: 80%;
+  max-width: 120px;
+  height: 40%;
+  max-height: 56px;
+  min-height: 32px;
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 28px;
+  border-radius: 999px; /* Pill shape */
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   border: 2px solid var(--border);
@@ -548,12 +388,12 @@ watch(() => props.config.switchConfig, () => {
   50% { opacity: 0.5; }
 }
 
-/* Switch Thumb */
+/* Switch Thumb - Responsive */
 .switch-thumb {
   position: absolute;
-  top: 4px;
-  width: 44px;
-  height: 44px;
+  top: 2px;
+  bottom: 2px;
+  aspect-ratio: 1/1;
   background: white;
   border-radius: 50%;
   display: flex;
@@ -564,18 +404,24 @@ watch(() => props.config.switchConfig, () => {
 }
 
 .state-off .switch-thumb {
-  left: 4px;
+  left: 2px;
 }
 
 .state-on .switch-thumb,
 .state-pending .switch-thumb {
-  left: calc(100% - 48px);
+  left: calc(100% - 2px);
+  transform: translateX(-100%);
 }
 
 .thumb-icon {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: bold;
   color: #333;
+}
+
+/* Hide icon on very small sizes */
+@container (height < 40px) {
+  .thumb-icon { display: none; }
 }
 
 .state-on .thumb-icon {
@@ -584,9 +430,9 @@ watch(() => props.config.switchConfig, () => {
 
 /* Spinner */
 .spinner {
-  width: 24px;
-  height: 24px;
-  border: 3px solid rgba(0, 0, 0, 0.1);
+  width: 60%;
+  height: 60%;
+  border: 2px solid rgba(0, 0, 0, 0.1);
   border-top-color: #333;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
@@ -596,7 +442,7 @@ watch(() => props.config.switchConfig, () => {
   to { transform: rotate(360deg); }
 }
 
-/* Labels */
+/* Labels - Hide on small height */
 .switch-labels {
   position: absolute;
   top: 0;
@@ -606,13 +452,17 @@ watch(() => props.config.switchConfig, () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 0 12px;
   pointer-events: none;
+}
+
+@container (height < 50px) {
+  .switch-labels { display: none; }
 }
 
 .label-off,
 .label-on {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.5px;
   color: rgba(255, 255, 255, 0.6);
@@ -624,7 +474,7 @@ watch(() => props.config.switchConfig, () => {
   opacity: 0.3;
 }
 
-/* State Text */
+/* State Text - Hide on small height */
 .state-text {
   font-size: 14px;
   font-weight: 600;
@@ -632,21 +482,14 @@ watch(() => props.config.switchConfig, () => {
   transition: color 0.3s;
 }
 
-.state-text.state-on {
-  color: var(--color-success);
+@container (height < 80px) {
+  .state-text { display: none; }
 }
 
-.state-text.state-off {
-  color: var(--muted);
-}
-
-.state-text.state-pending {
-  color: var(--color-warning);
-}
-
-.state-text.state-unknown {
-  color: var(--muted);
-}
+.state-text.state-on { color: var(--color-success); }
+.state-text.state-off { color: var(--muted); }
+.state-text.state-pending { color: var(--color-warning); }
+.state-text.state-unknown { color: var(--muted); }
 
 /* Error Message */
 .error-message {
@@ -664,6 +507,7 @@ watch(() => props.config.switchConfig, () => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  z-index: 10;
 }
 
 .retry-btn {
@@ -678,99 +522,16 @@ watch(() => props.config.switchConfig, () => {
   transition: opacity 0.2s;
 }
 
-.retry-btn:hover {
-  opacity: 0.8;
-}
-
 /* Disconnected Overlay */
 .disconnected-overlay {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  background: var(--color-error-bg);
-  border: 1px solid var(--color-error-border);
-  border-radius: 4px;
-  font-size: 11px;
-  color: var(--color-error);
+  top: 4px;
+  right: 4px;
+  pointer-events: none;
 }
 
 .disconnect-icon {
   font-size: 14px;
-}
-
-/* Confirmation Dialog */
-.confirm-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 10;
-}
-
-.confirm-dialog {
-  background: var(--panel);
-  border: 2px solid var(--border);
-  border-radius: 8px;
-  padding: 16px;
-  min-width: 200px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-}
-
-.confirm-header {
-  font-size: 14px;
-  font-weight: 600;
-  margin-bottom: 12px;
-  color: var(--text);
-}
-
-.confirm-body {
-  font-size: 13px;
-  color: var(--muted);
-  margin-bottom: 16px;
-  line-height: 1.4;
-}
-
-.confirm-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.btn-cancel,
-.btn-confirm {
-  padding: 6px 12px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  border: none;
-  transition: all 0.2s;
-}
-
-.btn-cancel {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text);
-}
-
-.btn-cancel:hover {
-  background: rgba(255, 255, 255, 0.15);
-}
-
-.btn-confirm {
-  background: var(--color-primary);
-  color: white;
-}
-
-.btn-confirm:hover {
-  background: var(--color-primary-hover);
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
 }
 </style>

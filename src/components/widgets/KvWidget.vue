@@ -40,11 +40,11 @@
         
         <template v-else>
           <span class="meta-item">
-            <span class="meta-label">Revision:</span>
+            <span class="meta-label">Rev:</span>
             <span class="meta-value">{{ revision }}</span>
           </span>
           <span v-if="lastUpdated" class="meta-item">
-            <span class="meta-label">Updated:</span>
+            <span class="meta-label">Upd:</span>
             <span class="meta-value">{{ lastUpdated }}</span>
           </span>
         </template>
@@ -54,9 +54,6 @@
     <div v-else class="kv-empty">
       <div class="empty-icon">🗄️</div>
       <div>Key not found</div>
-      <div class="empty-hint">
-        {{ config.dataSource.kvBucket }} / {{ config.dataSource.kvKey }}
-      </div>
     </div>
   </div>
 </template>
@@ -70,10 +67,6 @@ import LoadingState from '@/components/common/LoadingState.vue'
 import { useThresholds } from '@/composables/useThresholds'
 import type { WidgetConfig } from '@/types/dashboard'
 import { decodeBytes } from '@/utils/encoding'
-
-/**
- * KV Widget Component
- */
 
 const props = defineProps<{
   config: WidgetConfig
@@ -111,7 +104,6 @@ const processedValue = computed(() => {
       if (extracted === undefined) return undefined
       return extracted
     } catch (err) {
-      console.warn('[KvWidget] JSONPath error:', err)
       return undefined
     }
   }
@@ -131,32 +123,26 @@ const displayContent = computed(() => {
   return String(val)
 })
 
-// Apply Thresholds
-// FIXED: Use CSS variable as fallback for better theme support
 const valueColor = computed(() => {
   if (!isSingleValue.value) return 'var(--text)'
-  
   const val = processedValue.value
   const rules = props.config.kvConfig?.thresholds || []
-  
   const color = evaluateThresholds(val, rules)
   return color || 'var(--text)'
 })
-
-// ... (Rest of logic remains the same) ...
 
 async function loadKvValue() {
   const bucket = props.config.dataSource.kvBucket
   const key = props.config.dataSource.kvKey
   
   if (!bucket || !key || bucket === 'my-bucket') {
-    error.value = 'Click ⚙️ to configure bucket and key'
+    error.value = 'Click ⚙️ to configure'
     loading.value = false
     return
   }
   
   if (!natsStore.nc || !natsStore.isConnected) {
-    error.value = 'Not connected to NATS'
+    error.value = 'Not connected'
     loading.value = false
     return
   }
@@ -177,7 +163,6 @@ async function loadKvValue() {
       kvValue.value = null
     }
     
-    // Watch for changes
     const iter = await kv.watch({ key })
     watcher = iter
     
@@ -197,63 +182,43 @@ async function loadKvValue() {
             }
           }
         }
-      } catch (err: any) {
-        console.error('[KV Widget] Watch error:', err)
-      }
+      } catch (err) {}
     })()
     
     loading.value = false
   } catch (err: any) {
-    console.error('[KV Widget] Load error:', err)
     if (err.message.includes('stream not found')) {
       error.value = `Bucket "${bucket}" not found`
     } else {
-      error.value = err.message || 'Failed to load KV value'
+      error.value = err.message
     }
     loading.value = false
   }
 }
 
 function cleanup() {
-  if (watcher) {
-    try { 
-      watcher.stop() 
-    } catch {}
-    watcher = null
-  }
+  if (watcher) { try { watcher.stop() } catch {} watcher = null }
 }
 
 onMounted(() => {
-  if (natsStore.isConnected) {
-    loadKvValue()
-  }
+  if (natsStore.isConnected) loadKvValue()
 })
 
-onUnmounted(() => {
+onUnmounted(cleanup)
+
+watch(() => [props.config.dataSource.kvBucket, props.config.dataSource.kvKey, props.config.jsonPath], () => { 
   cleanup()
+  loadKvValue()
 })
 
-watch(
-  () => [props.config.dataSource.kvBucket, props.config.dataSource.kvKey, props.config.jsonPath],
-  () => { 
+watch(() => natsStore.isConnected, (isConnected) => {
+  if (isConnected) loadKvValue()
+  else {
     cleanup()
-    loadKvValue()
+    error.value = 'Not connected'
+    loading.value = false
   }
-)
-
-watch(
-  () => natsStore.isConnected,
-  (isConnected) => {
-    if (isConnected) {
-      console.log('[KvWidget] NATS connected, loading KV value')
-      loadKvValue()
-    } else {
-      cleanup()
-      error.value = 'Not connected to NATS'
-      loading.value = false
-    }
-  }
-)
+})
 </script>
 
 <style scoped>
@@ -261,7 +226,7 @@ watch(
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 16px;
+  padding: 8px;
   background: var(--widget-bg);
   border-radius: 8px;
   overflow: hidden;
@@ -286,27 +251,26 @@ watch(
 .kv-empty { color: var(--muted); }
 .error-icon, .empty-icon { font-size: 32px; }
 .error-text { font-size: 13px; line-height: 1.4; }
-.empty-hint { font-size: 11px; font-family: var(--mono); color: var(--color-accent); }
 
 .kv-content {
   display: flex;
   flex-direction: column;
   height: 100%;
   width: 100%;
-  gap: 12px;
+  gap: 8px;
 }
 
 .kv-header {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-bottom: 8px;
+  gap: 2px;
+  padding-bottom: 4px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
-.kv-bucket { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-.kv-key { font-size: 14px; font-weight: 600; color: var(--color-accent); font-family: var(--mono); }
+.kv-bucket { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+.kv-key { font-size: 12px; font-weight: 600; color: var(--color-accent); font-family: var(--mono); }
 
 .kv-value {
   flex: 1;
@@ -323,22 +287,23 @@ watch(
 }
 
 .value-display {
-  font-size: 24px;
+  font-size: clamp(16px, 15cqw, 60px);
   font-weight: 600;
   text-align: center;
   word-break: break-word;
-  line-height: 1.3;
+  line-height: 1.2;
   font-family: var(--mono);
   transition: color 0.3s ease;
 }
 
 .kv-value-content {
   margin: 0;
-  padding: 12px;
-  background: rgba(0, 0, 0, 0.3);
+  padding: 8px;
+  background: var(--input-bg); /* Better contrast */
+  border: 1px solid var(--border);
   border-radius: 4px;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.4;
   color: var(--text);
   font-family: var(--mono);
   white-space: pre-wrap;
@@ -346,26 +311,40 @@ watch(
   min-height: 100%;
 }
 
+/* Custom Scrollbar for JSON */
+.kv-value::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.kv-value::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
 .kv-meta {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 10px;
   flex-shrink: 0;
 }
 
 .kv-widget:not(.single-value-mode) .kv-meta {
-  padding-top: 8px;
+  padding-top: 4px;
   border-top: 1px solid var(--border);
-  gap: 12px;
 }
 
 .single-value-mode .kv-meta {
-  margin-top: 12px;
+  margin-top: 8px;
   justify-content: center;
 }
 
 .meta-simple { color: var(--muted); font-family: var(--mono); }
-.meta-item { display: flex; gap: 6px; }
+.meta-item { display: flex; gap: 4px; }
 .meta-label { color: var(--muted); }
 .meta-value { color: var(--text); font-family: var(--mono); }
+
+/* Hide meta on very small widgets */
+@container (height < 80px) {
+  .kv-meta { display: none; }
+}
 </style>

@@ -167,13 +167,23 @@
       </div>
     </div>
     
+    <!-- Global Widget Action Confirmation Dialog -->
+    <ConfirmDialog
+      v-model="confirmState.show"
+      :title="confirmState.title"
+      :message="confirmState.message"
+      :confirm-text="confirmState.confirmText"
+      variant="warning"
+      @confirm="handleGlobalConfirm"
+    />
+    
     <!-- Debug Panel -->
     <DebugPanel />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed, nextTick, provide } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNatsStore } from '@/stores/nats'
 import { useDashboardStore } from '@/stores/dashboard'
@@ -186,6 +196,7 @@ import DashboardGrid from '@/components/dashboard/DashboardGrid.vue'
 import AddWidgetModal from '@/components/dashboard/AddWidgetModal.vue'
 import ConfigureWidgetModal from '@/components/dashboard/ConfigureWidgetModal.vue'
 import KeyboardShortcutsModal from '@/components/common/KeyboardShortcutsModal.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import DebugPanel from '@/components/common/DebugPanel.vue'
 import TextWidget from '@/components/widgets/TextWidget.vue'
 import ChartWidget from '@/components/widgets/ChartWidget.vue'
@@ -199,8 +210,6 @@ import type { WidgetType } from '@/types/dashboard'
 
 /**
  * Dashboard View
- * 
- * Orchestrates the main dashboard layout, modals, and widget interactions.
  */
 
 const router = useRouter()
@@ -209,7 +218,6 @@ const dashboardStore = useDashboardStore()
 const dataStore = useWidgetDataStore()
 const { theme, toggleTheme } = useTheme()
 
-// Widget operations composable
 const {
   subscribeWidget,
   subscribeAllWidgets,
@@ -234,76 +242,79 @@ const fullScreenWidget = computed(() => {
   return dashboardStore.getWidget(fullScreenWidgetId.value)
 })
 
+// --- Global Confirmation Logic ---
+const confirmState = ref({
+  show: false,
+  title: 'Confirm Action',
+  message: 'Are you sure?',
+  confirmText: 'Confirm',
+  onConfirm: null as (() => void) | null
+})
+
 /**
- * Toggle sidebar (for hamburger menu)
+ * Request a confirmation dialog from a child widget
  */
+function requestConfirm(title: string, message: string, onConfirm: () => void, confirmText = 'Confirm') {
+  confirmState.value = {
+    show: true,
+    title,
+    message,
+    confirmText,
+    onConfirm
+  }
+}
+
+function handleGlobalConfirm() {
+  if (confirmState.value.onConfirm) {
+    confirmState.value.onConfirm()
+  }
+  confirmState.value.show = false
+}
+
+// Provide to all descendants
+provide('requestConfirm', requestConfirm)
+
+// --- End Global Confirmation ---
+
 function toggleSidebar() {
   if (sidebarRef.value) {
     sidebarRef.value.toggleSidebar()
   }
 }
 
-/**
- * Handle widget creation from modal
- */
 function handleCreateWidget(type: WidgetType) {
   createWidget(type)
 }
 
-/**
- * Handle widget deletion
- */
 function handleDeleteWidget(widgetId: string) {
   deleteWidget(widgetId)
 }
 
-/**
- * Handle widget duplication
- */
 function handleDuplicateWidget(widgetId: string) {
   duplicateWidget(widgetId)
 }
 
-/**
- * Handle widget configuration
- */
 function handleConfigureWidget(widgetId: string) {
   configWidgetId.value = widgetId
   showConfigWidget.value = true
 }
 
-/**
- * Handle widget config saved
- * Resubscribe widget with new config
- */
 function handleWidgetConfigSaved() {
   showConfigWidget.value = false
 }
 
-/**
- * Toggle fullscreen for widget
- */
 function toggleFullScreen(widgetId: string) {
   fullScreenWidgetId.value = fullScreenWidgetId.value === widgetId ? null : widgetId
 }
 
-/**
- * Exit fullscreen
- */
 function exitFullScreen() {
   fullScreenWidgetId.value = null
 }
 
-/**
- * Handle global help shortcut event
- */
 function handleShowShortcuts() {
   showShortcutsModal.value = true
 }
 
-/**
- * Setup keyboard shortcuts
- */
 const { shortcuts } = useKeyboardShortcuts([
   { 
     key: 's', 
@@ -317,7 +328,6 @@ const { shortcuts } = useKeyboardShortcuts([
     key: 'n', 
     description: 'Add New Widget', 
     handler: () => {
-      // Only allow adding if not locked
       if (!dashboardStore.isLocked) {
         showAddWidget.value = true 
       }
@@ -327,8 +337,6 @@ const { shortcuts } = useKeyboardShortcuts([
     key: 't', 
     description: 'New Dashboard', 
     handler: () => {
-      // New dashboard creation shouldn't be blocked by lock,
-      // as lock is per-dashboard, but let's allow it as it's a "sidebar" action essentially
       const name = prompt('Dashboard name:', 'New Dashboard')
       if (name) dashboardStore.createDashboard(name)
     }
@@ -370,38 +378,25 @@ const { shortcuts } = useKeyboardShortcuts([
   }
 ])
 
-/**
- * Lifecycle: Mount
- */
 onMounted(() => {
   dashboardStore.loadFromStorage()
-  
-  // Listen for the '?' key event dispatched by the composable
   window.addEventListener('show-shortcuts-help', handleShowShortcuts)
   
-  // Redirect to settings if not connected and no saved settings
   if (!natsStore.isConnected && !natsStore.autoConnect) {
     const hasSettings = natsStore.serverUrls.length > 0 || natsStore.getStoredCreds() !== null
     if (!hasSettings) router.push('/settings')
   }
   
-  // Subscribe to widgets if already connected
   if (natsStore.isConnected) {
     subscribeAllWidgets()
   }
 })
 
-/**
- * Lifecycle: Unmount
- */
 onUnmounted(() => {
   unsubscribeAllWidgets()
   window.removeEventListener('show-shortcuts-help', handleShowShortcuts)
 })
 
-/**
- * Watch: Connection changes
- */
 watch(() => natsStore.isConnected, (connected) => {
   if (connected) {
     subscribeAllWidgets()
@@ -411,25 +406,14 @@ watch(() => natsStore.isConnected, (connected) => {
   }
 })
 
-/**
- * Watch: Dashboard switches
- * Unsubscribe old widgets, subscribe new ones
- */
 watch(() => dashboardStore.activeDashboardId, async () => {
   unsubscribeAllWidgets()
-  
-  // Wait for Vue to finish updating the DOM
   await nextTick()
-  
   if (natsStore.isConnected) {
     subscribeAllWidgets()
   }
 })
 
-/**
- * Watch: New widgets added
- * Subscribe newly added widgets
- */
 watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   if (natsStore.isConnected && newCount > oldCount) {
     const newWidget = dashboardStore.activeWidgets[newCount - 1]
@@ -447,16 +431,14 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   overflow: hidden;
 }
 
-/* Main content area (flexes to fill space after sidebar) */
 .dashboard-main {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-width: 0; /* Allow flex shrinking */
+  min-width: 0;
   overflow: hidden;
 }
 
-/* Toolbar */
 .dashboard-toolbar {
   display: flex;
   justify-content: space-between;
@@ -482,7 +464,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   flex-wrap: wrap;
 }
 
-/* Hamburger menu (always visible) */
 .hamburger-btn {
   display: flex;
   align-items: center;
@@ -512,7 +493,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   white-space: nowrap;
 }
 
-/* Connection Status */
 .connection-status {
   display: flex;
   align-items: center;
@@ -550,7 +530,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   font-size: 11px;
 }
 
-/* Buttons */
 .btn-primary,
 .btn-secondary,
 .btn-icon {
@@ -579,9 +558,8 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   transform: scale(1.1);
 }
 
-/* Lock Active State */
 .lock-active {
-  background: rgba(210, 153, 34, 0.2); /* Warning-ish tint */
+  background: rgba(210, 153, 34, 0.2);
   border: 1px solid var(--color-warning);
 }
 
@@ -603,7 +581,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   background: rgba(255, 255, 255, 0.15);
 }
 
-/* Content */
 .dashboard-content {
   flex: 1;
   min-height: 0;
@@ -611,7 +588,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   position: relative;
 }
 
-/* No widgets state */
 .no-widgets-state {
   height: 100%;
   display: flex;
@@ -639,7 +615,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   font-size: 14px;
 }
 
-/* Fullscreen Modal */
 .fullscreen-modal {
   position: fixed;
   top: 0;
@@ -707,7 +682,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   font-size: 12px;
 }
 
-/* Responsive Media Queries */
 .btn-text {
   display: inline;
 }

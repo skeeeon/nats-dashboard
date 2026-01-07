@@ -76,14 +76,8 @@ import SliderWidget from '@/components/widgets/SliderWidget.vue'
 import StatCardWidget from '@/components/widgets/StatCardWidget.vue'
 import GaugeWidget from '@/components/widgets/GaugeWidget.vue'
 
-/**
- * Widget Container Component
- * 
- * Grug say: Box around widget. Has title and buttons.
- */
-
 const props = defineProps<{
-  config?: WidgetConfig // Made optional to handle undefined during transitions
+  config?: WidgetConfig
 }>()
 
 const emit = defineEmits<{
@@ -154,7 +148,7 @@ onErrorCaptured((err) => {
   padding: 8px 10px;
   background: var(--widget-header-bg);
   border-bottom: 1px solid var(--border);
-  flex-shrink: 0; /* Prevent header from squashing */
+  flex-shrink: 0;
   gap: 8px;
   height: 40px;
 }
@@ -165,13 +159,11 @@ onErrorCaptured((err) => {
   color: var(--text);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  
-  /* Flex magic for truncation */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
-  min-width: 0; /* Critical for flex item truncation */
+  min-width: 0;
 }
 
 .widget-actions {
@@ -189,8 +181,6 @@ onErrorCaptured((err) => {
   border-radius: 4px;
   font-size: 14px;
   transition: all 0.2s;
-  
-  /* Touch target improvement */
   min-width: 28px;
   min-height: 28px;
   display: flex;
@@ -213,13 +203,13 @@ onErrorCaptured((err) => {
   min-height: 0;
   overflow: hidden;
   position: relative;
-  /* Allow touch actions and interactions within widget body */
   touch-action: auto;
-  /* Ensure interactive elements work properly */
   pointer-events: auto;
+  
+  /* Enable container queries for children */
+  container-type: size;
 }
 
-/* Error state styling */
 .widget-error {
   height: 100%;
   display: flex;
