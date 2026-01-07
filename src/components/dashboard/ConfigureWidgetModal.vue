@@ -1,6 +1,6 @@
 <template>
   <div v-if="modelValue && widgetId" class="modal-overlay" @click.self="close">
-    <div class="modal">
+    <div class="modal" :class="{ 'modal-large': widgetType === 'map' }">
       <div class="modal-header">
         <h3>Configure Widget</h3>
         <button class="close-btn" @click="close">✕</button>
@@ -89,7 +89,7 @@ import { ref, computed, watch } from 'vue'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useValidation } from '@/composables/useValidation'
 import { useWidgetOperations } from '@/composables/useWidgetOperations'
-import type { WidgetType, ThresholdRule } from '@/types/dashboard'
+import type { WidgetType, ThresholdRule, MapMarker } from '@/types/dashboard'
 import type { WidgetFormState } from '@/types/config'
 
 // Import sub-components
@@ -157,16 +157,11 @@ const form = ref<WidgetFormState>({
   gaugeMax: 100,
   gaugeUnit: '',
   gaugeZones: [],
-  // Map widget fields
+  // Map V2 structure
   mapCenterLat: 39.8283,
   mapCenterLon: -98.5795,
   mapZoom: 4,
-  mapMarkerLabel: '',
-  mapMarkerLat: 0,
-  mapMarkerLon: 0,
-  mapActionLabel: '',
-  mapActionSubject: '',
-  mapActionPayload: '{}',
+  mapMarkers: [],
 })
 
 const errors = ref<Record<string, string>>({})
@@ -223,37 +218,18 @@ watch(() => props.widgetId, (widgetId) => {
     currentKvKey = widget.dataSource.kvKey || ''
   }
 
-  // Load map config
+  // Load map config - V2 structure
   let mapCenterLat = 39.8283
   let mapCenterLon = -98.5795
   let mapZoom = 4
-  let mapMarkerLabel = ''
-  let mapMarkerLat = 0
-  let mapMarkerLon = 0
-  let mapActionLabel = ''
-  let mapActionSubject = ''
-  let mapActionPayload = '{}'
+  let mapMarkers: MapMarker[] = []
 
   if (widget.type === 'map' && widget.mapConfig) {
     mapCenterLat = widget.mapConfig.center?.lat ?? 39.8283
     mapCenterLon = widget.mapConfig.center?.lon ?? -98.5795
     mapZoom = widget.mapConfig.zoom ?? 4
-
-    // V1: Load first marker if exists
-    const firstMarker = widget.mapConfig.markers?.[0]
-    if (firstMarker) {
-      mapMarkerLabel = firstMarker.label || ''
-      mapMarkerLat = firstMarker.lat || 0
-      mapMarkerLon = firstMarker.lon || 0
-
-      // V1: Load first action if exists
-      const firstAction = firstMarker.actions?.[0]
-      if (firstAction) {
-        mapActionLabel = firstAction.label || ''
-        mapActionSubject = firstAction.subject || ''
-        mapActionPayload = firstAction.payload || '{}'
-      }
-    }
+    // Deep clone markers to avoid mutating store directly
+    mapMarkers = JSON.parse(JSON.stringify(widget.mapConfig.markers || []))
   }
 
   // Populate form
@@ -302,16 +278,11 @@ watch(() => props.widgetId, (widgetId) => {
     gaugeUnit: widget.gaugeConfig?.unit || '',
     gaugeZones: widget.gaugeConfig?.zones ? [...widget.gaugeConfig.zones] : [],
 
-    // Map
+    // Map V2
     mapCenterLat,
     mapCenterLon,
     mapZoom,
-    mapMarkerLabel,
-    mapMarkerLat,
-    mapMarkerLon,
-    mapActionLabel,
-    mapActionSubject,
-    mapActionPayload,
+    mapMarkers,
   }
   
   errors.value = {}
@@ -397,19 +368,62 @@ function validate(): boolean {
       if (!jsonResult.valid) errors.value.jsonPath = jsonResult.error!
     }
   } else if (widget.type === 'map') {
-    // Map validation: if action is configured, validate subject and payload
-    if (form.value.mapActionLabel && form.value.mapActionSubject) {
-      const subjectResult = validator.validateSubject(form.value.mapActionSubject)
-      if (!subjectResult.valid) errors.value.mapActionSubject = subjectResult.error!
-      
-      if (form.value.mapActionPayload) {
-        const jsonResult = validator.validateJson(form.value.mapActionPayload)
-        if (!jsonResult.valid) errors.value.mapActionPayload = jsonResult.error!
-      }
-    }
+    // Validate map markers and actions
+    validateMapConfig()
   }
   
   return Object.keys(errors.value).length === 0
+}
+
+/**
+ * Validate map configuration
+ */
+function validateMapConfig() {
+  form.value.mapMarkers.forEach((marker, mIdx) => {
+    marker.actions.forEach((action, aIdx) => {
+      const prefix = `marker_${mIdx}_action_${aIdx}_`
+      
+      if (action.type === 'publish') {
+        // Validate publish action
+        if (action.subject) {
+          const subjectResult = validator.validateSubject(action.subject)
+          if (!subjectResult.valid) {
+            errors.value[`${prefix}subject`] = subjectResult.error!
+          }
+        }
+        if (action.payload) {
+          const jsonResult = validator.validateJson(action.payload)
+          if (!jsonResult.valid) {
+            errors.value[`${prefix}payload`] = jsonResult.error!
+          }
+        }
+      } else if (action.type === 'switch' && action.switchConfig) {
+        // Validate switch action
+        const cfg = action.switchConfig
+        if (cfg.mode === 'kv') {
+          if (cfg.kvBucket) {
+            const bucketResult = validator.validateKvBucket(cfg.kvBucket)
+            if (!bucketResult.valid) {
+              errors.value[`${prefix}kvBucket`] = bucketResult.error!
+            }
+          }
+          if (cfg.kvKey) {
+            const keyResult = validator.validateKvKey(cfg.kvKey)
+            if (!keyResult.valid) {
+              errors.value[`${prefix}kvKey`] = keyResult.error!
+            }
+          }
+        } else {
+          if (cfg.publishSubject) {
+            const subjectResult = validator.validateSubject(cfg.publishSubject)
+            if (!subjectResult.valid) {
+              errors.value[`${prefix}publishSubject`] = subjectResult.error!
+            }
+          }
+        }
+      }
+    })
+  })
 }
 
 /**
@@ -516,39 +530,14 @@ function save() {
       zones: [...form.value.gaugeZones],
     }
   } else if (widget.type === 'map') {
-    // Build markers array from V1 flat form
-    const markers = []
-    
-    // Only add marker if label or coords are set
-    if (form.value.mapMarkerLabel || form.value.mapMarkerLat || form.value.mapMarkerLon) {
-      const actions = []
-      
-      // Only add action if label and subject are set
-      if (form.value.mapActionLabel && form.value.mapActionSubject) {
-        actions.push({
-          id: `action_${Date.now()}`,
-          label: form.value.mapActionLabel.trim(),
-          subject: form.value.mapActionSubject.trim(),
-          payload: form.value.mapActionPayload.trim() || '{}',
-        })
-      }
-      
-      markers.push({
-        id: `marker_${Date.now()}`,
-        label: form.value.mapMarkerLabel.trim() || 'Marker',
-        lat: form.value.mapMarkerLat || form.value.mapCenterLat,
-        lon: form.value.mapMarkerLon || form.value.mapCenterLon,
-        actions,
-      })
-    }
-
+    // Map V2 - use markers array directly
     updates.mapConfig = {
       center: {
         lat: form.value.mapCenterLat,
         lon: form.value.mapCenterLon,
       },
       zoom: form.value.mapZoom,
-      markers,
+      markers: JSON.parse(JSON.stringify(form.value.mapMarkers)), // Deep clone
     }
   }
   
@@ -588,6 +577,12 @@ function close() {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* Larger modal for complex widgets like map */
+.modal.modal-large {
+  max-width: 800px;
+  max-height: 90vh;
 }
 
 .modal-header {

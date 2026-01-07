@@ -3,9 +3,11 @@
  * 
  * Grug say: Handle all Leaflet stuff in one place.
  * Theme switching, marker rendering, popup actions.
+ * 
+ * V2: Supports both publish (button) and switch (toggle) actions.
  */
 
-import { ref, shallowRef, onUnmounted } from 'vue'
+import { ref, shallowRef } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import type { MapMarker, MapMarkerAction } from '@/types/dashboard'
@@ -19,8 +21,17 @@ const TILE_URLS = {
 const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
 
 /**
+ * Popup event callbacks
+ */
+export interface PopupCallbacks {
+  onPublishAction: (action: MapMarkerAction) => void
+  onSwitchToggle: (action: MapMarkerAction) => void
+  onPopupOpen: (markerId: string, popupElement: HTMLElement) => void
+  onPopupClose: (markerId: string) => void
+}
+
+/**
  * Fix Leaflet's broken icon paths in bundlers
- * Grug say: Leaflet and Vite don't play nice. This fixes it.
  */
 function fixLeafletIcons() {
   // @ts-ignore - Leaflet internals
@@ -38,6 +49,9 @@ export function useLeafletMap() {
   const markersLayer = shallowRef<L.LayerGroup | null>(null)
   const tileLayer = shallowRef<L.TileLayer | null>(null)
   const initialized = ref(false)
+  
+  // Track marker instances for popup events
+  const markerInstances = new Map<string, L.Marker>()
 
   /**
    * Initialize the map
@@ -53,6 +67,7 @@ export function useLeafletMap() {
       map.value.remove()
       map.value = null
     }
+    markerInstances.clear()
 
     fixLeafletIcons()
 
@@ -107,19 +122,20 @@ export function useLeafletMap() {
    * Render markers on the map
    * 
    * @param markers - Array of marker configs
-   * @param onAction - Callback when action is clicked
+   * @param callbacks - Event callbacks for popup interactions
    */
   function renderMarkers(
     markers: MapMarker[],
-    onAction: (action: MapMarkerAction) => void
+    callbacks: PopupCallbacks
   ) {
     if (!map.value || !markersLayer.value) return
 
     // Clear existing markers
     markersLayer.value.clearLayers()
+    markerInstances.clear()
 
     markers.forEach(markerConfig => {
-      const { lat, lon, label, actions } = markerConfig
+      const { id, lat, lon, label, actions } = markerConfig
 
       // Create marker
       const marker = L.marker([lat, lon], {
@@ -127,14 +143,30 @@ export function useLeafletMap() {
       })
 
       // Build popup content
-      const popupContent = createPopupContent(label, actions, onAction)
-      marker.bindPopup(popupContent, {
+      const popupContent = createPopupContent(id, label, actions, callbacks)
+      const popup = L.popup({
         className: 'nats-map-popup',
-        minWidth: 150,
-        maxWidth: 250
+        minWidth: 180,
+        maxWidth: 300,
+        closeButton: true,
+      }).setContent(popupContent)
+      
+      marker.bindPopup(popup)
+
+      // Track popup open/close events
+      marker.on('popupopen', () => {
+        const popupEl = popup.getElement()
+        if (popupEl) {
+          callbacks.onPopupOpen(id, popupEl)
+        }
       })
 
-      // Add to layer
+      marker.on('popupclose', () => {
+        callbacks.onPopupClose(id)
+      })
+
+      // Store reference and add to layer
+      markerInstances.set(id, marker)
       markersLayer.value!.addLayer(marker)
     })
 
@@ -149,13 +181,13 @@ export function useLeafletMap() {
   }
 
   /**
-   * Create popup HTML content with action buttons
-   * Grug say: Build DOM elements, attach click handlers. Simple.
+   * Create popup HTML content with action buttons/toggles
    */
   function createPopupContent(
+    markerId: string,
     label: string,
     actions: MapMarkerAction[],
-    onAction: (action: MapMarkerAction) => void
+    callbacks: PopupCallbacks
   ): HTMLElement {
     const container = document.createElement('div')
     container.className = 'map-popup-content'
@@ -172,28 +204,145 @@ export function useLeafletMap() {
       actionList.className = 'map-popup-actions'
 
       actions.forEach(action => {
-        const btn = document.createElement('button')
-        btn.className = 'map-popup-action-btn'
-        btn.textContent = action.label
-        btn.onclick = (e) => {
-          e.stopPropagation()
-          onAction(action)
-          
-          // Visual feedback
-          btn.classList.add('action-success')
-          btn.textContent = '✓ Sent!'
-          setTimeout(() => {
-            btn.classList.remove('action-success')
-            btn.textContent = action.label
-          }, 1500)
+        if (action.type === 'publish') {
+          // Publish action - button
+          const btn = createPublishButton(action, callbacks.onPublishAction)
+          actionList.appendChild(btn)
+        } else if (action.type === 'switch') {
+          // Switch action - toggle
+          const toggle = createSwitchToggle(action, callbacks.onSwitchToggle)
+          actionList.appendChild(toggle)
         }
-        actionList.appendChild(btn)
       })
 
       container.appendChild(actionList)
+    } else {
+      // No actions hint
+      const hint = document.createElement('div')
+      hint.className = 'map-popup-no-actions'
+      hint.textContent = 'No actions configured'
+      container.appendChild(hint)
     }
 
     return container
+  }
+
+  /**
+   * Create publish action button
+   */
+  function createPublishButton(
+    action: MapMarkerAction,
+    onAction: (action: MapMarkerAction) => void
+  ): HTMLElement {
+    const btn = document.createElement('button')
+    btn.className = 'map-popup-action-btn publish'
+    btn.dataset.actionId = action.id
+    btn.textContent = action.label
+
+    btn.onclick = (e) => {
+      e.stopPropagation()
+      onAction(action)
+      
+      // Visual feedback
+      btn.classList.add('action-success')
+      const originalText = btn.textContent
+      btn.textContent = '✓ Sent!'
+      setTimeout(() => {
+        btn.classList.remove('action-success')
+        btn.textContent = originalText
+      }, 1500)
+    }
+
+    return btn
+  }
+
+  /**
+   * Create switch action toggle
+   */
+  function createSwitchToggle(
+    action: MapMarkerAction,
+    onToggle: (action: MapMarkerAction) => void
+  ): HTMLElement {
+    const container = document.createElement('div')
+    container.className = 'map-popup-switch'
+    container.dataset.actionId = action.id
+
+    // Label
+    const label = document.createElement('span')
+    label.className = 'switch-label'
+    label.textContent = action.label
+
+    // Toggle track
+    const track = document.createElement('button')
+    track.className = 'switch-track'
+    track.dataset.state = 'unknown'
+
+    // Thumb
+    const thumb = document.createElement('span')
+    thumb.className = 'switch-thumb'
+    track.appendChild(thumb)
+
+    // State text
+    const stateText = document.createElement('span')
+    stateText.className = 'switch-state-text'
+    stateText.textContent = '...'
+
+    track.onclick = (e) => {
+      e.stopPropagation()
+      onToggle(action)
+    }
+
+    container.appendChild(label)
+    container.appendChild(track)
+    container.appendChild(stateText)
+
+    return container
+  }
+
+  /**
+   * Update switch toggle state in popup
+   * Called by MapWidget when switch state changes
+   */
+  function updateSwitchState(
+    actionId: string,
+    state: 'on' | 'off' | 'pending' | 'unknown',
+    labels?: { on?: string; off?: string }
+  ) {
+    // Find the switch element in any open popup
+    const switchEl = document.querySelector(
+      `.map-popup-switch[data-action-id="${actionId}"]`
+    ) as HTMLElement | null
+
+    if (!switchEl) return
+
+    const track = switchEl.querySelector('.switch-track') as HTMLElement
+    const stateText = switchEl.querySelector('.switch-state-text') as HTMLElement
+
+    if (track) {
+      track.dataset.state = state
+      track.classList.remove('state-on', 'state-off', 'state-pending', 'state-unknown')
+      track.classList.add(`state-${state}`)
+    }
+
+    if (stateText) {
+      switch (state) {
+        case 'on':
+          stateText.textContent = labels?.on || 'ON'
+          stateText.className = 'switch-state-text state-on'
+          break
+        case 'off':
+          stateText.textContent = labels?.off || 'OFF'
+          stateText.className = 'switch-state-text state-off'
+          break
+        case 'pending':
+          stateText.textContent = '...'
+          stateText.className = 'switch-state-text state-pending'
+          break
+        default:
+          stateText.textContent = '?'
+          stateText.className = 'switch-state-text state-unknown'
+      }
+    }
   }
 
   /**
@@ -214,6 +363,13 @@ export function useLeafletMap() {
   }
 
   /**
+   * Get marker instance by ID
+   */
+  function getMarker(markerId: string): L.Marker | undefined {
+    return markerInstances.get(markerId)
+  }
+
+  /**
    * Cleanup
    */
   function cleanup() {
@@ -223,11 +379,9 @@ export function useLeafletMap() {
     }
     markersLayer.value = null
     tileLayer.value = null
+    markerInstances.clear()
     initialized.value = false
   }
-
-  // Auto-cleanup on unmount
-  onUnmounted(cleanup)
 
   return {
     map,
@@ -235,8 +389,10 @@ export function useLeafletMap() {
     initMap,
     updateTheme,
     renderMarkers,
+    updateSwitchState,
     setView,
     invalidateSize,
+    getMarker,
     cleanup,
   }
 }

@@ -1,177 +1,119 @@
 <template>
   <div class="config-map">
-    <!-- Map Center -->
-    <div class="form-group">
-      <label>Map Center</label>
-      <div class="coord-inputs">
-        <div class="coord-input-group">
-          <label class="coord-label">Latitude</label>
-          <input 
-            v-model.number="form.mapCenterLat" 
-            type="number" 
-            class="form-input"
-            placeholder="39.8283"
-            step="any"
-          />
-        </div>
-        <div class="coord-input-group">
-          <label class="coord-label">Longitude</label>
-          <input 
-            v-model.number="form.mapCenterLon" 
-            type="number" 
-            class="form-input"
-            placeholder="-98.5795"
-            step="any"
-          />
-        </div>
-        <div class="coord-input-group">
-          <label class="coord-label">Zoom</label>
-          <input 
-            v-model.number="form.mapZoom" 
-            type="number" 
-            class="form-input"
-            placeholder="4"
-            min="1"
-            max="19"
-          />
-        </div>
+    <!-- Map View Settings -->
+    <div class="config-section">
+      <div class="section-header">
+        <span class="section-icon">🗺️</span>
+        <span class="section-title">Map View</span>
       </div>
-      <div class="help-text">
-        Default view when map loads. Zoom: 1 (world) to 19 (street level).
+      
+      <div class="form-group">
+        <label>Default Center</label>
+        <div class="coord-inputs">
+          <div class="coord-input-group">
+            <label class="coord-label">Latitude</label>
+            <input 
+              v-model.number="form.mapCenterLat" 
+              type="number" 
+              class="form-input"
+              placeholder="39.8283"
+              step="any"
+            />
+          </div>
+          <div class="coord-input-group">
+            <label class="coord-label">Longitude</label>
+            <input 
+              v-model.number="form.mapCenterLon" 
+              type="number" 
+              class="form-input"
+              placeholder="-98.5795"
+              step="any"
+            />
+          </div>
+          <div class="coord-input-group">
+            <label class="coord-label">Zoom</label>
+            <input 
+              v-model.number="form.mapZoom" 
+              type="number" 
+              class="form-input"
+              placeholder="4"
+              min="1"
+              max="19"
+            />
+          </div>
+        </div>
+        <div class="help-text">
+          Initial view when map loads. Zoom: 1 (world) to 19 (street level).
+        </div>
       </div>
     </div>
 
-    <!-- Marker Section -->
-    <div class="form-group">
-      <label>Marker (Optional)</label>
-      <div class="marker-section">
-        <div class="marker-toggle">
-          <label class="checkbox-label">
-            <input type="checkbox" v-model="hasMarker" />
-            <span>Add a marker to the map</span>
-          </label>
-        </div>
-
-        <template v-if="hasMarker">
-          <div class="marker-fields">
-            <div class="form-group">
-              <label class="field-label">Marker Label</label>
-              <input 
-                v-model="form.mapMarkerLabel" 
-                type="text" 
-                class="form-input"
-                placeholder="Building A"
-              />
-            </div>
-
-            <div class="coord-inputs">
-              <div class="coord-input-group">
-                <label class="coord-label">Latitude</label>
-                <input 
-                  v-model.number="form.mapMarkerLat" 
-                  type="number" 
-                  class="form-input"
-                  :placeholder="String(form.mapCenterLat || 39.8283)"
-                  step="any"
-                />
-              </div>
-              <div class="coord-input-group">
-                <label class="coord-label">Longitude</label>
-                <input 
-                  v-model.number="form.mapMarkerLon" 
-                  type="number" 
-                  class="form-input"
-                  :placeholder="String(form.mapCenterLon || -98.5795)"
-                  step="any"
-                />
-              </div>
-            </div>
-
-            <button 
-              type="button"
-              class="btn-use-center"
-              @click="useMapCenter"
-            >
-              📍 Use Map Center
-            </button>
-          </div>
-
-          <!-- Action Section -->
-          <div class="action-section">
-            <div class="action-toggle">
-              <label class="checkbox-label">
-                <input type="checkbox" v-model="hasAction" />
-                <span>Add click action</span>
-              </label>
-            </div>
-
-            <template v-if="hasAction">
-              <div class="action-fields">
-                <div class="form-group">
-                  <label class="field-label">Action Label</label>
-                  <input 
-                    v-model="form.mapActionLabel" 
-                    type="text" 
-                    class="form-input"
-                    placeholder="Toggle Light"
-                  />
-                </div>
-
-                <div class="form-group">
-                  <label class="field-label">Publish Subject</label>
-                  <input 
-                    v-model="form.mapActionSubject" 
-                    type="text" 
-                    class="form-input"
-                    :class="{ 'has-error': errors.mapActionSubject }"
-                    placeholder="building.a.control"
-                  />
-                  <div v-if="errors.mapActionSubject" class="error-text">
-                    {{ errors.mapActionSubject }}
-                  </div>
-                </div>
-
-                <div class="form-group">
-                  <label class="field-label">Payload</label>
-                  <textarea 
-                    v-model="form.mapActionPayload" 
-                    class="form-textarea"
-                    :class="{ 'has-error': errors.mapActionPayload }"
-                    rows="3"
-                    placeholder='{"action": "toggle"}'
-                  />
-                  <div v-if="errors.mapActionPayload" class="error-text">
-                    {{ errors.mapActionPayload }}
-                  </div>
-                </div>
-              </div>
-            </template>
-          </div>
-        </template>
+    <!-- Markers Section -->
+    <div class="config-section">
+      <div class="section-header">
+        <span class="section-icon">📍</span>
+        <span class="section-title">Markers</span>
+        <span class="section-count">{{ form.mapMarkers.length }}</span>
       </div>
+      
+      <div v-if="form.mapMarkers.length === 0" class="empty-markers">
+        <div class="empty-icon">📍</div>
+        <div class="empty-text">No markers configured</div>
+        <div class="empty-hint">Add a marker to place interactive points on the map</div>
+      </div>
+      
+      <div class="markers-list">
+        <MarkerEditor
+          v-for="(marker, index) in form.mapMarkers"
+          :key="marker.id"
+          :marker="marker"
+          :action-errors="getMarkerActionErrors(index)"
+          @remove="removeMarker(index)"
+          @use-center="useMapCenterForMarker(index)"
+        />
+      </div>
+      
+      <button class="btn-add-marker" @click="addMarker">
+        <span class="btn-icon">+</span>
+        <span class="btn-text">Add Marker</span>
+      </button>
     </div>
 
-    <!-- Preview hint -->
-    <div class="preview-hint">
-      <span class="hint-icon">💡</span>
-      <span class="hint-text">
-        Tip: Find coordinates using 
-        <a href="https://www.google.com/maps" target="_blank" rel="noopener">Google Maps</a>
-        (right-click → "What's here?")
-      </span>
+    <!-- Tips -->
+    <div class="tips-section">
+      <div class="tip">
+        <span class="tip-icon">💡</span>
+        <span class="tip-text">
+          Find coordinates using 
+          <a href="https://www.google.com/maps" target="_blank" rel="noopener">Google Maps</a>
+          (right-click → "What's here?")
+        </span>
+      </div>
+      <div class="tip">
+        <span class="tip-icon">🔄</span>
+        <span class="tip-text">
+          <strong>Switch actions</strong> create live toggles. 
+          State updates when popup is open.
+        </span>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import MarkerEditor from './MarkerEditor.vue'
+import { createDefaultMarker } from '@/types/dashboard'
 import type { WidgetFormState } from '@/types/config'
 
 /**
  * Map Widget Configuration Form
  * 
- * Grug say: V1 is simple. One marker, one action.
- * Data structure supports V2 with arrays, but UI is flat.
+ * Grug say: Full V2 implementation.
+ * - Multiple markers
+ * - Multiple actions per marker
+ * - Publish and Switch action types
+ * 
+ * Uses MarkerEditor for each marker, which uses MarkerActionEditor for each action.
  */
 
 const props = defineProps<{
@@ -179,65 +121,121 @@ const props = defineProps<{
   errors: Record<string, string>
 }>()
 
-// V1 toggles - controls whether marker/action fields are shown
-const hasMarker = ref(false)
-const hasAction = ref(false)
-
 /**
- * Set marker coords to match map center
+ * Add new marker
  */
-function useMapCenter() {
-  props.form.mapMarkerLat = props.form.mapCenterLat
-  props.form.mapMarkerLon = props.form.mapCenterLon
+function addMarker() {
+  const marker = createDefaultMarker()
+  // Default to map center
+  marker.lat = props.form.mapCenterLat || 39.8283
+  marker.lon = props.form.mapCenterLon || -98.5795
+  props.form.mapMarkers.push(marker)
 }
 
 /**
- * Initialize toggles based on existing form data
+ * Remove marker
  */
-onMounted(() => {
-  // Check if we have marker data
-  hasMarker.value = !!(
-    props.form.mapMarkerLabel || 
-    props.form.mapMarkerLat || 
-    props.form.mapMarkerLon
-  )
+function removeMarker(index: number) {
+  props.form.mapMarkers.splice(index, 1)
+}
+
+/**
+ * Set marker coords to map center
+ */
+function useMapCenterForMarker(index: number) {
+  const marker = props.form.mapMarkers[index]
+  if (marker) {
+    marker.lat = props.form.mapCenterLat
+    marker.lon = props.form.mapCenterLon
+  }
+}
+
+/**
+ * Get errors for a specific marker's actions
+ * Grug say: Errors are keyed by "marker_X_action_Y_field"
+ * We extract and restructure for the MarkerEditor
+ */
+function getMarkerActionErrors(markerIndex: number): Record<number, Record<string, string>> {
+  const result: Record<number, Record<string, string>> = {}
+  const prefix = `marker_${markerIndex}_action_`
   
-  // Check if we have action data
-  hasAction.value = !!(
-    props.form.mapActionLabel || 
-    props.form.mapActionSubject
-  )
-})
-
-/**
- * Clear marker fields when toggled off
- */
-watch(hasMarker, (has) => {
-  if (!has) {
-    props.form.mapMarkerLabel = ''
-    props.form.mapMarkerLat = 0
-    props.form.mapMarkerLon = 0
-    hasAction.value = false
+  for (const [key, value] of Object.entries(props.errors)) {
+    if (key.startsWith(prefix)) {
+      // Extract action index and field name
+      const rest = key.substring(prefix.length)
+      const underscorePos = rest.indexOf('_')
+      if (underscorePos > 0) {
+        const actionIndex = parseInt(rest.substring(0, underscorePos))
+        const field = rest.substring(underscorePos + 1)
+        if (!isNaN(actionIndex)) {
+          if (!result[actionIndex]) result[actionIndex] = {}
+          result[actionIndex][field] = value
+        }
+      }
+    }
   }
-})
-
-/**
- * Clear action fields when toggled off
- */
-watch(hasAction, (has) => {
-  if (!has) {
-    props.form.mapActionLabel = ''
-    props.form.mapActionSubject = ''
-    props.form.mapActionPayload = '{}'
-  }
-})
+  
+  return result
+}
 </script>
 
 <style scoped>
 .config-map {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 24px;
+}
+
+.config-section {
+  background: rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.section-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+}
+
+.section-count {
+  font-size: 12px;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.2);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group:last-child {
+  margin-bottom: 0;
+}
+
+.form-group > label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
 }
 
 .coord-inputs {
@@ -258,85 +256,106 @@ watch(hasAction, (has) => {
   font-weight: 500;
 }
 
-.field-label {
-  font-size: 12px;
-  color: var(--text);
-  font-weight: 500;
-  margin-bottom: 4px;
-  display: block;
-}
-
-.marker-section {
-  background: rgba(0, 0, 0, 0.1);
+.form-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--input-bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 12px;
+  border-radius: 4px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
 }
 
-.marker-toggle,
-.action-toggle {
-  margin-bottom: 12px;
+.form-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
 }
 
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  font-size: 14px;
+.help-text {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
 }
 
-.checkbox-label input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--color-primary);
-}
-
-.marker-fields {
+/* Empty state */
+.empty-markers {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  align-items: center;
+  gap: 8px;
+  padding: 32px 16px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+  text-align: center;
+  margin-bottom: 16px;
 }
 
-.btn-use-center {
-  align-self: flex-start;
-  padding: 6px 12px;
-  background: var(--color-info-bg);
-  border: 1px solid var(--color-info-border);
-  border-radius: 4px;
-  color: var(--color-info);
-  font-size: 12px;
+.empty-icon {
+  font-size: 32px;
+  opacity: 0.5;
+}
+
+.empty-text {
+  font-size: 14px;
   font-weight: 500;
+  color: var(--text);
+}
+
+.empty-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Markers list */
+.markers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+/* Add marker button */
+.btn-add-marker {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--color-primary);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
 }
 
-.btn-use-center:hover {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: white;
+.btn-add-marker:hover {
+  background: var(--color-primary-hover);
+  transform: translateY(-1px);
 }
 
-.action-section {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
+.btn-add-marker .btn-icon {
+  font-size: 18px;
+  font-weight: 700;
 }
 
-.action-fields {
+/* Tips section */
+.tips-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-top: 12px;
+  gap: 8px;
 }
 
-.preview-hint {
+.tip {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 12px;
+  padding: 10px 12px;
   background: var(--color-info-bg);
   border: 1px solid var(--color-info-border);
   border-radius: 6px;
@@ -344,21 +363,26 @@ watch(hasAction, (has) => {
   color: var(--color-info);
 }
 
-.hint-icon {
-  font-size: 16px;
-  line-height: 1;
+.tip-icon {
+  font-size: 14px;
+  line-height: 1.4;
+  flex-shrink: 0;
 }
 
-.hint-text a {
+.tip-text {
+  line-height: 1.4;
+}
+
+.tip-text a {
   color: var(--color-accent);
   text-decoration: underline;
 }
 
-.hint-text a:hover {
+.tip-text a:hover {
   text-decoration: none;
 }
 
-/* Responsive adjustments */
+/* Responsive */
 @media (max-width: 500px) {
   .coord-inputs {
     grid-template-columns: 1fr 1fr;

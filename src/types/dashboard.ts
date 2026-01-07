@@ -109,20 +109,51 @@ export interface GaugeWidgetConfig {
   }[]
 }
 
+// --- Map Widget Types ---
+
+/**
+ * Map Action Type
+ * Grug say: Two types. Publish is fire-and-forget. Switch is stateful toggle.
+ */
+export type MapActionType = 'publish' | 'switch'
+
+/**
+ * Map Marker Action - Switch Configuration
+ * Grug say: Same structure as SwitchWidget config, embedded in action.
+ */
+export interface MapActionSwitchConfig {
+  mode: 'kv' | 'core'
+  kvBucket?: string
+  kvKey?: string
+  publishSubject?: string
+  stateSubject?: string
+  onPayload: any
+  offPayload: any
+  confirmOnChange?: boolean
+  labels?: {
+    on?: string
+    off?: string
+  }
+}
+
 /**
  * Map Marker Action
- * Grug say: Click action in popup. Publish message like button.
+ * Grug say: Click action in popup. Can be publish (like button) or switch (stateful toggle).
  */
 export interface MapMarkerAction {
   id: string
+  type: MapActionType
   label: string
-  subject: string
-  payload: string
+  // For publish type
+  subject?: string
+  payload?: string
+  // For switch type
+  switchConfig?: MapActionSwitchConfig
 }
 
 /**
  * Map Marker
- * Grug say: Point on map. Has location and optional actions.
+ * Grug say: Point on map. Has location and multiple actions.
  */
 export interface MapMarker {
   id: string
@@ -136,9 +167,7 @@ export interface MapMarker {
 /**
  * Map Widget Configuration
  * Grug say: Show map with markers. Click markers to do things.
- * 
- * V1: Single marker, single action (UI simplified)
- * V2: Multiple markers, multiple actions (data structure ready)
+ * Supports multiple markers, each with multiple actions (publish or switch).
  */
 export interface MapWidgetConfig {
   center: {
@@ -295,5 +324,45 @@ export function createDefaultDashboard(name: string): Dashboard {
     created: now,
     modified: now,
     widgets: [],
+  }
+}
+
+// --- Helper: Create default marker ---
+export function createDefaultMarker(): MapMarker {
+  return {
+    id: `marker_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    label: 'New Marker',
+    lat: 0,
+    lon: 0,
+    actions: []
+  }
+}
+
+// --- Helper: Create default action ---
+export function createDefaultAction(type: MapActionType = 'publish'): MapMarkerAction {
+  const id = `action_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  
+  if (type === 'switch') {
+    return {
+      id,
+      type: 'switch',
+      label: 'Toggle',
+      switchConfig: {
+        mode: 'kv',
+        kvBucket: 'device-states',
+        kvKey: 'device.switch',
+        onPayload: { state: 'on' },
+        offPayload: { state: 'off' },
+        labels: { on: 'ON', off: 'OFF' }
+      }
+    }
+  }
+  
+  return {
+    id,
+    type: 'publish',
+    label: 'Send',
+    subject: 'marker.action',
+    payload: '{}'
   }
 }
