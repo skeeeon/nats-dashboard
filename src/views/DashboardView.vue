@@ -8,7 +8,7 @@
       <!-- Top toolbar -->
       <div class="dashboard-toolbar">
         <div class="toolbar-left">
-          <!-- Hamburger menu (always visible) -->
+          <!-- Hamburger menu -->
           <button 
             class="hamburger-btn"
             @click="toggleSidebar"
@@ -160,10 +160,12 @@
             :is="GaugeWidget"
             :config="fullScreenWidget"
           />
+          <!-- MapWidget gets isFullscreen prop to use unique container ID -->
           <component
             v-else-if="fullScreenWidget.type === 'map'"
             :is="MapWidget"
             :config="fullScreenWidget"
+            :is-fullscreen="true"
           />
         </div>
         <div class="fullscreen-hint">
@@ -214,10 +216,6 @@ import GaugeWidget from '@/components/widgets/GaugeWidget.vue'
 import MapWidget from '@/components/widgets/MapWidget.vue'
 import type { WidgetType } from '@/types/dashboard'
 
-/**
- * Dashboard View
- */
-
 const router = useRouter()
 const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
@@ -257,9 +255,6 @@ const confirmState = ref({
   onConfirm: null as (() => void) | null
 })
 
-/**
- * Request a confirmation dialog from a child widget
- */
 function requestConfirm(title: string, message: string, onConfirm: () => void, confirmText = 'Confirm') {
   confirmState.value = {
     show: true,
@@ -277,10 +272,7 @@ function handleGlobalConfirm() {
   confirmState.value.show = false
 }
 
-// Provide to all descendants
 provide('requestConfirm', requestConfirm)
-
-// --- End Global Confirmation ---
 
 function toggleSidebar() {
   if (sidebarRef.value) {

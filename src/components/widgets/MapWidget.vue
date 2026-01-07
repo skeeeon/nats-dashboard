@@ -36,7 +36,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useLeafletMap } from '@/composables/useLeafletMap'
+import { useLeafletMap, type PopupCallbacks } from '@/composables/useLeafletMap'
+import { createSwitchState, type SwitchState } from '@/composables/useSwitchState'
 import { useNatsStore } from '@/stores/nats'
 import { useTheme } from '@/composables/useTheme'
 import { encodeString } from '@/utils/encoding'
@@ -46,23 +47,38 @@ import type { WidgetConfig, MapMarkerAction } from '@/types/dashboard'
  * Map Widget
  * 
  * Grug say: Show map with markers. Click marker, see popup with actions.
- * Actions publish messages like button widget.
+ * Actions can be publish (fire-and-forget) or switch (stateful toggle).
+ * 
+ * Fixed: Proper callback interface, fullscreen support, switch state management.
  */
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   config: WidgetConfig
-}>()
+  isFullscreen?: boolean
+}>(), {
+  isFullscreen: false
+})
 
 const natsStore = useNatsStore()
 const { theme } = useTheme()
-const { initMap, updateTheme, renderMarkers, invalidateSize, cleanup } = useLeafletMap()
+const { initMap, updateTheme, renderMarkers, updateSwitchState, invalidateSize, cleanup } = useLeafletMap()
 
-// Unique ID for this widget's map container
-const mapContainerId = computed(() => `map-${props.config.id}`)
+// Unique ID - include fullscreen suffix to avoid container collision
+const mapContainerId = computed(() => {
+  const suffix = props.isFullscreen ? '-fullscreen' : ''
+  return `map-${props.config.id}${suffix}`
+})
+
 const mapReady = ref(false)
 
 // Action feedback state
 const actionFeedback = ref<{ type: 'success' | 'error'; message: string } | null>(null)
+
+// Track active switch states for each action (keyed by action ID)
+const activeSwitchStates = new Map<string, SwitchState>()
+
+// Track which marker popup is currently open
+const openMarkerId = ref<string | null>(null)
 
 // Get markers from config
 const markers = computed(() => props.config.mapConfig?.markers || [])
@@ -79,16 +95,21 @@ const mapCenter = computed(() =>
 const mapZoom = computed(() => props.config.mapConfig?.zoom || 4)
 
 /**
- * Handle marker action click
+ * Handle publish action click
  */
-function handleAction(action: MapMarkerAction) {
+function handlePublishAction(action: MapMarkerAction) {
   if (!natsStore.nc || !natsStore.isConnected) {
     showFeedback('error', 'Not connected to NATS')
     return
   }
 
+  if (!action.subject) {
+    showFeedback('error', 'No subject configured')
+    return
+  }
+
   try {
-    const payload = encodeString(action.payload)
+    const payload = encodeString(action.payload || '{}')
     natsStore.nc.publish(action.subject, payload)
     
     showFeedback('success', `Published to ${action.subject}`)
@@ -100,6 +121,129 @@ function handleAction(action: MapMarkerAction) {
 }
 
 /**
+ * Handle switch toggle click
+ */
+function handleSwitchToggle(action: MapMarkerAction) {
+  if (!natsStore.isConnected) {
+    showFeedback('error', 'Not connected to NATS')
+    return
+  }
+
+  const switchState = activeSwitchStates.get(action.id)
+  if (!switchState) {
+    console.warn('[MapWidget] No switch state found for action:', action.id)
+    return
+  }
+
+  // Toggle the switch
+  switchState.toggle()
+}
+
+/**
+ * Handle popup open - start switch state watchers
+ */
+function handlePopupOpen(markerId: string, popupElement: HTMLElement) {
+  console.log('[MapWidget] Popup opened for marker:', markerId)
+  openMarkerId.value = markerId
+
+  // Find the marker
+  const marker = markers.value.find(m => m.id === markerId)
+  if (!marker) return
+
+  // Start switch state watchers for all switch actions
+  for (const action of marker.actions) {
+    if (action.type === 'switch' && action.switchConfig) {
+      startSwitchStateWatcher(action)
+    }
+  }
+}
+
+/**
+ * Handle popup close - stop switch state watchers
+ */
+function handlePopupClose(markerId: string) {
+  console.log('[MapWidget] Popup closed for marker:', markerId)
+  openMarkerId.value = null
+
+  // Find the marker and stop all its switch watchers
+  const marker = markers.value.find(m => m.id === markerId)
+  if (!marker) return
+
+  for (const action of marker.actions) {
+    if (action.type === 'switch') {
+      stopSwitchStateWatcher(action.id)
+    }
+  }
+}
+
+/**
+ * Start a switch state watcher for an action
+ */
+async function startSwitchStateWatcher(action: MapMarkerAction) {
+  if (!action.switchConfig) return
+
+  // Don't start if already active
+  if (activeSwitchStates.has(action.id)) {
+    const existing = activeSwitchStates.get(action.id)!
+    if (existing.isActive()) return
+  }
+
+  // Create switch state instance
+  const switchState = createSwitchState({
+    mode: action.switchConfig.mode,
+    kvBucket: action.switchConfig.kvBucket,
+    kvKey: action.switchConfig.kvKey,
+    publishSubject: action.switchConfig.publishSubject,
+    stateSubject: action.switchConfig.stateSubject,
+    onPayload: action.switchConfig.onPayload,
+    offPayload: action.switchConfig.offPayload,
+    defaultState: 'off'
+  })
+
+  activeSwitchStates.set(action.id, switchState)
+
+  // Start watching
+  await switchState.start()
+
+  // Update UI immediately with current state
+  updateSwitchState(
+    action.id,
+    switchState.state.value,
+    action.switchConfig.labels
+  )
+
+  // Watch for state changes and update popup UI
+  watch(switchState.state, (newState) => {
+    updateSwitchState(
+      action.id,
+      newState,
+      action.switchConfig?.labels
+    )
+  })
+}
+
+/**
+ * Stop a switch state watcher
+ */
+function stopSwitchStateWatcher(actionId: string) {
+  const switchState = activeSwitchStates.get(actionId)
+  if (switchState) {
+    switchState.stop()
+    activeSwitchStates.delete(actionId)
+  }
+}
+
+/**
+ * Stop all switch state watchers
+ */
+function stopAllSwitchStateWatchers() {
+  for (const [actionId, switchState] of activeSwitchStates) {
+    switchState.stop()
+  }
+  activeSwitchStates.clear()
+}
+
+/**
  * Show feedback toast
  */
 function showFeedback(type: 'success' | 'error', message: string) {
@@ -107,6 +251,16 @@ function showFeedback(type: 'success' | 'error', message: string) {
   setTimeout(() => {
     actionFeedback.value = null
   }, 2000)
+}
+
+/**
+ * Build callbacks object for useLeafletMap
+ */
+const popupCallbacks: PopupCallbacks = {
+  onPublishAction: handlePublishAction,
+  onSwitchToggle: handleSwitchToggle,
+  onPopupOpen: handlePopupOpen,
+  onPopupClose: handlePopupClose
 }
 
 /**
@@ -124,7 +278,7 @@ async function initializeMap() {
       theme.value === 'dark'
     )
     
-    renderMarkers(markers.value, handleAction)
+    renderMarkers(markers.value, popupCallbacks)
     mapReady.value = true
   }, 50)
 }
@@ -134,7 +288,7 @@ async function initializeMap() {
  */
 function updateMarkers() {
   if (!mapReady.value) return
-  renderMarkers(markers.value, handleAction)
+  renderMarkers(markers.value, popupCallbacks)
 }
 
 // Initialize on mount
@@ -144,6 +298,7 @@ onMounted(() => {
 
 // Cleanup on unmount
 onUnmounted(() => {
+  stopAllSwitchStateWatchers()
   cleanup()
 })
 
@@ -155,23 +310,31 @@ watch(theme, (newTheme) => {
 // Watch for marker changes
 watch(markers, updateMarkers, { deep: true })
 
-// Watch for center/zoom changes
+// Watch for center/zoom changes - reinitialize map
 watch([mapCenter, mapZoom], () => {
   if (!mapReady.value) return
-  // Re-initialize to apply new center/zoom
+  cleanup()
+  mapReady.value = false
   initializeMap()
 }, { deep: true })
 
 // Handle resize when widget is resized
 const resizeObserver = new ResizeObserver(() => {
-  invalidateSize()
+  if (mapReady.value) {
+    invalidateSize()
+  }
 })
 
 onMounted(() => {
-  const container = document.getElementById(mapContainerId.value)
-  if (container?.parentElement) {
-    resizeObserver.observe(container.parentElement)
+  // Wait for map to be ready before observing
+  const checkAndObserve = () => {
+    const container = document.getElementById(mapContainerId.value)
+    if (container?.parentElement) {
+      resizeObserver.observe(container.parentElement)
+    }
   }
+  // Delay to ensure container exists
+  setTimeout(checkAndObserve, 100)
 })
 
 onUnmounted(() => {
@@ -192,11 +355,9 @@ onUnmounted(() => {
 .map-container {
   position: absolute;
   inset: 0;
-  /* Keep map below widget controls - Leaflet defaults to high z-index */
   z-index: 0;
 }
 
-/* Force Leaflet internals to stay contained */
 .map-container :deep(.leaflet-pane),
 .map-container :deep(.leaflet-control-container) {
   z-index: 0 !important;
@@ -207,7 +368,11 @@ onUnmounted(() => {
   z-index: 1 !important;
 }
 
-/* Loading state */
+/* Popups need higher z-index */
+.map-container :deep(.leaflet-popup-pane) {
+  z-index: 2 !important;
+}
+
 .map-loading {
   position: absolute;
   inset: 0;
@@ -235,7 +400,6 @@ onUnmounted(() => {
   to { transform: rotate(360deg); }
 }
 
-/* No markers hint */
 .no-markers-hint {
   position: absolute;
   bottom: 12px;
@@ -254,11 +418,8 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
-.hint-icon {
-  font-size: 14px;
-}
+.hint-icon { font-size: 14px; }
 
-/* Disconnected badge */
 .disconnected-badge {
   position: absolute;
   top: 8px;
@@ -273,7 +434,6 @@ onUnmounted(() => {
   color: var(--color-warning);
 }
 
-/* Action feedback toast */
 .action-feedback {
   position: absolute;
   bottom: 12px;
@@ -333,7 +493,6 @@ onUnmounted(() => {
   margin: 0;
 }
 
-/* Popup content styles */
 .map-popup-content {
   padding: 0;
   min-width: 120px;
@@ -352,9 +511,18 @@ onUnmounted(() => {
   padding: 8px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
+.map-popup-no-actions {
+  padding: 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* Publish button styles */
 .map-popup-action-btn {
   width: 100%;
   padding: 8px 12px;
@@ -379,6 +547,93 @@ onUnmounted(() => {
   background: var(--color-success);
   border-color: var(--color-success);
   color: white;
+}
+
+/* Switch toggle styles in popup */
+.map-popup-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+}
+
+.map-popup-switch .switch-label {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.map-popup-switch .switch-track {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.map-popup-switch .switch-track.state-on {
+  background: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.map-popup-switch .switch-track.state-off {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.map-popup-switch .switch-track.state-pending {
+  background: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
+.map-popup-switch .switch-track.state-unknown {
+  background: var(--muted);
+  opacity: 0.5;
+}
+
+.map-popup-switch .switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  background: white;
+  border-radius: 50%;
+  transition: all 0.2s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.map-popup-switch .switch-track.state-on .switch-thumb,
+.map-popup-switch .switch-track.state-pending .switch-thumb {
+  left: calc(100% - 20px);
+}
+
+.map-popup-switch .switch-state-text {
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 28px;
+  text-align: right;
+}
+
+.map-popup-switch .switch-state-text.state-on {
+  color: var(--color-success);
+}
+
+.map-popup-switch .switch-state-text.state-off {
+  color: var(--muted);
+}
+
+.map-popup-switch .switch-state-text.state-pending {
+  color: var(--color-warning);
+}
+
+.map-popup-switch .switch-state-text.state-unknown {
+  color: var(--muted);
 }
 
 /* Leaflet control styling for dark mode */

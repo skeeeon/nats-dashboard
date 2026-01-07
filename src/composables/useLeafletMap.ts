@@ -5,6 +5,7 @@
  * Theme switching, marker rendering, popup actions.
  * 
  * V2: Supports both publish (button) and switch (toggle) actions.
+ * Fixed: Proper callback interface, popup event handling.
  */
 
 import { ref, shallowRef } from 'vue'
@@ -12,7 +13,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import type { MapMarker, MapMarkerAction } from '@/types/dashboard'
 
-// Tile providers - OpenStreetMap for light, CartoDB for dark
+// Tile providers
 const TILE_URLS = {
   light: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
   dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
@@ -21,7 +22,7 @@ const TILE_URLS = {
 const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
 
 /**
- * Popup event callbacks
+ * Popup event callbacks - EXPORTED for use by MapWidget
  */
 export interface PopupCallbacks {
   onPublishAction: (action: MapMarkerAction) => void
@@ -44,7 +45,6 @@ function fixLeafletIcons() {
 }
 
 export function useLeafletMap() {
-  // Use shallowRef for Leaflet instances - prevents Vue reactivity issues
   const map = shallowRef<L.Map | null>(null)
   const markersLayer = shallowRef<L.LayerGroup | null>(null)
   const tileLayer = shallowRef<L.TileLayer | null>(null)
@@ -71,7 +71,6 @@ export function useLeafletMap() {
 
     fixLeafletIcons()
 
-    // Create map instance
     const mapInstance = L.map(containerId, {
       center: [center.lat, center.lon],
       zoom: zoom,
@@ -103,12 +102,10 @@ export function useLeafletMap() {
   function updateTheme(isDarkMode: boolean) {
     if (!map.value) return
 
-    // Remove existing tile layer
     if (tileLayer.value) {
       map.value.removeLayer(tileLayer.value)
     }
 
-    // Add new tile layer
     const url = isDarkMode ? TILE_URLS.dark : TILE_URLS.light
     const newTileLayer = L.tileLayer(url, {
       attribution: TILE_ATTRIBUTION,
@@ -120,14 +117,8 @@ export function useLeafletMap() {
 
   /**
    * Render markers on the map
-   * 
-   * @param markers - Array of marker configs
-   * @param callbacks - Event callbacks for popup interactions
    */
-  function renderMarkers(
-    markers: MapMarker[],
-    callbacks: PopupCallbacks
-  ) {
+  function renderMarkers(markers: MapMarker[], callbacks: PopupCallbacks) {
     if (!map.value || !markersLayer.value) return
 
     // Clear existing markers
@@ -137,12 +128,9 @@ export function useLeafletMap() {
     markers.forEach(markerConfig => {
       const { id, lat, lon, label, actions } = markerConfig
 
-      // Create marker
-      const marker = L.marker([lat, lon], {
-        title: label
-      })
+      const marker = L.marker([lat, lon], { title: label })
 
-      // Build popup content
+      // Build popup content with callbacks wired up
       const popupContent = createPopupContent(id, label, actions, callbacks)
       const popup = L.popup({
         className: 'nats-map-popup',
@@ -165,7 +153,6 @@ export function useLeafletMap() {
         callbacks.onPopupClose(id)
       })
 
-      // Store reference and add to layer
       markerInstances.set(id, marker)
       markersLayer.value!.addLayer(marker)
     })
@@ -175,7 +162,6 @@ export function useLeafletMap() {
       const bounds = markers.map(m => [m.lat, m.lon] as [number, number])
       map.value.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 })
     } else if (markers.length === 1) {
-      // Center on single marker
       map.value.setView([markers[0].lat, markers[0].lon], map.value.getZoom())
     }
   }
@@ -205,11 +191,9 @@ export function useLeafletMap() {
 
       actions.forEach(action => {
         if (action.type === 'publish') {
-          // Publish action - button
           const btn = createPublishButton(action, callbacks.onPublishAction)
           actionList.appendChild(btn)
         } else if (action.type === 'switch') {
-          // Switch action - toggle
           const toggle = createSwitchToggle(action, callbacks.onSwitchToggle)
           actionList.appendChild(toggle)
         }
@@ -217,7 +201,6 @@ export function useLeafletMap() {
 
       container.appendChild(actionList)
     } else {
-      // No actions hint
       const hint = document.createElement('div')
       hint.className = 'map-popup-no-actions'
       hint.textContent = 'No actions configured'
@@ -274,7 +257,7 @@ export function useLeafletMap() {
 
     // Toggle track
     const track = document.createElement('button')
-    track.className = 'switch-track'
+    track.className = 'switch-track state-unknown'
     track.dataset.state = 'unknown'
 
     // Thumb
@@ -284,7 +267,7 @@ export function useLeafletMap() {
 
     // State text
     const stateText = document.createElement('span')
-    stateText.className = 'switch-state-text'
+    stateText.className = 'switch-state-text state-unknown'
     stateText.textContent = '...'
 
     track.onclick = (e) => {
@@ -325,22 +308,21 @@ export function useLeafletMap() {
     }
 
     if (stateText) {
+      stateText.classList.remove('state-on', 'state-off', 'state-pending', 'state-unknown')
+      stateText.classList.add(`state-${state}`)
+      
       switch (state) {
         case 'on':
           stateText.textContent = labels?.on || 'ON'
-          stateText.className = 'switch-state-text state-on'
           break
         case 'off':
           stateText.textContent = labels?.off || 'OFF'
-          stateText.className = 'switch-state-text state-off'
           break
         case 'pending':
           stateText.textContent = '...'
-          stateText.className = 'switch-state-text state-pending'
           break
         default:
           stateText.textContent = '?'
-          stateText.className = 'switch-state-text state-unknown'
       }
     }
   }
@@ -355,7 +337,6 @@ export function useLeafletMap() {
 
   /**
    * Force map to recalculate size
-   * Call after container resize
    */
   function invalidateSize() {
     if (!map.value) return
