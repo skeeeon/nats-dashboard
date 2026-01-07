@@ -65,6 +65,12 @@
           :errors="errors" 
         />
         
+        <ConfigMap 
+          v-if="widgetType === 'map'" 
+          :form="form" 
+          :errors="errors" 
+        />
+        
         <div class="modal-actions">
           <button class="btn-secondary" @click="close">
             Cancel
@@ -97,6 +103,7 @@ import ConfigButton from './config/ConfigButton.vue'
 import ConfigKv from './config/ConfigKv.vue'
 import ConfigSwitch from './config/ConfigSwitch.vue'
 import ConfigSlider from './config/ConfigSlider.vue'
+import ConfigMap from './config/ConfigMap.vue'
 
 interface Props {
   modelValue: boolean
@@ -150,13 +157,20 @@ const form = ref<WidgetFormState>({
   gaugeMax: 100,
   gaugeUnit: '',
   gaugeZones: [],
+  // Map widget fields
+  mapCenterLat: 39.8283,
+  mapCenterLon: -98.5795,
+  mapZoom: 4,
+  mapMarkerLabel: '',
+  mapMarkerLat: 0,
+  mapMarkerLon: 0,
+  mapActionLabel: '',
+  mapActionSubject: '',
+  mapActionPayload: '{}',
 })
 
 const errors = ref<Record<string, string>>({})
 
-/**
- * Get widget type
- */
 const widgetType = computed<WidgetType | null>(() => {
   if (!props.widgetId) return null
   const widget = dashboardStore.getWidget(props.widgetId)
@@ -194,7 +208,7 @@ watch(() => props.widgetId, (widgetId) => {
     currentThresholds = widget.statConfig?.thresholds ? [...widget.statConfig.thresholds] : []
   }
 
-  // Load KV bucket/key from the right place based on widget type
+  // Load KV bucket/key
   let currentKvBucket = ''
   let currentKvKey = ''
   
@@ -207,6 +221,39 @@ watch(() => props.widgetId, (widgetId) => {
   } else if (widget.type === 'kv') {
     currentKvBucket = widget.dataSource.kvBucket || ''
     currentKvKey = widget.dataSource.kvKey || ''
+  }
+
+  // Load map config
+  let mapCenterLat = 39.8283
+  let mapCenterLon = -98.5795
+  let mapZoom = 4
+  let mapMarkerLabel = ''
+  let mapMarkerLat = 0
+  let mapMarkerLon = 0
+  let mapActionLabel = ''
+  let mapActionSubject = ''
+  let mapActionPayload = '{}'
+
+  if (widget.type === 'map' && widget.mapConfig) {
+    mapCenterLat = widget.mapConfig.center?.lat ?? 39.8283
+    mapCenterLon = widget.mapConfig.center?.lon ?? -98.5795
+    mapZoom = widget.mapConfig.zoom ?? 4
+
+    // V1: Load first marker if exists
+    const firstMarker = widget.mapConfig.markers?.[0]
+    if (firstMarker) {
+      mapMarkerLabel = firstMarker.label || ''
+      mapMarkerLat = firstMarker.lat || 0
+      mapMarkerLon = firstMarker.lon || 0
+
+      // V1: Load first action if exists
+      const firstAction = firstMarker.actions?.[0]
+      if (firstAction) {
+        mapActionLabel = firstAction.label || ''
+        mapActionSubject = firstAction.subject || ''
+        mapActionPayload = firstAction.payload || '{}'
+      }
+    }
   }
 
   // Populate form
@@ -254,6 +301,17 @@ watch(() => props.widgetId, (widgetId) => {
     gaugeMax: widget.gaugeConfig?.max || 100,
     gaugeUnit: widget.gaugeConfig?.unit || '',
     gaugeZones: widget.gaugeConfig?.zones ? [...widget.gaugeConfig.zones] : [],
+
+    // Map
+    mapCenterLat,
+    mapCenterLon,
+    mapZoom,
+    mapMarkerLabel,
+    mapMarkerLat,
+    mapMarkerLon,
+    mapActionLabel,
+    mapActionSubject,
+    mapActionPayload,
   }
   
   errors.value = {}
@@ -318,7 +376,6 @@ function validate(): boolean {
       const keyResult = validator.validateKvKey(form.value.kvKey)
       if (!keyResult.valid) errors.value.kvKey = keyResult.error!
     } else {
-      // CORE mode requires publish subject
       const subjectResult = validator.validateSubject(form.value.subject)
       if (!subjectResult.valid) errors.value.subject = subjectResult.error!
     }
@@ -331,7 +388,6 @@ function validate(): boolean {
       const keyResult = validator.validateKvKey(form.value.kvKey)
       if (!keyResult.valid) errors.value.kvKey = keyResult.error!
     } else {
-      // CORE mode requires publish subject
       const subjectResult = validator.validateSubject(form.value.subject)
       if (!subjectResult.valid) errors.value.subject = subjectResult.error!
     }
@@ -339,6 +395,17 @@ function validate(): boolean {
     if (form.value.jsonPath) {
       const jsonResult = validator.validateJsonPath(form.value.jsonPath)
       if (!jsonResult.valid) errors.value.jsonPath = jsonResult.error!
+    }
+  } else if (widget.type === 'map') {
+    // Map validation: if action is configured, validate subject and payload
+    if (form.value.mapActionLabel && form.value.mapActionSubject) {
+      const subjectResult = validator.validateSubject(form.value.mapActionSubject)
+      if (!subjectResult.valid) errors.value.mapActionSubject = subjectResult.error!
+      
+      if (form.value.mapActionPayload) {
+        const jsonResult = validator.validateJson(form.value.mapActionPayload)
+        if (!jsonResult.valid) errors.value.mapActionPayload = jsonResult.error!
+      }
     }
   }
   
@@ -393,11 +460,9 @@ function save() {
     updates.switchConfig = {
       mode: form.value.switchMode,
       ...(form.value.switchMode === 'kv' ? {
-        // KV mode: only bucket and key needed
         kvBucket: form.value.kvBucket.trim(),
         kvKey: form.value.kvKey.trim(),
       } : {
-        // CORE mode: publish subject and state tracking
         publishSubject: form.value.subject.trim(),
         defaultState: form.value.switchDefaultState,
         stateSubject: form.value.switchStateSubject.trim() || undefined,
@@ -450,18 +515,49 @@ function save() {
       unit: form.value.gaugeUnit.trim() || undefined,
       zones: [...form.value.gaugeZones],
     }
+  } else if (widget.type === 'map') {
+    // Build markers array from V1 flat form
+    const markers = []
+    
+    // Only add marker if label or coords are set
+    if (form.value.mapMarkerLabel || form.value.mapMarkerLat || form.value.mapMarkerLon) {
+      const actions = []
+      
+      // Only add action if label and subject are set
+      if (form.value.mapActionLabel && form.value.mapActionSubject) {
+        actions.push({
+          id: `action_${Date.now()}`,
+          label: form.value.mapActionLabel.trim(),
+          subject: form.value.mapActionSubject.trim(),
+          payload: form.value.mapActionPayload.trim() || '{}',
+        })
+      }
+      
+      markers.push({
+        id: `marker_${Date.now()}`,
+        label: form.value.mapMarkerLabel.trim() || 'Marker',
+        lat: form.value.mapMarkerLat || form.value.mapCenterLat,
+        lon: form.value.mapMarkerLon || form.value.mapCenterLon,
+        actions,
+      })
+    }
+
+    updates.mapConfig = {
+      center: {
+        lat: form.value.mapCenterLat,
+        lon: form.value.mapCenterLon,
+      },
+      zoom: form.value.mapZoom,
+      markers,
+    }
   }
   
-  // Use the safe update method from our composable
   updateWidgetConfiguration(props.widgetId, updates)
   
   emit('saved')
   close()
 }
 
-/**
- * Close modal
- */
 function close() {
   emit('update:modelValue', false)
   errors.value = {}

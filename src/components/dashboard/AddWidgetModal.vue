@@ -53,6 +53,13 @@
             <div class="widget-type-name">KV Widget</div>
             <div class="widget-type-desc">Display KV values</div>
           </button>
+          
+          <!-- Map Widget -->
+          <button class="widget-type-btn" @click="selectType('map')">
+            <div class="widget-type-icon">🗺️</div>
+            <div class="widget-type-name">Map Widget</div>
+            <div class="widget-type-desc">Geographic location</div>
+          </button>
         </div>
       </div>
     </div>
@@ -80,16 +87,10 @@ const emit = defineEmits<{
   'select': [type: WidgetType]
 }>()
 
-/**
- * Close modal
- */
 function close() {
   emit('update:modelValue', false)
 }
 
-/**
- * User selected a widget type
- */
 function selectType(type: WidgetType) {
   emit('select', type)
   close()

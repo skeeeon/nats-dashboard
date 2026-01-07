@@ -51,4 +51,15 @@ export interface WidgetFormState {
   gaugeMax: number
   gaugeUnit: string
   gaugeZones: Array<{ min: number; max: number; color: string }>
+  
+  // Map Widget (V1: single marker, single action - flat structure)
+  mapCenterLat: number
+  mapCenterLon: number
+  mapZoom: number
+  mapMarkerLabel: string
+  mapMarkerLat: number
+  mapMarkerLon: number
+  mapActionLabel: string
+  mapActionSubject: string
+  mapActionPayload: string
 }

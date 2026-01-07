@@ -26,7 +26,8 @@ export default defineConfig({
       'jsonpath-plus',
       '@nats-io/nats-core',
       '@nats-io/jetstream',
-      '@nats-io/kv'
+      '@nats-io/kv',
+      'leaflet'
     ]
   }
 })

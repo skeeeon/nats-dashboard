@@ -160,6 +160,11 @@
             :is="GaugeWidget"
             :config="fullScreenWidget"
           />
+          <component
+            v-else-if="fullScreenWidget.type === 'map'"
+            :is="MapWidget"
+            :config="fullScreenWidget"
+          />
         </div>
         <div class="fullscreen-hint">
           Press <kbd>Esc</kbd> to exit full screen
@@ -206,6 +211,7 @@ import SwitchWidget from '@/components/widgets/SwitchWidget.vue'
 import SliderWidget from '@/components/widgets/SliderWidget.vue'
 import StatCardWidget from '@/components/widgets/StatCardWidget.vue'
 import GaugeWidget from '@/components/widgets/GaugeWidget.vue'
+import MapWidget from '@/components/widgets/MapWidget.vue'
 import type { WidgetType } from '@/types/dashboard'
 
 /**

@@ -75,6 +75,7 @@ import SwitchWidget from '@/components/widgets/SwitchWidget.vue'
 import SliderWidget from '@/components/widgets/SliderWidget.vue'
 import StatCardWidget from '@/components/widgets/StatCardWidget.vue'
 import GaugeWidget from '@/components/widgets/GaugeWidget.vue'
+import MapWidget from '@/components/widgets/MapWidget.vue'
 
 const props = defineProps<{
   config?: WidgetConfig
@@ -103,6 +104,7 @@ const widgetComponent = computed(() => {
     case 'slider': return SliderWidget
     case 'stat': return StatCardWidget
     case 'gauge': return GaugeWidget
+    case 'map': return MapWidget
     default:
       error.value = `Unknown type: ${props.config.type}`
       return null
@@ -208,6 +210,9 @@ onErrorCaptured((err) => {
   
   /* Enable container queries for children */
   container-type: size;
+  
+  /* Ensure widget body stays below header for drag handle */
+  z-index: 0;
 }
 
 .widget-error {

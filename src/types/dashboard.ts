@@ -1,7 +1,7 @@
 /**
  * Widget Types
  */
-export type WidgetType = 'chart' | 'text' | 'button' | 'kv' | 'switch' | 'slider' | 'stat' | 'gauge'
+export type WidgetType = 'chart' | 'text' | 'button' | 'kv' | 'switch' | 'slider' | 'stat' | 'gauge' | 'map'
 export type DataSourceType = 'subscription' | 'consumer' | 'kv'
 export type ChartType = 'line' | 'bar' | 'pie' | 'gauge'
 
@@ -11,8 +11,8 @@ export type ThresholdOperator = '>' | '>=' | '<' | '<=' | '==' | '!='
 export interface ThresholdRule {
   id: string
   operator: ThresholdOperator
-  value: string      // Stored as string, parsed during evaluation
-  color: string      // Hex or CSS var
+  value: string
+  color: string
 }
 
 // --- Data Source Configuration ---
@@ -56,82 +56,48 @@ export interface KvWidgetConfig {
   thresholds?: ThresholdRule[]
 }
 
-/**
- * Switch Widget Configuration
- * Grug say: Two modes. KV = stateful. CORE = simple pub/sub.
- * 
- * KV Mode: Uses KV bucket for persistent state, watches for changes
- * CORE Mode: Subscribes to state subject (defaults to publishSubject)
- */
 export interface SwitchWidgetConfig {
   mode: 'kv' | 'core'
-  
-  // KV mode settings (required when mode='kv')
   kvBucket?: string
   kvKey?: string
-  
-  // CORE mode settings (used when mode='core')
-  defaultState?: 'on' | 'off'  // Initial state to display
-  stateSubject?: string        // Optional: Subject to subscribe for state updates
-                               // If not specified, defaults to publishSubject
-                               // Set to empty string to disable subscription (fire & forget)
-  
-  // Control settings (both modes)
-  publishSubject: string       // Where to publish control commands
-  onPayload: any              // Can be string | number | boolean | object
-  offPayload: any             // Can be string | number | boolean | object
-  
-  // Optional settings
+  defaultState?: 'on' | 'off'
+  stateSubject?: string
+  publishSubject: string
+  onPayload: any
+  offPayload: any
   confirmOnChange?: boolean
   confirmMessage?: string
   labels?: {
-    on?: string   // Default: "ON"
-    off?: string  // Default: "OFF"
+    on?: string
+    off?: string
   }
 }
 
-/**
- * Slider Widget Configuration
- * Grug say: Publish value when user release slider. Simple.
- */
 export interface SliderWidgetConfig {
   mode: 'core' | 'kv'
-
   publishSubject: string
   stateSubject?: string
-  
   kvBucket?: string
   kvKey?: string
-
   min: number
   max: number
   step: number
   defaultValue: number
-  unit?: string  // e.g., "%", "°C", "dB"
+  unit?: string
   valueTemplate?: string
-
   jsonPath?: string
-  
   confirmOnChange?: boolean
   confirmMessage?: string
 }
 
-/**
- * Stat Card Widget Configuration
- * Grug say: Big number with trend. Good for KPIs.
- */
 export interface StatCardWidgetConfig {
-  format?: string  // e.g., "{value}°C"
+  format?: string
   unit?: string
   showTrend?: boolean
-  trendWindow?: number  // Compare to N messages ago
+  trendWindow?: number
   thresholds?: ThresholdRule[]
 }
 
-/**
- * Gauge Widget Configuration
- * Grug say: Round meter. Show current value in range.
- */
 export interface GaugeWidgetConfig {
   min: number
   max: number
@@ -141,6 +107,46 @@ export interface GaugeWidgetConfig {
     max: number
     color: string
   }[]
+}
+
+/**
+ * Map Marker Action
+ * Grug say: Click action in popup. Publish message like button.
+ */
+export interface MapMarkerAction {
+  id: string
+  label: string
+  subject: string
+  payload: string
+}
+
+/**
+ * Map Marker
+ * Grug say: Point on map. Has location and optional actions.
+ */
+export interface MapMarker {
+  id: string
+  label: string
+  lat: number
+  lon: number
+  color?: string
+  actions: MapMarkerAction[]
+}
+
+/**
+ * Map Widget Configuration
+ * Grug say: Show map with markers. Click markers to do things.
+ * 
+ * V1: Single marker, single action (UI simplified)
+ * V2: Multiple markers, multiple actions (data structure ready)
+ */
+export interface MapWidgetConfig {
+  center: {
+    lat: number
+    lon: number
+  }
+  zoom: number
+  markers: MapMarker[]
 }
 
 // --- Main Widget Configuration ---
@@ -164,6 +170,7 @@ export interface WidgetConfig {
   sliderConfig?: SliderWidgetConfig
   statConfig?: StatCardWidgetConfig
   gaugeConfig?: GaugeWidgetConfig
+  mapConfig?: MapWidgetConfig
 }
 
 export interface Dashboard {
@@ -185,6 +192,7 @@ export const DEFAULT_WIDGET_SIZES: Record<WidgetType, { w: number; h: number }> 
   slider: { w: 4, h: 2 },
   stat: { w: 3, h: 2 },
   gauge: { w: 3, h: 3 },
+  map: { w: 6, h: 4 },
 }
 
 export const DEFAULT_BUFFER_CONFIG: BufferConfig = {
@@ -235,12 +243,12 @@ export function createDefaultWidget(type: WidgetType, position: { x: number; y: 
     case 'slider':
       base.sliderConfig = {
         mode: 'core',
-	publishSubject: 'device.slider',
+        publishSubject: 'device.slider',
         min: 0,
         max: 100,
         step: 1,
         defaultValue: 50,
-	valueTemplate: '{{value}}',
+        valueTemplate: '{{value}}',
         unit: '%'
       }
       break
@@ -264,6 +272,13 @@ export function createDefaultWidget(type: WidgetType, position: { x: number; y: 
           { min: 60, max: 80, color: 'var(--color-warning)' },
           { min: 80, max: 100, color: 'var(--color-error)' }
         ]
+      }
+      break
+    case 'map':
+      base.mapConfig = {
+        center: { lat: 39.8283, lon: -98.5795 }, // US center
+        zoom: 4,
+        markers: []
       }
       break
   }

@@ -72,11 +72,11 @@ export function useWidgetOperations() {
 
   /**
    * Check if widget type needs data subscription
-   * Grug say: Control widgets (button, switch, slider) manage their own connections
+   * Grug say: Control widgets (button, switch, slider, map) manage their own connections
    */
   function needsSubscription(widgetType: WidgetType): boolean {
-    // These widgets handle their own connections internally
-    const selfManagedTypes: WidgetType[] = ['button', 'kv', 'switch', 'slider']
+    // These widgets handle their own connections internally or don't need subscriptions
+    const selfManagedTypes: WidgetType[] = ['button', 'kv', 'switch', 'slider', 'map']
     return !selfManagedTypes.includes(widgetType)
   }
 
@@ -126,6 +126,14 @@ export function useWidgetOperations() {
         widget.title = 'Gauge Meter'
         widget.dataSource = { type: 'subscription', subject: 'sensor.value' }
         widget.jsonPath = '$.value'
+        break
+      case 'map':
+        widget.title = 'Map Widget'
+        widget.mapConfig = {
+          center: { lat: 39.8283, lon: -98.5795 },
+          zoom: 4,
+          markers: []
+        }
         break
     }
     
@@ -182,9 +190,6 @@ export function useWidgetOperations() {
    * 1. Unsubscribe using OLD config (so we know what subject to stop listening to)
    * 2. Update store with NEW config
    * 3. Subscribe using NEW config
-   * 
-   * This prevents "ghost subscriptions" where we update store first, then try to 
-   * unsubscribe, but can't find the old subject anymore.
    */
   function updateWidgetConfiguration(widgetId: string, updates: Partial<WidgetConfig>) {
     const widget = dashboardStore.getWidget(widgetId)
@@ -223,7 +228,7 @@ export function useWidgetOperations() {
     subscribeWidget,
     unsubscribeWidget,
     resubscribeWidget,
-    updateWidgetConfiguration, // NEW explicit update function
+    updateWidgetConfiguration,
     
     // Bulk operations
     subscribeAllWidgets,
