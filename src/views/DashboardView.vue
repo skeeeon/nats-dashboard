@@ -20,8 +20,7 @@
           <div class="dashboard-title-container">
             <h1 class="dashboard-name">{{ dashboardStore.activeDashboard?.name || 'Dashboard' }}</h1>
             
-            <!-- Unified Status Pill -->
-            <!-- Priority 1: Remote Update Available -->
+            <!-- Status Pills -->
             <button
               v-if="dashboardStore.remoteChanged"
               class="badge-shared is-stale"
@@ -31,7 +30,6 @@
               Update ↻
             </button>
 
-            <!-- Priority 2: Local Unsaved Changes -->
             <button
               v-else-if="dashboardStore.isDirty"
               class="badge-shared is-dirty"
@@ -41,7 +39,6 @@
               Save ●
             </button>
 
-            <!-- Priority 3: Synced/Shared Read-Only -->
             <span
               v-else-if="dashboardStore.activeDashboard?.storage === 'kv'"
               class="badge-shared"
@@ -51,7 +48,7 @@
             </span>
           </div>
           
-          <!-- Connection Status (Clickable for Debug) -->
+          <!-- Connection Status -->
           <button 
             class="connection-status" 
             :class="natsStore.isConnected ? 'connected' : 'disconnected'"
@@ -66,7 +63,17 @@
         
         <!-- Row 2: Actions -->
         <div class="toolbar-actions">
-          <!-- Lock Toggle -->
+          <!-- Variable Toggle (Only if variables exist) -->
+          <button 
+            v-if="hasVariables"
+            class="btn-icon"
+            :class="{ 'is-active': showVariableBar }"
+            @click="showVariableBar = !showVariableBar"
+            title="Toggle Variables"
+          >
+            <span class="var-icon">{ }</span>
+          </button>
+
           <button 
             class="btn-icon" 
             :title="dashboardStore.isLocked ? 'Unlock (U)' : 'Lock (L)'"
@@ -76,7 +83,6 @@
             {{ dashboardStore.isLocked ? '🔒' : '🔓' }}
           </button>
 
-          <!-- Theme Toggle -->
           <button 
             class="btn-icon" 
             title="Toggle Theme"
@@ -85,7 +91,6 @@
             {{ theme === 'dark' ? '☀️' : '🌙' }}
           </button>
           
-          <!-- Add Widget -->
           <button 
             v-if="!dashboardStore.isLocked"
             class="btn-primary" 
@@ -96,7 +101,6 @@
             <span class="btn-text">Add Widget</span>
           </button>
           
-          <!-- Settings -->
           <button class="btn-secondary" @click="$router.push('/settings')" title="Settings">
             <span class="btn-icon-only">⚙️</span>
             <span class="btn-text">Settings</span>
@@ -104,8 +108,17 @@
         </div>
       </div>
       
+      <!-- Variable Bar (Collapsible) -->
+      <Transition name="slide-fade">
+        <div v-if="showVariableBar || (!dashboardStore.isLocked && !hasVariables)" class="variable-bar-wrapper">
+          <VariableBar 
+            @edit="showVariableModal = true" 
+            @close="showVariableBar = false"
+          />
+        </div>
+      </Transition>
+      
       <!-- Grid with widgets -->
-      <!-- Quick Win B: Add is-offline class to gray out stale data -->
       <div class="dashboard-content" :class="{ 'is-offline': !natsStore.isConnected }">
         <DashboardGrid
           v-if="dashboardStore.activeWidgets.length > 0"
@@ -126,24 +139,11 @@
       </div>
     </div>
     
-    <!-- Add Widget Modal -->
-    <AddWidgetModal
-      v-model="showAddWidget"
-      @select="handleCreateWidget"
-    />
-    
-    <!-- Configure Widget Modal -->
-    <ConfigureWidgetModal
-      v-model="showConfigWidget"
-      :widget-id="configWidgetId"
-      @saved="handleWidgetConfigSaved"
-    />
-
-    <!-- Keyboard Shortcuts Modal -->
-    <KeyboardShortcutsModal 
-      v-model="showShortcutsModal" 
-      :shortcuts="shortcuts" 
-    />
+    <!-- Modals -->
+    <AddWidgetModal v-model="showAddWidget" @select="handleCreateWidget" />
+    <ConfigureWidgetModal v-model="showConfigWidget" :widget-id="configWidgetId" @saved="handleWidgetConfigSaved" />
+    <KeyboardShortcutsModal v-model="showShortcutsModal" :shortcuts="shortcuts" />
+    <VariableEditorModal v-model="showVariableModal" />
     
     <!-- Full-Screen Widget Modal -->
     <div v-if="fullScreenWidgetId && fullScreenWidget" class="fullscreen-modal" @click.self="exitFullScreen">
@@ -193,7 +193,6 @@
             :is="GaugeWidget"
             :config="fullScreenWidget"
           />
-          <!-- MapWidget gets isFullscreen prop to use unique container ID -->
           <component
             v-else-if="fullScreenWidget.type === 'map'"
             :is="MapWidget"
@@ -207,7 +206,6 @@
       </div>
     </div>
     
-    <!-- Global Widget Action Confirmation Dialog -->
     <ConfirmDialog
       v-model="confirmState.show"
       :title="confirmState.title"
@@ -217,7 +215,6 @@
       @confirm="handleGlobalConfirm"
     />
     
-    <!-- Debug Panel (Now controlled by prop) -->
     <DebugPanel v-model="showDebugPanel" />
   </div>
 </template>
@@ -237,6 +234,8 @@ import ConfigureWidgetModal from '@/components/dashboard/ConfigureWidgetModal.vu
 import KeyboardShortcutsModal from '@/components/common/KeyboardShortcutsModal.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import DebugPanel from '@/components/common/DebugPanel.vue'
+import VariableBar from '@/components/dashboard/VariableBar.vue'
+import VariableEditorModal from '@/components/dashboard/VariableEditorModal.vue'
 import TextWidget from '@/components/widgets/TextWidget.vue'
 import ChartWidget from '@/components/widgets/ChartWidget.vue'
 import ButtonWidget from '@/components/widgets/ButtonWidget.vue'
@@ -269,7 +268,12 @@ const showAddWidget = ref(false)
 const showConfigWidget = ref(false)
 const showShortcutsModal = ref(false)
 const showDebugPanel = ref(false)
+const showVariableModal = ref(false)
 const configWidgetId = ref<string | null>(null)
+
+// Variable Bar State
+const showVariableBar = ref(false)
+const hasVariables = computed(() => (dashboardStore.activeDashboard?.variables?.length || 0) > 0)
 
 // Fullscreen state
 const fullScreenWidgetId = ref<string | null>(null)
@@ -431,6 +435,7 @@ const { shortcuts } = useKeyboardShortcuts([
         showAddWidget.value = false
         showShortcutsModal.value = false
         showDebugPanel.value = false
+        showVariableModal.value = false
       }
     }
   }
@@ -451,7 +456,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  // Disconnect on unmount, but don't clear data immediately if just navigating
   unsubscribeAllWidgets(false)
   window.removeEventListener('show-shortcuts-help', handleShowShortcuts)
 })
@@ -460,20 +464,26 @@ watch(() => natsStore.isConnected, (connected) => {
   if (connected) {
     subscribeAllWidgets()
   } else {
-    // Quick Win B: Don't clear buffers. Keep stale data visible.
-    // Pass true to keep buffer data
     unsubscribeAllWidgets(true) 
   }
 })
 
 watch(() => dashboardStore.activeDashboardId, async () => {
-  // Switching dashboards always clears data of old dashboard
   unsubscribeAllWidgets(false)
   await nextTick()
   if (natsStore.isConnected) {
     subscribeAllWidgets()
   }
 })
+
+// Watch for variable changes -> Resubscribe
+watch(() => dashboardStore.currentVariableValues, () => {
+  if (natsStore.isConnected) {
+    console.log('[Dashboard] Variables changed, resubscribing...')
+    unsubscribeAllWidgets(false)
+    subscribeAllWidgets()
+  }
+}, { deep: true })
 
 watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   if (natsStore.isConnected && newCount > oldCount) {
@@ -484,6 +494,7 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 </script>
 
 <style scoped>
+/* Same styles as before */
 .dashboard-view {
   height: 100vh;
   display: flex;
@@ -511,7 +522,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   gap: 12px;
 }
 
-/* Desktop Layout: Everything in one row */
 .toolbar-top-row {
   display: flex;
   align-items: center;
@@ -563,7 +573,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   text-overflow: ellipsis;
 }
 
-/* Shared/Save Badge */
 .badge-shared {
   font-size: 10px;
   background: var(--color-info-bg);
@@ -580,7 +589,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   white-space: nowrap;
 }
 
-/* Dirty State (Orange) */
 .badge-shared.is-dirty {
   background: var(--color-warning);
   color: white;
@@ -589,7 +597,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   animation: pulse-badge 2s infinite;
 }
 
-/* Stale State (Update Available - Purple/Accent) */
 .badge-shared.is-stale {
   background: var(--color-accent);
   color: white;
@@ -609,7 +616,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
 }
 
-/* Connection Status */
 .connection-status {
   display: flex;
   align-items: center;
@@ -655,7 +661,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   font-size: 11px;
 }
 
-/* Buttons */
 .btn-primary,
 .btn-secondary,
 .btn-icon {
@@ -684,6 +689,16 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   transform: scale(1.1);
 }
 
+.btn-icon.is-active {
+  background: var(--color-accent);
+  color: white;
+}
+
+.var-icon {
+  font-family: var(--mono);
+  font-weight: bold;
+}
+
 .lock-active {
   background: rgba(210, 153, 34, 0.2);
   border: 1px solid var(--color-warning);
@@ -707,29 +722,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   background: rgba(255, 255, 255, 0.15);
 }
 
-.remote-update-badge {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: var(--color-info-bg);
-  border: 1px solid var(--color-info-border);
-  border-radius: 4px;
-  color: var(--color-info);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.btn-link {
-  background: none;
-  border: none;
-  text-decoration: underline;
-  color: inherit;
-  cursor: pointer;
-  font-weight: bold;
-  padding: 0;
-}
-
 .dashboard-content {
   flex: 1;
   min-height: 0;
@@ -738,10 +730,9 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   transition: filter 0.3s ease;
 }
 
-/* Quick Win B: Visual indicator for stale state */
 .dashboard-content.is-offline {
   filter: grayscale(0.8) opacity(0.7);
-  pointer-events: none; /* Prevent interaction with stale widgets to avoid confusion */
+  pointer-events: none;
   cursor: not-allowed;
 }
 
@@ -847,15 +838,27 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   display: none;
 }
 
+/* Transition for Variable Bar */
+.slide-fade-enter-active,
+.slide-fade-leave-active {
+  transition: all 0.2s ease-out;
+  max-height: 100px;
+  opacity: 1;
+}
+
+.slide-fade-enter-from,
+.slide-fade-leave-to {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+}
+
 @media (max-width: 900px) {
   .dashboard-toolbar {
     padding: 12px 16px;
   }
 }
 
-/* ==========================================================================
-   MOBILE LAYOUT (< 600px)
-   ========================================================================== */
 @media (max-width: 600px) {
   .dashboard-toolbar {
     flex-direction: column;
@@ -864,7 +867,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
     gap: 12px;
   }
 
-  /* Row 1: Nav | Title | Connection */
   .toolbar-top-row {
     width: 100%;
     display: grid;
@@ -882,7 +884,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
     font-size: 16px;
   }
 
-  /* Compact Connection Status (Dot only) */
   .connection-status {
     padding: 0;
     width: 36px;
@@ -894,16 +895,13 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   .status-dot { margin: 0; }
   .status-label, .rtt { display: none; }
 
-  /* Row 2: Actions Grid */
   .toolbar-actions {
     width: 100%;
     display: grid;
-    /* Create equal width columns for actions */
     grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
     gap: 8px;
   }
 
-  /* Bigger Touch Targets for Mobile */
   .btn-icon, .btn-primary, .btn-secondary {
     height: 44px;
     padding: 0;
@@ -911,7 +909,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
     justify-content: center;
   }
 
-  /* Hide text labels on mobile actions to save space */
   .btn-text { display: none; }
   .btn-icon-only { 
     display: inline-block; 
@@ -919,7 +916,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
     font-weight: bold;
   }
   
-  /* Ensure hamburger is touch-friendly */
   .hamburger-btn {
     width: 36px;
     height: 36px;

@@ -3,6 +3,7 @@
     <div 
       class="value-display"
       :style="valueStyle"
+      :title="resolvedSubject ? `Source: ${resolvedSubject}` : ''"
     >
       {{ displayValue }}
     </div>
@@ -15,20 +16,28 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useWidgetDataStore } from '@/stores/widgetData'
+import { useDashboardStore } from '@/stores/dashboard'
 import { useThresholds } from '@/composables/useThresholds'
 import type { WidgetConfig } from '@/types/dashboard'
+import { resolveTemplate } from '@/utils/variables'
 
 const props = defineProps<{
   config: WidgetConfig
 }>()
 
 const dataStore = useWidgetDataStore()
+const dashboardStore = useDashboardStore()
 const { evaluateThresholds } = useThresholds()
 
 const fontSize = computed(() => props.config.textConfig?.fontSize || 24)
 const configColor = computed(() => props.config.textConfig?.color)
 const format = computed(() => props.config.textConfig?.format)
 const thresholds = computed(() => props.config.textConfig?.thresholds || [])
+
+// Resolve subject for tooltip
+const resolvedSubject = computed(() => {
+  return resolveTemplate(props.config.dataSource.subject, dashboardStore.currentVariableValues)
+})
 
 const latestMessage = computed(() => {
   const buffer = dataStore.getBuffer(props.config.id)
@@ -66,7 +75,6 @@ const showTimestamp = computed(() => latestMessage.value !== null)
 
 const valueStyle = computed(() => {
   const style: Record<string, string> = {
-    // Use clamp with cqw for responsive scaling, fallback to configured size
     fontSize: `clamp(12px, 15cqw, ${fontSize.value * 2}px)`,
     transition: 'color 0.3s ease'
   }
@@ -96,6 +104,7 @@ const valueStyle = computed(() => {
   max-height: 100%;
   overflow-y: auto;
   color: var(--text);
+  cursor: default;
 }
 
 .timestamp {
@@ -105,7 +114,6 @@ const valueStyle = computed(() => {
   font-family: var(--mono);
 }
 
-/* Hide timestamp if widget is too short */
 @container (height < 80px) {
   .timestamp { display: none; }
 }

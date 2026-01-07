@@ -1,43 +1,36 @@
 <template>
   <div class="switch-widget">
-    <!-- Switch container -->
     <div 
       class="switch-container"
       :class="{ 'is-disabled': isDisabled }"
     >
-      <!-- Switch track -->
       <div 
         class="switch-track vue-grid-item-no-drag"
         :class="switchStateClass"
         @click="handleToggle"
         :title="switchTooltip"
       >
-        <!-- Switch thumb -->
         <div class="switch-thumb">
           <div v-if="isPending" class="spinner"></div>
           <div v-else class="thumb-icon">{{ thumbIcon }}</div>
         </div>
         
-        <!-- Labels (Hidden on small sizes) -->
         <div class="switch-labels">
           <span class="label-off">{{ offLabel }}</span>
           <span class="label-on">{{ onLabel }}</span>
         </div>
       </div>
       
-      <!-- State text (Hidden on small sizes) -->
       <div class="state-text" :class="switchStateClass">
         {{ stateDisplayText }}
       </div>
     </div>
     
-    <!-- Error message -->
     <div v-if="error" class="error-message">
       {{ error }}
       <button class="retry-btn" @click="retry">Retry</button>
     </div>
     
-    <!-- Disconnected overlay -->
     <div v-if="!natsStore.isConnected" class="disconnected-overlay">
       <span class="disconnect-icon">⚠️</span>
     </div>
@@ -47,34 +40,45 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue'
 import { useNatsStore } from '@/stores/nats'
+import { useDashboardStore } from '@/stores/dashboard'
 import { Kvm } from '@nats-io/kv'
 import type { WidgetConfig } from '@/types/dashboard'
 import { decodeBytes, encodeString } from '@/utils/encoding'
+import { resolveTemplate } from '@/utils/variables'
 
 const props = defineProps<{
   config: WidgetConfig
 }>()
 
 const natsStore = useNatsStore()
+const dashboardStore = useDashboardStore()
 const requestConfirm = inject('requestConfirm') as (title: string, message: string, onConfirm: () => void) => void
 
-// Component state
 type SwitchState = 'unknown' | 'on' | 'off' | 'pending'
 const currentState = ref<SwitchState>('unknown')
 const error = ref<string | null>(null)
 const isPending = ref(false)
 
-// KV watcher and instance
 let kvWatcher: any = null
 let kvInstance: any = null
 let subscription: any = null
 
-// Configuration shortcuts
 const cfg = computed(() => props.config.switchConfig!)
 const mode = computed(() => cfg.value.mode)
 const onLabel = computed(() => cfg.value.labels?.on || 'ON')
 const offLabel = computed(() => cfg.value.labels?.off || 'OFF')
 const isDisabled = computed(() => !natsStore.isConnected || isPending.value)
+
+// Resolved configuration
+const resolvedConfig = computed(() => {
+  const vars = dashboardStore.currentVariableValues
+  return {
+    kvBucket: resolveTemplate(cfg.value.kvBucket, vars),
+    kvKey: resolveTemplate(cfg.value.kvKey, vars),
+    publishSubject: resolveTemplate(cfg.value.publishSubject, vars),
+    stateSubject: resolveTemplate(cfg.value.stateSubject, vars),
+  }
+})
 
 const switchStateClass = computed(() => `state-${currentState.value}`)
 
@@ -117,8 +121,8 @@ async function initialize() {
 }
 
 async function initializeKvMode() {
-  const bucket = cfg.value.kvBucket
-  const key = cfg.value.kvKey
+  const bucket = resolvedConfig.value.kvBucket
+  const key = resolvedConfig.value.kvKey
   
   if (!bucket || !key) {
     error.value = 'KV bucket and key required'
@@ -175,7 +179,7 @@ async function initializeKvMode() {
 
 async function initializeCoreMode() {
   currentState.value = cfg.value.defaultState || 'off'
-  const stateSubject = cfg.value.stateSubject || cfg.value.publishSubject
+  const stateSubject = resolvedConfig.value.stateSubject || resolvedConfig.value.publishSubject
   
   try {
     subscription = natsStore.nc!.subscribe(stateSubject)
@@ -249,16 +253,16 @@ async function executeToggle(targetState: 'on' | 'off') {
   try {
     if (mode.value === 'kv') {
       if (!kvInstance) throw new Error('KV instance not initialized')
-      const key = cfg.value.kvKey!
+      const key = resolvedConfig.value.kvKey!
       const data = encodeString(JSON.stringify(payload))
       await kvInstance.put(key, data)
     } else {
       if (!natsStore.nc) throw new Error('Not connected to NATS')
-      const subject = cfg.value.publishSubject
+      const subject = resolvedConfig.value.publishSubject
       const data = serializePayload(payload)
       natsStore.nc.publish(subject, data)
       
-      if (!cfg.value.stateSubject) {
+      if (!resolvedConfig.value.stateSubject) {
         currentState.value = targetState
         isPending.value = false
       }
@@ -310,7 +314,8 @@ watch(() => natsStore.isConnected, (connected) => {
   }
 })
 
-watch(() => props.config.switchConfig, () => {
+// Watch for config OR variables changing
+watch([() => props.config.switchConfig, () => dashboardStore.currentVariableValues], () => {
   cleanup()
   if (natsStore.isConnected) initialize()
 }, { deep: true })
@@ -343,7 +348,6 @@ watch(() => props.config.switchConfig, () => {
   pointer-events: none;
 }
 
-/* Switch Track - Responsive Sizing */
 .switch-track {
   position: relative;
   width: 80%;
@@ -352,7 +356,7 @@ watch(() => props.config.switchConfig, () => {
   max-height: 56px;
   min-height: 32px;
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 999px; /* Pill shape */
+  border-radius: 999px;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   border: 2px solid var(--border);
@@ -388,7 +392,6 @@ watch(() => props.config.switchConfig, () => {
   50% { opacity: 0.5; }
 }
 
-/* Switch Thumb - Responsive */
 .switch-thumb {
   position: absolute;
   top: 2px;
@@ -419,7 +422,6 @@ watch(() => props.config.switchConfig, () => {
   color: #333;
 }
 
-/* Hide icon on very small sizes */
 @container (height < 40px) {
   .thumb-icon { display: none; }
 }
@@ -428,7 +430,6 @@ watch(() => props.config.switchConfig, () => {
   color: var(--color-success);
 }
 
-/* Spinner */
 .spinner {
   width: 60%;
   height: 60%;
@@ -442,7 +443,6 @@ watch(() => props.config.switchConfig, () => {
   to { transform: rotate(360deg); }
 }
 
-/* Labels - Hide on small height */
 .switch-labels {
   position: absolute;
   top: 0;
@@ -474,7 +474,6 @@ watch(() => props.config.switchConfig, () => {
   opacity: 0.3;
 }
 
-/* State Text - Hide on small height */
 .state-text {
   font-size: 14px;
   font-weight: 600;
@@ -491,7 +490,6 @@ watch(() => props.config.switchConfig, () => {
 .state-text.state-pending { color: var(--color-warning); }
 .state-text.state-unknown { color: var(--muted); }
 
-/* Error Message */
 .error-message {
   position: absolute;
   bottom: 8px;
@@ -522,7 +520,6 @@ watch(() => props.config.switchConfig, () => {
   transition: opacity 0.2s;
 }
 
-/* Disconnected Overlay */
 .disconnected-overlay {
   position: absolute;
   top: 4px;

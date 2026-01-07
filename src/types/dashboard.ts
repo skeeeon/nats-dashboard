@@ -7,6 +7,18 @@ export type WidgetType = 'chart' | 'text' | 'button' | 'kv' | 'switch' | 'slider
 export type DataSourceType = 'subscription' | 'consumer' | 'kv'
 export type ChartType = 'line' | 'bar' | 'pie' | 'gauge'
 
+// --- Dashboard Variables ---
+export type VariableType = 'text' | 'select'
+
+export interface DashboardVariable {
+  id: string          // Unique ID for the variable definition
+  name: string        // The token used in templates (e.g. "device_id")
+  label: string       // Display label (e.g. "Device")
+  type: VariableType
+  options?: string[]  // For 'select' type
+  defaultValue: string
+}
+
 // --- Threshold Types ---
 export type ThresholdOperator = '>' | '>=' | '<' | '<=' | '==' | '!='
 
@@ -196,6 +208,7 @@ export interface Dashboard {
   created: number
   modified: number
   widgets: WidgetConfig[]
+  variables?: DashboardVariable[] // New field
   
   // Storage Metadata
   storage?: StorageType
@@ -316,7 +329,8 @@ export function createDefaultDashboard(name: string): Dashboard {
     created: now,
     modified: now,
     widgets: [],
-    storage: 'local' // Default to local
+    variables: [], // Initialize empty variables
+    storage: 'local'
   }
 }
 

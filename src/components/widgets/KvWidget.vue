@@ -12,8 +12,8 @@
     <div v-else-if="kvValue !== null" class="kv-content">
       <!-- Header: Only show for complex objects -->
       <div v-if="!isSingleValue" class="kv-header">
-        <div class="kv-bucket">{{ config.dataSource.kvBucket }}</div>
-        <div class="kv-key">{{ config.dataSource.kvKey }}</div>
+        <div class="kv-bucket">{{ resolvedConfig.bucket }}</div>
+        <div class="kv-key">{{ resolvedConfig.key }}</div>
       </div>
       
       <div class="kv-value">
@@ -54,6 +54,7 @@
     <div v-else class="kv-empty">
       <div class="empty-icon">🗄️</div>
       <div>Key not found</div>
+      <div class="empty-hint">{{ resolvedConfig.key }}</div>
     </div>
   </div>
 </template>
@@ -61,18 +62,21 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useNatsStore } from '@/stores/nats'
+import { useDashboardStore } from '@/stores/dashboard'
 import { Kvm } from '@nats-io/kv'
 import { JSONPath } from 'jsonpath-plus'
 import LoadingState from '@/components/common/LoadingState.vue'
 import { useThresholds } from '@/composables/useThresholds'
 import type { WidgetConfig } from '@/types/dashboard'
 import { decodeBytes } from '@/utils/encoding'
+import { resolveTemplate } from '@/utils/variables'
 
 const props = defineProps<{
   config: WidgetConfig
 }>()
 
 const natsStore = useNatsStore()
+const dashboardStore = useDashboardStore()
 const { evaluateThresholds } = useThresholds()
 
 // State
@@ -82,6 +86,16 @@ const lastUpdated = ref<string | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
 let watcher: any = null
+
+// Resolved Configuration
+const resolvedConfig = computed(() => {
+  const vars = dashboardStore.currentVariableValues
+  return {
+    bucket: resolveTemplate(props.config.dataSource.kvBucket, vars),
+    key: resolveTemplate(props.config.dataSource.kvKey, vars),
+    jsonPath: props.config.jsonPath
+  }
+})
 
 // Computed
 const processedValue = computed(() => {
@@ -94,10 +108,10 @@ const processedValue = computed(() => {
     isJson = true
   } catch { }
 
-  if (props.config.jsonPath && isJson) {
+  if (resolvedConfig.value.jsonPath && isJson) {
     try {
       const extracted = JSONPath({ 
-        path: props.config.jsonPath, 
+        path: resolvedConfig.value.jsonPath, 
         json: val, 
         wrap: false 
       })
@@ -132,8 +146,7 @@ const valueColor = computed(() => {
 })
 
 async function loadKvValue() {
-  const bucket = props.config.dataSource.kvBucket
-  const key = props.config.dataSource.kvKey
+  const { bucket, key } = resolvedConfig.value
   
   if (!bucket || !key || bucket === 'my-bucket') {
     error.value = 'Click ⚙️ to configure'
@@ -206,10 +219,11 @@ onMounted(() => {
 
 onUnmounted(cleanup)
 
-watch(() => [props.config.dataSource.kvBucket, props.config.dataSource.kvKey, props.config.jsonPath], () => { 
+// Watch resolved config (handles both prop changes AND variable changes)
+watch(resolvedConfig, () => { 
   cleanup()
-  loadKvValue()
-})
+  if (natsStore.isConnected) loadKvValue()
+}, { deep: true })
 
 watch(() => natsStore.isConnected, (isConnected) => {
   if (isConnected) loadKvValue()
@@ -251,6 +265,7 @@ watch(() => natsStore.isConnected, (isConnected) => {
 .kv-empty { color: var(--muted); }
 .error-icon, .empty-icon { font-size: 32px; }
 .error-text { font-size: 13px; line-height: 1.4; }
+.empty-hint { font-size: 11px; font-family: var(--mono); opacity: 0.7; }
 
 .kv-content {
   display: flex;
@@ -299,7 +314,7 @@ watch(() => natsStore.isConnected, (isConnected) => {
 .kv-value-content {
   margin: 0;
   padding: 8px;
-  background: var(--input-bg); /* Better contrast */
+  background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 12px;
@@ -311,7 +326,6 @@ watch(() => natsStore.isConnected, (isConnected) => {
   min-height: 100%;
 }
 
-/* Custom Scrollbar for JSON */
 .kv-value::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -343,7 +357,6 @@ watch(() => natsStore.isConnected, (isConnected) => {
 .meta-label { color: var(--muted); }
 .meta-value { color: var(--text); font-family: var(--mono); }
 
-/* Hide meta on very small widgets */
 @container (height < 80px) {
   .kv-meta { display: none; }
 }

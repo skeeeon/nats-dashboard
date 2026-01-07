@@ -3,6 +3,7 @@ import { useWidgetDataStore } from '@/stores/widgetData'
 import { useNatsStore } from '@/stores/nats'
 import { getSubscriptionManager } from '@/composables/useSubscriptionManager'
 import { createDefaultWidget } from '@/types/dashboard'
+import { resolveTemplate } from '@/utils/variables'
 import type { WidgetType, WidgetConfig } from '@/types/dashboard'
 
 /**
@@ -31,8 +32,12 @@ export function useWidgetOperations() {
     
     // Subscribe to NATS if it's a subscription-based widget
     if (widget.dataSource.type === 'subscription') {
-      const subject = widget.dataSource.subject
-      if (!subject) return
+      const rawSubject = widget.dataSource.subject
+      if (!rawSubject) return
+      
+      // Resolve variables in subject
+      const subject = resolveTemplate(rawSubject, dashboardStore.currentVariableValues)
+      
       subManager.subscribe(widgetId, subject, widget.jsonPath)
     }
   }
@@ -50,7 +55,13 @@ export function useWidgetOperations() {
     
     // Unsubscribe from NATS
     if (widget.dataSource.type === 'subscription' && widget.dataSource.subject) {
-      subManager.unsubscribe(widgetId, widget.dataSource.subject)
+      // We need to unsubscribe from the *resolved* subject
+      // But subManager tracks by ID internally, so we might just need to tell it to stop for this widget
+      // Actually, subManager.unsubscribe takes (widgetId, subject).
+      // We must resolve the subject again to find the correct subscription ref.
+      
+      const subject = resolveTemplate(widget.dataSource.subject, dashboardStore.currentVariableValues)
+      subManager.unsubscribe(widgetId, subject)
     }
     
     // Remove data buffer ONLY if we are not keeping data

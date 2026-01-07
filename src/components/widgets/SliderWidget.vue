@@ -1,14 +1,11 @@
 <template>
   <div class="slider-widget">
-    <!-- Slider container -->
     <div class="slider-container" :class="{ 'is-disabled': isDisabled }">
-      <!-- Current value display -->
       <div class="value-display">
         <span class="value-number">{{ displayValue }}</span>
         <span v-if="cfg.unit" class="value-unit">{{ cfg.unit }}</span>
       </div>
       
-      <!-- Slider wrapper -->
       <div 
         class="slider-wrapper vue-grid-item-no-drag"
         @mousedown.stop
@@ -31,7 +28,6 @@
           :style="sliderStyle"
         />
         
-        <!-- Min/Max labels (Hidden on small width) -->
         <div class="slider-labels">
           <span class="label-min">{{ cfg.min }}{{ cfg.unit }}</span>
           <span class="label-max">{{ cfg.max }}{{ cfg.unit }}</span>
@@ -39,18 +35,15 @@
       </div>
     </div>
     
-    <!-- Publish status -->
     <div v-if="publishStatus" class="publish-status" :class="statusClass">
       {{ publishStatus }}
     </div>
     
-    <!-- Error message -->
     <div v-if="error" class="error-message">
       {{ error }}
       <button class="retry-btn" @click="retry">Retry</button>
     </div>
     
-    <!-- Disconnected overlay -->
     <div v-if="!natsStore.isConnected" class="disconnected-overlay">
       <span class="disconnect-icon">⚠️</span>
     </div>
@@ -60,34 +53,45 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue'
 import { useNatsStore } from '@/stores/nats'
+import { useDashboardStore } from '@/stores/dashboard'
 import { Kvm } from '@nats-io/kv'
 import { JSONPath } from 'jsonpath-plus'
 import type { WidgetConfig } from '@/types/dashboard'
 import { encodeString, decodeBytes } from '@/utils/encoding'
+import { resolveTemplate } from '@/utils/variables'
 
 const props = defineProps<{
   config: WidgetConfig
 }>()
 
 const natsStore = useNatsStore()
+const dashboardStore = useDashboardStore()
 const requestConfirm = inject('requestConfirm') as (title: string, message: string, onConfirm: () => void) => void
 
-// Component state
 const localValue = ref(0)
 const isDragging = ref(false)
 const error = ref<string | null>(null)
 const publishStatus = ref<string | null>(null)
 const pendingValue = ref<number | null>(null)
 
-// NATS/KV references
 let kvWatcher: any = null
 let kvInstance: any = null
 let subscription: any = null
 
-// Configuration shortcuts
 const cfg = computed(() => props.config.sliderConfig!)
 const mode = computed(() => cfg.value.mode || 'core')
 const isDisabled = computed(() => !natsStore.isConnected)
+
+// Resolved configuration
+const resolvedConfig = computed(() => {
+  const vars = dashboardStore.currentVariableValues
+  return {
+    kvBucket: resolveTemplate(cfg.value.kvBucket, vars),
+    kvKey: resolveTemplate(cfg.value.kvKey, vars),
+    publishSubject: resolveTemplate(cfg.value.publishSubject, vars),
+    stateSubject: resolveTemplate(cfg.value.stateSubject, vars),
+  }
+})
 
 const displayValue = computed(() => {
   return localValue.value.toFixed(getDecimalPlaces(cfg.value.step))
@@ -123,8 +127,8 @@ async function initialize() {
 }
 
 async function initializeKv() {
-  const bucket = cfg.value.kvBucket
-  const key = cfg.value.kvKey
+  const bucket = resolvedConfig.value.kvBucket
+  const key = resolvedConfig.value.kvKey
   if (!bucket || !key) {
     error.value = 'KV Bucket/Key required'
     return
@@ -164,7 +168,7 @@ async function initializeKv() {
 }
 
 async function initializeCore() {
-  const subject = cfg.value.stateSubject || cfg.value.publishSubject
+  const subject = resolvedConfig.value.stateSubject || resolvedConfig.value.publishSubject
   if (!subject) return
 
   try {
@@ -248,10 +252,10 @@ async function publishValue(val: number) {
 
   try {
     if (mode.value === 'kv') {
-      if (!kvInstance || !cfg.value.kvKey) throw new Error('KV not initialized')
-      await kvInstance.put(cfg.value.kvKey, data)
+      if (!kvInstance || !resolvedConfig.value.kvKey) throw new Error('KV not initialized')
+      await kvInstance.put(resolvedConfig.value.kvKey, data)
     } else {
-      natsStore.nc!.publish(cfg.value.publishSubject, data)
+      natsStore.nc!.publish(resolvedConfig.value.publishSubject, data)
     }
     
     publishStatus.value = `✓ Sent: ${val}${cfg.value.unit || ''}`
@@ -290,16 +294,11 @@ watch(() => natsStore.isConnected, (connected) => {
   else cleanup()
 })
 
-watch(() => [
-  cfg.value.mode, 
-  cfg.value.kvBucket, 
-  cfg.value.kvKey, 
-  cfg.value.stateSubject, 
-  cfg.value.publishSubject
-], () => {
+// Watch for config OR variables changing
+watch([() => props.config.sliderConfig, () => dashboardStore.currentVariableValues], () => {
   cleanup()
   if (natsStore.isConnected) initialize()
-})
+}, { deep: true })
 </script>
 
 <style scoped>
@@ -328,7 +327,6 @@ watch(() => [
   pointer-events: none;
 }
 
-/* Value Display - Responsive */
 .value-display {
   display: flex;
   align-items: baseline;
@@ -349,7 +347,6 @@ watch(() => [
   color: var(--muted);
 }
 
-/* Slider Wrapper */
 .slider-wrapper {
   width: 100%;
   display: flex;
@@ -358,11 +355,10 @@ watch(() => [
   cursor: default;
 }
 
-/* Slider Input - Thicker track */
 .slider-input {
   -webkit-appearance: none;
   width: 100%;
-  height: 12px; /* Thicker */
+  height: 12px;
   border-radius: 6px;
   background: linear-gradient(
     to right,
@@ -385,7 +381,6 @@ watch(() => [
   opacity: 0.5;
 }
 
-/* Webkit Thumb */
 .slider-input::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
@@ -404,7 +399,6 @@ watch(() => [
   box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
 }
 
-/* Slider Labels - Hide on small width */
 .slider-labels {
   display: flex;
   justify-content: space-between;
@@ -417,7 +411,6 @@ watch(() => [
   .slider-labels { display: none; }
 }
 
-/* Publish Status */
 .publish-status {
   position: absolute;
   bottom: 16px;
@@ -449,7 +442,6 @@ watch(() => [
   background: var(--color-error-bg);
 }
 
-/* Error Message */
 .error-message {
   position: absolute;
   bottom: 8px;
@@ -479,7 +471,6 @@ watch(() => [
   cursor: pointer;
 }
 
-/* Disconnected Overlay */
 .disconnected-overlay {
   position: absolute;
   top: 4px;

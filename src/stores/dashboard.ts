@@ -4,7 +4,7 @@ import { ref, computed, watch } from 'vue'
 import { useNatsStore } from './nats'
 import { Kvm, type KV } from '@nats-io/kv'
 import { decodeBytes, encodeString } from '@/utils/encoding'
-import type { Dashboard, WidgetConfig, StorageType } from '@/types/dashboard'
+import type { Dashboard, WidgetConfig, StorageType, DashboardVariable } from '@/types/dashboard'
 import { createDefaultDashboard } from '@/types/dashboard'
 
 /**
@@ -41,6 +41,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
   // Active Dashboard (The one currently displayed)
   const activeDashboard = ref<Dashboard | null>(null)
   
+  // Current Variable Values (Runtime state, not saved to dashboard definition)
+  const currentVariableValues = ref<Record<string, string>>({})
+
   // Settings
   const kvBucketName = ref('dashboards')
   const enableSharedDashboards = ref(true)
@@ -131,6 +134,68 @@ export const useDashboardStore = defineStore('dashboard', () => {
 
   function clearStorageError() {
     storageError.value = null
+  }
+
+  // ============================================================================
+  // VARIABLE MANAGEMENT
+  // ============================================================================
+
+  function setVariableValue(name: string, value: string) {
+    currentVariableValues.value[name] = value
+  }
+
+  function initVariables(variables: DashboardVariable[] = []) {
+    const values: Record<string, string> = {}
+    variables.forEach(v => {
+      values[v.name] = v.defaultValue || ''
+    })
+    currentVariableValues.value = values
+  }
+
+  function addVariable(variable: DashboardVariable) {
+    if (!activeDashboard.value) return
+    if (!activeDashboard.value.variables) activeDashboard.value.variables = []
+    
+    activeDashboard.value.variables.push(variable)
+    // Initialize its value
+    currentVariableValues.value[variable.name] = variable.defaultValue
+    
+    markAsModified()
+  }
+
+  function updateVariable(index: number, variable: DashboardVariable) {
+    if (!activeDashboard.value?.variables) return
+    
+    const oldName = activeDashboard.value.variables[index].name
+    activeDashboard.value.variables[index] = variable
+    
+    // If name changed, migrate value
+    if (oldName !== variable.name) {
+      const val = currentVariableValues.value[oldName]
+      delete currentVariableValues.value[oldName]
+      currentVariableValues.value[variable.name] = val || variable.defaultValue
+    }
+    
+    markAsModified()
+  }
+
+  function removeVariable(index: number) {
+    if (!activeDashboard.value?.variables) return
+    const name = activeDashboard.value.variables[index].name
+    activeDashboard.value.variables.splice(index, 1)
+    delete currentVariableValues.value[name]
+    
+    markAsModified()
+  }
+
+  function markAsModified() {
+    if (!activeDashboard.value) return
+    activeDashboard.value.modified = Date.now()
+    if (activeDashboard.value.storage === 'local') {
+      saveToStorage()
+    } else {
+      isDirty.value = true
+    }
   }
 
   // ============================================================================
@@ -443,6 +508,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
     }
     
     activeDashboard.value = dashboard
+    // Initialize variables for this dashboard
+    initVariables(dashboard.variables)
+    
     isDirty.value = false
     remoteChanged.value = false
     
@@ -495,13 +563,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     if (!activeDashboard.value || activeDashboard.value.id !== id) return
     
     Object.assign(activeDashboard.value, updates)
-    activeDashboard.value.modified = Date.now()
-    
-    if (activeDashboard.value.storage === 'local') {
-      saveToStorage()
-    } else {
-      isDirty.value = true
-    }
+    markAsModified()
   }
   
   function renameDashboard(id: string, newName: string): boolean {
@@ -509,13 +571,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     
     if (activeDashboard.value && activeDashboard.value.id === id) {
       activeDashboard.value.name = newName.trim()
-      activeDashboard.value.modified = Date.now()
-      
-      if (activeDashboard.value.storage === 'local') {
-        saveToStorage()
-      } else {
-        isDirty.value = true
-      }
+      markAsModified()
       return true
     }
     
@@ -569,13 +625,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
   function addWidget(widget: WidgetConfig) {
     if (!activeDashboard.value) return
     activeDashboard.value.widgets.push(widget)
-    activeDashboard.value.modified = Date.now()
-    
-    if (activeDashboard.value.storage === 'local') {
-      saveToStorage()
-    } else {
-      isDirty.value = true
-    }
+    markAsModified()
   }
   
   function updateWidget(widgetId: string, updates: Partial<WidgetConfig>) {
@@ -583,13 +633,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     const widget = activeDashboard.value.widgets.find(w => w.id === widgetId)
     if (!widget) return
     Object.assign(widget, updates)
-    activeDashboard.value.modified = Date.now()
-    
-    if (activeDashboard.value.storage === 'local') {
-      saveToStorage()
-    } else {
-      isDirty.value = true
-    }
+    markAsModified()
   }
   
   function removeWidget(widgetId: string) {
@@ -597,13 +641,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     const index = activeDashboard.value.widgets.findIndex(w => w.id === widgetId)
     if (index === -1) return
     activeDashboard.value.widgets.splice(index, 1)
-    activeDashboard.value.modified = Date.now()
-    
-    if (activeDashboard.value.storage === 'local') {
-      saveToStorage()
-    } else {
-      isDirty.value = true
-    }
+    markAsModified()
   }
   
   function getWidget(widgetId: string): WidgetConfig | null {
@@ -621,13 +659,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     widget.w = layout.w
     widget.h = layout.h
     
-    activeDashboard.value.modified = Date.now()
-    
-    if (activeDashboard.value.storage === 'local') {
-      saveToStorage()
-    } else {
-      isDirty.value = true
-    }
+    markAsModified()
   }
 
   function batchUpdateLayout(updates: Array<{ id: string; x: number; y: number; w: number; h: number }>) {
@@ -649,12 +681,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     })
 
     if (hasChanges) {
-      activeDashboard.value.modified = Date.now()
-      if (activeDashboard.value.storage === 'local') {
-        saveToStorage()
-      } else {
-        isDirty.value = true
-      }
+      markAsModified()
     }
   }
   
@@ -785,6 +812,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     activeDashboardId,
     activeDashboard,
     activeWidgets,
+    currentVariableValues, // New
     storageError,
     dashboardCount,
     isAtLimit,
@@ -807,6 +835,12 @@ export const useDashboardStore = defineStore('dashboard', () => {
     setActiveDashboard,
     setStartupDashboard,
     clearStartupDashboard,
+    
+    // Variable Actions
+    setVariableValue,
+    addVariable,
+    updateVariable,
+    removeVariable,
     
     // Local CRUD
     createDashboard,

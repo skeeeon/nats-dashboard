@@ -10,7 +10,7 @@
       <div class="no-data-icon">📈</div>
       <div class="no-data-text">Waiting for data...</div>
       <div class="no-data-hint">
-        Subscribed to: <code>{{ config.dataSource.subject }}</code>
+        Subscribed to: <code>{{ resolvedSubject }}</code>
       </div>
     </div>
   </div>
@@ -29,19 +29,11 @@ import {
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import { useWidgetDataStore } from '@/stores/widgetData'
+import { useDashboardStore } from '@/stores/dashboard'
 import { useDesignTokens } from '@/composables/useDesignTokens'
 import { useTheme } from '@/composables/useTheme'
 import type { WidgetConfig } from '@/types/dashboard'
-
-/**
- * Chart Widget
- * 
- * Grug say: Show data as pretty pictures. Lines go up, lines go down.
- * Use ECharts because it good at making charts.
- * 
- * NEW: Now uses design tokens for theme-aware colors!
- * Charts automatically update when theme changes.
- */
+import { resolveTemplate } from '@/utils/variables'
 
 // Register ECharts components
 use([
@@ -61,6 +53,7 @@ const props = defineProps<{
 }>()
 
 const dataStore = useWidgetDataStore()
+const dashboardStore = useDashboardStore()
 const { chartColors, chartStyling, getChartColorArray } = useDesignTokens()
 const { theme } = useTheme()
 
@@ -73,9 +66,13 @@ const hasData = computed(() => buffer.value.length > 0)
 // Get chart type (default to line)
 const chartType = computed(() => props.config.chartConfig?.chartType || 'line')
 
+// Resolve subject for display
+const resolvedSubject = computed(() => {
+  return resolveTemplate(props.config.dataSource.subject, dashboardStore.currentVariableValues)
+})
+
 /**
  * Generate chart option based on chart type
- * All colors now come from design tokens!
  */
 const chartOption = computed(() => {
   const data = buffer.value
@@ -94,12 +91,6 @@ const chartOption = computed(() => {
   }
 })
 
-/**
- * Line Chart - Show values over time
- * Grug say: Most useful for NATS messages. See trends.
- * 
- * NEW: Uses design tokens for all colors!
- */
 function generateLineChart(data: any[]) {
   const colors = chartColors.value
   const styling = chartStyling.value
@@ -173,15 +164,10 @@ function generateLineChart(data: any[]) {
         },
       },
     ],
-    // Apply custom options if provided (but don't override colors)
     ...props.config.chartConfig?.echartOptions,
   }
 }
 
-/**
- * Bar Chart - Show values as bars
- * NEW: Uses design tokens!
- */
 function generateBarChart(data: any[]) {
   const colors = chartColors.value
   const styling = chartStyling.value
@@ -231,7 +217,7 @@ function generateBarChart(data: any[]) {
         data: data.map((m) => m.value),
         type: 'bar',
         itemStyle: {
-          color: colors.color2, // Use green for bars
+          color: colors.color2,
         },
       },
     ],
@@ -239,17 +225,9 @@ function generateBarChart(data: any[]) {
   }
 }
 
-/**
- * Gauge Chart - Show single value as gauge
- * Grug say: Good for showing current value like temperature, speed, etc.
- * 
- * NEW: Uses threshold colors for color ranges!
- */
 function generateGaugeChart(data: any[]) {
   const colors = chartColors.value
   const styling = chartStyling.value
-  
-  // Use latest value for gauge
   const latestValue = data.length > 0 ? data[data.length - 1].value : 0
 
   return {
@@ -274,11 +252,10 @@ function generateGaugeChart(data: any[]) {
         axisLine: {
           lineStyle: {
             width: 18,
-            // Use semantic colors for ranges
             color: [
-              [0.3, colors.color2],  // Green for low (good)
-              [0.7, colors.color3],  // Orange for medium (warning)
-              [1, colors.color5],    // Red for high (critical)
+              [0.3, colors.color2],
+              [0.7, colors.color3],
+              [1, colors.color5],
             ],
           },
         },
@@ -331,19 +308,8 @@ function generateGaugeChart(data: any[]) {
   }
 }
 
-/**
- * Pie Chart - Show distribution
- * Grug say: Good if your data has categories
- * 
- * NEW: Uses chart color palette!
- */
 function generatePieChart(data: any[]) {
   const styling = chartStyling.value
-  
-  // For pie chart, we need to aggregate data
-  // If value is object with categories, use those
-  // Otherwise, count occurrences of each value
-  
   const pieData: Record<string, number> = {}
   
   data.forEach((m) => {
@@ -351,7 +317,6 @@ function generatePieChart(data: any[]) {
     pieData[val] = (pieData[val] || 0) + 1
   })
   
-  // Get colors for pie slices
   const colorArray = getChartColorArray(Object.keys(pieData).length)
 
   return {
@@ -371,7 +336,7 @@ function generatePieChart(data: any[]) {
         color: styling.muted,
       },
     },
-    color: colorArray, // Use our color palette
+    color: colorArray,
     series: [
       {
         type: 'pie',
@@ -393,11 +358,7 @@ function generatePieChart(data: any[]) {
   }
 }
 
-// Watch for theme changes and force chart update
-// ECharts needs explicit notification when colors change
 watch(theme, () => {
-  // chartOption is already reactive and will update,
-  // but we log it for debugging
   if (import.meta.env.DEV) {
     console.log('[ChartWidget] Theme changed, chart colors will update')
   }
@@ -420,7 +381,6 @@ watch(theme, () => {
   min-height: 0;
 }
 
-/* No data state */
 .no-data {
   height: 100%;
   display: flex;
