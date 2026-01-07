@@ -36,7 +36,7 @@ export function useValidation() {
    * - Cannot have consecutive dots (..)
    * - Cannot start or end with dot
    * - Can contain wildcards (* and >)
-   * - Only alphanumeric, dots, dashes, underscores, and wildcards
+   * - Only alphanumeric, dots, dashes, underscores, wildcards, AND curly braces for variables
    */
   function validateSubject(subject: string): ValidationResult {
     // Empty check
@@ -57,32 +57,36 @@ export function useValidation() {
     }
     
     // Check for invalid characters
-    // Valid: alphanumeric, dots, dashes, underscores, wildcards (* and >)
-    const validPattern = /^[a-zA-Z0-9._\-*>]+$/
+    // Valid: alphanumeric, dots, dashes, underscores, wildcards (* and >), and variables ({})
+    // Grug fix: Allow { and } for variables
+    const validPattern = /^[a-zA-Z0-9._\-*>{}]+$/
     if (!validPattern.test(subject)) {
       return { 
         valid: false, 
-        error: 'Subject can only contain letters, numbers, dots, dashes, underscores, and wildcards (* or >)' 
+        error: 'Subject contains invalid characters. Allowed: letters, numbers, . - _ * > { }' 
       }
     }
     
     // > wildcard must be at end and must be last token
-    const parts = subject.split('.')
-    const gtIndex = parts.findIndex(p => p.includes('>'))
-    if (gtIndex !== -1) {
-      // Found > wildcard
-      if (gtIndex !== parts.length - 1) {
-        return { valid: false, error: '> wildcard must be the last token in subject' }
+    // Note: We skip this check if variables are present, as {{var}} might resolve to anything
+    if (!subject.includes('{{')) {
+      const parts = subject.split('.')
+      const gtIndex = parts.findIndex(p => p.includes('>'))
+      if (gtIndex !== -1) {
+        // Found > wildcard
+        if (gtIndex !== parts.length - 1) {
+          return { valid: false, error: '> wildcard must be the last token in subject' }
+        }
+        if (parts[gtIndex] !== '>') {
+          return { valid: false, error: '> wildcard must be alone in its token (e.g., "foo.>" not "foo.bar>"' }
+        }
       }
-      if (parts[gtIndex] !== '>') {
-        return { valid: false, error: '> wildcard must be alone in its token (e.g., "foo.>" not "foo.bar>"' }
-      }
-    }
-    
-    // * wildcard must be alone in its token
-    for (const part of parts) {
-      if (part.includes('*') && part !== '*') {
-        return { valid: false, error: '* wildcard must be alone in its token (e.g., "foo.*" not "foo*")' }
+      
+      // * wildcard must be alone in its token
+      for (const part of parts) {
+        if (part.includes('*') && part !== '*') {
+          return { valid: false, error: '* wildcard must be alone in its token (e.g., "foo.*" not "foo*")' }
+        }
       }
     }
     
@@ -108,6 +112,12 @@ export function useValidation() {
     
     // $ alone is valid (means whole object)
     if (path === '$') {
+      return { valid: true }
+    }
+
+    // Grug fix: If path has variables {{...}}, we cannot validate it strictly
+    // because the parser will likely choke on the braces. Trust the user.
+    if (path.includes('{{')) {
       return { valid: true }
     }
     
@@ -192,16 +202,18 @@ export function useValidation() {
       return { valid: false, error: 'Bucket name cannot exceed 255 characters' }
     }
     
-    // Character check - only lowercase, numbers, dash, underscore
-    const validPattern = /^[a-z0-9_-]+$/
+    // Character check
+    // Grug fix: Allow { } for variables. 
+    // Also allow A-Z because variable names inside {{...}} might be uppercase (e.g. {{DeviceID}})
+    const validPattern = /^[a-zA-Z0-9_\-{}]+$/
     if (!validPattern.test(bucket)) {
       return { 
         valid: false, 
-        error: 'Bucket name can only contain lowercase letters, numbers, dashes, and underscores' 
+        error: 'Bucket name contains invalid characters. Allowed: a-z, 0-9, -, _, { }' 
       }
     }
     
-    // Cannot start with dash
+    // Cannot start with dash (unless it's a variable start, but that's unlikely to be just '-')
     if (bucket.startsWith('-')) {
       return { valid: false, error: 'Bucket name cannot start with a dash' }
     }
@@ -230,6 +242,7 @@ export function useValidation() {
     }
     
     // KV keys cannot contain certain characters
+    // Note: { and } are NOT in this list, so variables are implicitly allowed here.
     const invalidChars = ['*', '>', ' ', '\t', '\n', '\r']
     for (const char of invalidChars) {
       if (key.includes(char)) {
@@ -256,6 +269,13 @@ export function useValidation() {
   function validateJson(jsonString: string): ValidationResult {
     // Empty is valid
     if (!jsonString || jsonString.trim() === '') {
+      return { valid: true }
+    }
+
+    // Grug fix: If it contains variables, it might not be valid JSON yet.
+    // e.g. {"id": "{{device_id}}"} is valid JSON, but {"val": {{value}}} is NOT valid JSON until resolved.
+    // We try to be lenient here.
+    if (jsonString.includes('{{')) {
       return { valid: true }
     }
     
