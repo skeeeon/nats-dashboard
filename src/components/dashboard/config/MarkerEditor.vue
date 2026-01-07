@@ -7,8 +7,8 @@
       <span class="marker-coords">
         {{ marker.lat.toFixed(4) }}, {{ marker.lon.toFixed(4) }}
       </span>
-      <span class="action-count">
-        {{ marker.actions.length }} action{{ marker.actions.length !== 1 ? 's' : '' }}
+      <span class="item-count">
+        {{ marker.items.length }} item{{ marker.items.length !== 1 ? 's' : '' }}
       </span>
       <span class="expand-icon">{{ isExpanded ? '▼' : '▶' }}</span>
       <button 
@@ -71,39 +71,36 @@
         </button>
       </div>
       
-      <!-- Actions -->
+      <!-- Items -->
       <div class="marker-section">
         <div class="section-title">
-          Actions
-          <span class="section-hint">({{ marker.actions.length }}/{{ MAX_ACTIONS_PER_MARKER }})</span>
+          Popup Items
+          <span class="section-hint">({{ marker.items.length }}/{{ MAX_ITEMS_PER_MARKER }})</span>
         </div>
         
-        <div v-if="marker.actions.length === 0" class="empty-actions">
-          No actions configured. Add an action to enable interactivity.
+        <div v-if="marker.items.length === 0" class="empty-items">
+          No items configured. Add an item to display data or controls.
         </div>
         
-        <div class="actions-list">
-          <MarkerActionEditor
-            v-for="(action, index) in marker.actions"
-            :key="action.id"
-            :action="action"
-            :errors="actionErrors ? actionErrors[index] : undefined"
-            @remove="removeAction(index)"
-            @update:action="updateAction(index, $event)"
+        <div class="items-list">
+          <MarkerItemEditor
+            v-for="(item, index) in marker.items"
+            :key="item.id"
+            :item="item"
+            :errors="itemErrors ? itemErrors[index] : undefined"
+            @remove="removeItem(index)"
+            @update:item="updateItem(index, $event)"
           />
         </div>
         
-        <!-- Action limit warning -->
-        <div v-if="isAtActionLimit" class="limit-warning">
-          ⚠️ Maximum {{ MAX_ACTIONS_PER_MARKER }} actions per marker
+        <!-- Limit warning -->
+        <div v-if="isAtLimit" class="limit-warning">
+          ⚠️ Maximum {{ MAX_ITEMS_PER_MARKER }} items per marker
         </div>
         
-        <div v-else class="add-action-row">
-          <button class="btn-add" @click="addAction('publish')">
-            + Add Publish Action
-          </button>
-          <button class="btn-add switch" @click="addAction('switch')">
-            + Add Switch Action
+        <div v-else class="add-item-row">
+          <button class="btn-add" @click="addItem('publish')">
+            + Add Item
           </button>
         </div>
       </div>
@@ -113,24 +110,15 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import MarkerActionEditor from './MarkerActionEditor.vue'
-import { createDefaultAction, MAP_LIMITS } from '@/types/dashboard'
-import type { MapMarker, MapMarkerAction, MapActionType } from '@/types/dashboard'
+import MarkerItemEditor from './MarkerItemEditor.vue'
+import { createDefaultItem, MAP_LIMITS } from '@/types/dashboard'
+import type { MapMarker, MapMarkerItem, MapItemType } from '@/types/dashboard'
 
-/**
- * Marker Editor Component
- * 
- * Grug say: Edit single marker with its location and actions.
- * Collapsible to keep UI manageable with many markers.
- * 
- * Now enforces action limit per marker.
- */
-
-const MAX_ACTIONS_PER_MARKER = MAP_LIMITS.MAX_ACTIONS_PER_MARKER
+const MAX_ITEMS_PER_MARKER = MAP_LIMITS.MAX_ITEMS_PER_MARKER
 
 const props = defineProps<{
   marker: MapMarker
-  actionErrors?: Record<number, Record<string, string>>
+  itemErrors?: Record<number, Record<string, string>>
 }>()
 
 const emit = defineEmits<{
@@ -141,7 +129,7 @@ const emit = defineEmits<{
 
 const isExpanded = ref(true)
 
-const isAtActionLimit = computed(() => props.marker.actions.length >= MAX_ACTIONS_PER_MARKER)
+const isAtLimit = computed(() => props.marker.items.length >= MAX_ITEMS_PER_MARKER)
 
 /**
  * Emit updated marker to parent
@@ -158,32 +146,32 @@ function updateMarkerField(field: keyof MapMarker, value: any) {
 }
 
 /**
- * Add new action to marker
+ * Add new item to marker
  */
-function addAction(type: MapActionType) {
-  if (isAtActionLimit.value) return
+function addItem(type: MapItemType) {
+  if (isAtLimit.value) return
   
-  const action = createDefaultAction(type)
-  const newActions = [...props.marker.actions, action]
-  emitMarkerUpdate({ actions: newActions })
+  const item = createDefaultItem(type)
+  const newItems = [...props.marker.items, item]
+  emitMarkerUpdate({ items: newItems })
 }
 
 /**
- * Remove action from marker
+ * Remove item from marker
  */
-function removeAction(index: number) {
-  const newActions = [...props.marker.actions]
-  newActions.splice(index, 1)
-  emitMarkerUpdate({ actions: newActions })
+function removeItem(index: number) {
+  const newItems = [...props.marker.items]
+  newItems.splice(index, 1)
+  emitMarkerUpdate({ items: newItems })
 }
 
 /**
- * Update a specific action
+ * Update a specific item
  */
-function updateAction(index: number, updatedAction: MapMarkerAction) {
-  const newActions = [...props.marker.actions]
-  newActions[index] = updatedAction
-  emitMarkerUpdate({ actions: newActions })
+function updateItem(index: number, updatedItem: MapMarkerItem) {
+  const newItems = [...props.marker.items]
+  newItems[index] = updatedItem
+  emitMarkerUpdate({ items: newItems })
 }
 </script>
 
@@ -239,7 +227,7 @@ function updateAction(index: number, updatedAction: MapMarkerAction) {
   border-radius: 4px;
 }
 
-.action-count {
+.item-count {
   font-size: 11px;
   color: var(--color-accent);
   background: var(--color-info-bg);
@@ -352,7 +340,7 @@ function updateAction(index: number, updatedAction: MapMarkerAction) {
   color: white;
 }
 
-.empty-actions {
+.empty-items {
   color: var(--muted);
   font-size: 13px;
   font-style: italic;
@@ -362,7 +350,7 @@ function updateAction(index: number, updatedAction: MapMarkerAction) {
   border-radius: 6px;
 }
 
-.actions-list {
+.items-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -379,7 +367,7 @@ function updateAction(index: number, updatedAction: MapMarkerAction) {
   text-align: center;
 }
 
-.add-action-row {
+.add-item-row {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -404,15 +392,6 @@ function updateAction(index: number, updatedAction: MapMarkerAction) {
   border-color: var(--color-info);
 }
 
-.btn-add.switch {
-  color: var(--color-warning);
-}
-
-.btn-add.switch:hover {
-  background: var(--color-warning-bg);
-  border-color: var(--color-warning);
-}
-
 @media (max-width: 500px) {
   .coord-row {
     grid-template-columns: 1fr;
@@ -422,7 +401,7 @@ function updateAction(index: number, updatedAction: MapMarkerAction) {
     display: none;
   }
   
-  .add-action-row {
+  .add-item-row {
     flex-direction: column;
   }
   

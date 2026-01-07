@@ -19,7 +19,7 @@
     </div>
     
     <!-- Disconnected indicator -->
-    <div v-if="!natsStore.isConnected && hasActions" class="disconnected-badge">
+    <div v-if="!natsStore.isConnected && hasItems" class="disconnected-badge">
       ⚠️ Offline
     </div>
     
@@ -41,9 +41,11 @@ import { createSwitchState, type SwitchState } from '@/composables/useSwitchStat
 import { useNatsStore } from '@/stores/nats'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useTheme } from '@/composables/useTheme'
-import { encodeString } from '@/utils/encoding'
+import { encodeString, decodeBytes } from '@/utils/encoding'
 import { resolveTemplate } from '@/utils/variables'
-import type { WidgetConfig, MapMarkerAction } from '@/types/dashboard'
+import type { WidgetConfig, MapMarkerItem } from '@/types/dashboard'
+import { Kvm } from '@nats-io/kv'
+import { JSONPath } from 'jsonpath-plus'
 
 const props = withDefaults(defineProps<{
   config: WidgetConfig
@@ -55,7 +57,7 @@ const props = withDefaults(defineProps<{
 const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
 const { theme } = useTheme()
-const { initMap, updateTheme, renderMarkers, updateSwitchState, invalidateSize, cleanup } = useLeafletMap()
+const { initMap, updateTheme, renderMarkers, updateSwitchState, updateItemValue, invalidateSize, cleanup } = useLeafletMap()
 
 // Unique ID
 const mapContainerId = computed(() => {
@@ -73,24 +75,30 @@ interface SwitchStateEntry {
 }
 const activeSwitchStates = new Map<string, SwitchStateEntry>()
 
+// Track active subscriptions for Text/KV items
+interface SubscriptionEntry {
+  stop: () => void
+}
+const activeSubscriptions = new Map<string, SubscriptionEntry>()
+
 const openMarkerId = ref<string | null>(null)
 const markers = computed(() => props.config.mapConfig?.markers || [])
-const hasActions = computed(() => markers.value.some(m => m.actions && m.actions.length > 0))
+const hasItems = computed(() => markers.value.some(m => m.items && m.items.length > 0))
 const mapCenter = computed(() => props.config.mapConfig?.center || { lat: 39.8283, lon: -98.5795 })
 const mapZoom = computed(() => props.config.mapConfig?.zoom || 4)
 
 /**
- * Handle publish action click
+ * Handle publish item click
  */
-function handlePublishAction(action: MapMarkerAction) {
+function handlePublishItem(item: MapMarkerItem) {
   if (!natsStore.nc || !natsStore.isConnected) {
     showFeedback('error', 'Not connected to NATS')
     return
   }
 
   // Resolve variables
-  const subject = resolveTemplate(action.subject, dashboardStore.currentVariableValues)
-  const payloadStr = resolveTemplate(action.payload || '{}', dashboardStore.currentVariableValues)
+  const subject = resolveTemplate(item.subject, dashboardStore.currentVariableValues)
+  const payloadStr = resolveTemplate(item.payload || '{}', dashboardStore.currentVariableValues)
 
   if (!subject) {
     showFeedback('error', 'No subject configured')
@@ -112,15 +120,15 @@ function handlePublishAction(action: MapMarkerAction) {
 /**
  * Handle switch toggle click
  */
-function handleSwitchToggle(action: MapMarkerAction) {
+function handleSwitchToggle(item: MapMarkerItem) {
   if (!natsStore.isConnected) {
     showFeedback('error', 'Not connected to NATS')
     return
   }
 
-  const entry = activeSwitchStates.get(action.id)
+  const entry = activeSwitchStates.get(item.id)
   if (!entry) {
-    console.warn('[MapWidget] No switch state found for action:', action.id)
+    console.warn('[MapWidget] No switch state found for item:', item.id)
     return
   }
 
@@ -128,56 +136,62 @@ function handleSwitchToggle(action: MapMarkerAction) {
 }
 
 /**
- * Handle popup open - start switch state watchers
+ * Handle popup open - start watchers
  */
 function handlePopupOpen(markerId: string, _popupElement: HTMLElement) {
   openMarkerId.value = markerId
   const marker = markers.value.find(m => m.id === markerId)
   if (!marker) return
 
-  for (const action of marker.actions) {
-    if (action.type === 'switch' && action.switchConfig) {
-      startSwitchStateWatcher(action)
+  for (const item of marker.items) {
+    if (item.type === 'switch' && item.switchConfig) {
+      startSwitchStateWatcher(item)
+    } else if (item.type === 'text' && item.textConfig) {
+      startTextSubscription(item)
+    } else if (item.type === 'kv' && item.kvConfig) {
+      startKvWatcher(item)
     }
   }
 }
 
 /**
- * Handle popup close - stop switch state watchers
+ * Handle popup close - stop watchers
  */
 function handlePopupClose(markerId: string) {
   openMarkerId.value = null
   const marker = markers.value.find(m => m.id === markerId)
   if (!marker) return
 
-  for (const action of marker.actions) {
-    if (action.type === 'switch') {
-      stopSwitchStateWatcher(action.id)
+  for (const item of marker.items) {
+    if (item.type === 'switch') {
+      stopSwitchStateWatcher(item.id)
+    } else if (item.type === 'text' || item.type === 'kv') {
+      stopSubscription(item.id)
     }
   }
 }
 
 /**
- * Start a switch state watcher for an action
+ * Start a switch state watcher for an item
  */
-async function startSwitchStateWatcher(action: MapMarkerAction) {
-  if (!action.switchConfig) return
+async function startSwitchStateWatcher(item: MapMarkerItem) {
+  if (!item.switchConfig) return
 
-  if (activeSwitchStates.has(action.id)) {
-    const existing = activeSwitchStates.get(action.id)!
+  if (activeSwitchStates.has(item.id)) {
+    const existing = activeSwitchStates.get(item.id)!
     if (existing.switchState.isActive()) return
   }
 
   // Resolve variables for switch config
   const vars = dashboardStore.currentVariableValues
   const resolvedConfig = {
-    mode: action.switchConfig.mode,
-    kvBucket: resolveTemplate(action.switchConfig.kvBucket, vars),
-    kvKey: resolveTemplate(action.switchConfig.kvKey, vars),
-    publishSubject: resolveTemplate(action.switchConfig.publishSubject, vars),
-    stateSubject: resolveTemplate(action.switchConfig.stateSubject, vars),
-    onPayload: action.switchConfig.onPayload, // Payloads usually don't need template resolution for switches, but could if string
-    offPayload: action.switchConfig.offPayload,
+    mode: item.switchConfig.mode,
+    kvBucket: resolveTemplate(item.switchConfig.kvBucket, vars),
+    kvKey: resolveTemplate(item.switchConfig.kvKey, vars),
+    publishSubject: resolveTemplate(item.switchConfig.publishSubject, vars),
+    stateSubject: resolveTemplate(item.switchConfig.stateSubject, vars),
+    onPayload: item.switchConfig.onPayload,
+    offPayload: item.switchConfig.offPayload,
     defaultState: 'off' as const
   }
 
@@ -185,21 +199,21 @@ async function startSwitchStateWatcher(action: MapMarkerAction) {
 
   await switchState.start()
 
-  updateSwitchState(action.id, switchState.state.value, action.switchConfig.labels)
+  updateSwitchState(item.id, switchState.state.value, item.switchConfig.labels)
 
   const stopWatch = watch(switchState.state, (newState) => {
-    updateSwitchState(action.id, newState, action.switchConfig?.labels)
+    updateSwitchState(item.id, newState, item.switchConfig?.labels)
   })
 
-  activeSwitchStates.set(action.id, { switchState, stopWatch })
+  activeSwitchStates.set(item.id, { switchState, stopWatch })
 }
 
-function stopSwitchStateWatcher(actionId: string) {
-  const entry = activeSwitchStates.get(actionId)
+function stopSwitchStateWatcher(itemId: string) {
+  const entry = activeSwitchStates.get(itemId)
   if (entry) {
     entry.stopWatch()
     entry.switchState.stop()
-    activeSwitchStates.delete(actionId)
+    activeSwitchStates.delete(itemId)
   }
 }
 
@@ -211,6 +225,138 @@ function stopAllSwitchStateWatchers() {
   activeSwitchStates.clear()
 }
 
+/**
+ * Start NATS subscription for Text item
+ */
+function startTextSubscription(item: MapMarkerItem) {
+  if (!natsStore.nc || !natsStore.isConnected || !item.textConfig) return
+  
+  const subject = resolveTemplate(item.textConfig.subject, dashboardStore.currentVariableValues)
+  if (!subject) return
+
+  try {
+    const sub = natsStore.nc.subscribe(subject)
+    
+    // Async iterator loop
+    ;(async () => {
+      try {
+        for await (const msg of sub) {
+          const text = decodeBytes(msg.data)
+          let val: any = text
+          try { val = JSON.parse(text) } catch {}
+          
+          if (item.textConfig?.jsonPath && typeof val === 'object') {
+            try {
+              const extracted = JSONPath({ path: item.textConfig.jsonPath, json: val, wrap: false })
+              if (extracted !== undefined) val = extracted
+            } catch {}
+          }
+          
+          updateItemValue(item.id, String(val))
+        }
+      } catch (err) {
+        console.error('[MapWidget] Text sub error:', err)
+      }
+    })()
+
+    activeSubscriptions.set(item.id, {
+      stop: () => {
+        try { sub.unsubscribe() } catch {}
+      }
+    })
+  } catch (err) {
+    console.error('[MapWidget] Failed to subscribe:', err)
+  }
+}
+
+/**
+ * Start KV watcher for KV item
+ */
+async function startKvWatcher(item: MapMarkerItem) {
+  if (!natsStore.nc || !natsStore.isConnected || !item.kvConfig) return
+
+  const bucket = resolveTemplate(item.kvConfig.kvBucket, dashboardStore.currentVariableValues)
+  const key = resolveTemplate(item.kvConfig.kvKey, dashboardStore.currentVariableValues)
+  
+  if (!bucket || !key) return
+
+  try {
+    const kvm = new Kvm(natsStore.nc)
+    const kv = await kvm.open(bucket)
+    
+    // Get initial value
+    try {
+      const entry = await kv.get(key)
+      if (entry) {
+        processKvValue(item, entry.value)
+      } else {
+        updateItemValue(item.id, '<empty>')
+      }
+    } catch {
+      updateItemValue(item.id, '<empty>')
+    }
+
+    // Watch
+    const iter = await kv.watch({ key })
+    
+    ;(async () => {
+      try {
+        for await (const e of iter) {
+          if (e.key === key) {
+            if (e.operation === 'PUT') {
+              processKvValue(item, e.value!)
+            } else if (e.operation === 'DEL' || e.operation === 'PURGE') {
+              updateItemValue(item.id, '<deleted>')
+            }
+          }
+        }
+      } catch (err) {
+        // Ignore connection closed errors
+      }
+    })()
+
+    activeSubscriptions.set(item.id, {
+      stop: () => {
+        try { iter.stop() } catch {}
+      }
+    })
+
+  } catch (err) {
+    console.error('[MapWidget] KV watch error:', err)
+    updateItemValue(item.id, 'Error')
+  }
+}
+
+function processKvValue(item: MapMarkerItem, data: Uint8Array) {
+  const text = decodeBytes(data)
+  let val: any = text
+  try { val = JSON.parse(text) } catch {}
+  
+  if (item.kvConfig?.jsonPath && typeof val === 'object') {
+    try {
+      const extracted = JSONPath({ path: item.kvConfig.jsonPath, json: val, wrap: false })
+      if (extracted !== undefined) val = extracted
+    } catch {}
+  }
+  
+  updateItemValue(item.id, String(val))
+}
+
+function stopSubscription(itemId: string) {
+  const entry = activeSubscriptions.get(itemId)
+  if (entry) {
+    entry.stop()
+    activeSubscriptions.delete(itemId)
+  }
+}
+
+function stopAllSubscriptions() {
+  for (const entry of activeSubscriptions.values()) {
+    entry.stop()
+  }
+  activeSubscriptions.clear()
+}
+
 function showFeedback(type: 'success' | 'error', message: string) {
   actionFeedback.value = { type, message }
   setTimeout(() => {
@@ -219,7 +365,7 @@ function showFeedback(type: 'success' | 'error', message: string) {
 }
 
 const popupCallbacks: PopupCallbacks = {
-  onPublishAction: handlePublishAction,
+  onPublishItem: handlePublishItem,
   onSwitchToggle: handleSwitchToggle,
   onPopupOpen: handlePopupOpen,
   onPopupClose: handlePopupClose
@@ -264,6 +410,7 @@ onUnmounted(() => {
   if (resizeObserverTimeout !== null) clearTimeout(resizeObserverTimeout)
   if (resizeObserver) resizeObserver.disconnect()
   stopAllSwitchStateWatchers()
+  stopAllSubscriptions()
   cleanup()
 })
 
@@ -284,12 +431,15 @@ watch(() => dashboardStore.currentVariableValues, () => {
     // Stop existing
     const marker = markers.value.find(m => m.id === markerId)
     if (marker) {
-      marker.actions.forEach(a => {
+      marker.items.forEach(a => {
         if (a.type === 'switch') stopSwitchStateWatcher(a.id)
+        else if (a.type === 'text' || a.type === 'kv') stopSubscription(a.id)
       })
       // Restart
-      marker.actions.forEach(a => {
+      marker.items.forEach(a => {
         if (a.type === 'switch' && a.switchConfig) startSwitchStateWatcher(a)
+        else if (a.type === 'text' && a.textConfig) startTextSubscription(a)
+        else if (a.type === 'kv' && a.kvConfig) startKvWatcher(a)
       })
     }
   }
@@ -482,14 +632,14 @@ watch(() => dashboardStore.currentVariableValues, () => {
   padding-right: 32px; /* Space for close button */
 }
 
-:deep(.map-popup-actions) {
+:deep(.map-popup-items) {
   padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-:deep(.map-popup-no-actions) {
+:deep(.map-popup-no-items) {
   padding: 16px;
   text-align: center;
   color: var(--muted);
@@ -497,8 +647,8 @@ watch(() => dashboardStore.currentVariableValues, () => {
   font-size: 12px;
 }
 
-/* Action Buttons */
-:deep(.map-popup-action-btn) {
+/* Item Buttons */
+:deep(.map-popup-item-btn) {
   width: 100%;
   padding: 8px 12px;
   background: var(--color-primary);
@@ -512,16 +662,16 @@ watch(() => dashboardStore.currentVariableValues, () => {
   text-align: center;
 }
 
-:deep(.map-popup-action-btn:hover) {
+:deep(.map-popup-item-btn:hover) {
   background: var(--color-primary-hover);
   transform: translateY(-1px);
 }
 
-:deep(.map-popup-action-btn:active) {
+:deep(.map-popup-item-btn:active) {
   transform: translateY(0);
 }
 
-:deep(.map-popup-action-btn.action-success) {
+:deep(.map-popup-item-btn.action-success) {
   background: var(--color-success);
   pointer-events: none;
 }
@@ -595,5 +745,39 @@ watch(() => dashboardStore.currentVariableValues, () => {
 
 :deep(.switch-state-text.state-on) {
   color: var(--color-success);
+}
+
+/* Value Display (Text/KV) */
+:deep(.map-popup-value-display) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+}
+
+:deep(.value-label) {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+:deep(.value-text) {
+  font-size: 13px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-weight: 600;
+  text-align: right;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:deep(.value-unit) {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 2px;
 }
 </style>

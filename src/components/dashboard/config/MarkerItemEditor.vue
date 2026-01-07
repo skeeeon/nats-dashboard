@@ -1,26 +1,28 @@
 <template>
-  <div class="action-editor">
-    <div class="action-header">
-      <span class="action-badge" :class="action.type">
-        {{ action.type === 'publish' ? '📤' : '🔄' }}
+  <div class="item-editor">
+    <div class="item-header">
+      <span class="item-badge" :class="item.type">
+        {{ getItemIcon(item.type) }}
       </span>
-      <span class="action-label">{{ action.label || 'Unnamed Action' }}</span>
+      <span class="item-label">{{ item.label || 'Unnamed Item' }}</span>
       <button 
         class="btn-icon-small danger" 
         @click="$emit('remove')"
-        title="Remove action"
+        title="Remove item"
       >
         ✕
       </button>
     </div>
     
-    <div class="action-body">
-      <!-- Action Type -->
+    <div class="item-body">
+      <!-- Item Type -->
       <div class="form-row">
         <label>Type</label>
-        <select :value="action.type" @change="handleTypeChange" class="form-input">
+        <select :value="item.type" @change="handleTypeChange" class="form-input">
           <option value="publish">Publish (Button)</option>
           <option value="switch">Switch (Toggle)</option>
+          <option value="text">Text (Display)</option>
+          <option value="kv">KV (Display)</option>
         </select>
       </div>
       
@@ -28,20 +30,20 @@
       <div class="form-row">
         <label>Label</label>
         <input 
-          :value="action.label"
+          :value="item.label"
           @input="updateField('label', ($event.target as HTMLInputElement).value)"
           type="text" 
           class="form-input"
-          placeholder="Action label"
+          placeholder="Item label"
         />
       </div>
       
-      <!-- Publish Action Fields -->
-      <template v-if="action.type === 'publish'">
+      <!-- Publish Item Fields -->
+      <template v-if="item.type === 'publish'">
         <div class="form-row">
           <label>Subject</label>
           <input 
-            :value="action.subject"
+            :value="item.subject"
             @input="updateField('subject', ($event.target as HTMLInputElement).value)"
             type="text" 
             class="form-input"
@@ -54,7 +56,7 @@
         <div class="form-row">
           <label>Payload</label>
           <textarea 
-            :value="action.payload"
+            :value="item.payload"
             @input="updateField('payload', ($event.target as HTMLTextAreaElement).value)"
             class="form-textarea"
             :class="{ 'has-error': errors?.payload }"
@@ -65,8 +67,8 @@
         </div>
       </template>
       
-      <!-- Switch Action Fields -->
-      <template v-if="action.type === 'switch'">
+      <!-- Switch Item Fields -->
+      <template v-if="item.type === 'switch'">
         <div class="form-row">
           <label>Mode</label>
           <select 
@@ -196,44 +198,140 @@
           </label>
         </div>
       </template>
+
+      <!-- Text Item Fields -->
+      <template v-if="item.type === 'text'">
+        <div class="form-row">
+          <label>Subject</label>
+          <input 
+            :value="textConfig.subject"
+            @input="updateTextField('subject', ($event.target as HTMLInputElement).value)"
+            type="text" 
+            class="form-input"
+            :class="{ 'has-error': errors?.subject }"
+            placeholder="sensors.temp"
+          />
+          <div v-if="errors?.subject" class="error-text">{{ errors.subject }}</div>
+        </div>
+
+        <div class="form-row">
+          <label>JSONPath (optional)</label>
+          <input 
+            :value="textConfig.jsonPath"
+            @input="updateTextField('jsonPath', ($event.target as HTMLInputElement).value)"
+            type="text" 
+            class="form-input"
+            placeholder="$.value"
+          />
+        </div>
+
+        <div class="form-row">
+          <label>Unit (optional)</label>
+          <input 
+            :value="textConfig.unit"
+            @input="updateTextField('unit', ($event.target as HTMLInputElement).value)"
+            type="text" 
+            class="form-input"
+            placeholder="°C"
+          />
+        </div>
+      </template>
+
+      <!-- KV Item Fields -->
+      <template v-if="item.type === 'kv'">
+        <div class="form-row">
+          <label>KV Bucket</label>
+          <input 
+            :value="kvConfig.kvBucket"
+            @input="updateKvField('kvBucket', ($event.target as HTMLInputElement).value)"
+            type="text" 
+            class="form-input"
+            :class="{ 'has-error': errors?.kvBucket }"
+            placeholder="my-bucket"
+          />
+          <div v-if="errors?.kvBucket" class="error-text">{{ errors.kvBucket }}</div>
+        </div>
+
+        <div class="form-row">
+          <label>KV Key</label>
+          <input 
+            :value="kvConfig.kvKey"
+            @input="updateKvField('kvKey', ($event.target as HTMLInputElement).value)"
+            type="text" 
+            class="form-input"
+            :class="{ 'has-error': errors?.kvKey }"
+            placeholder="my-key"
+          />
+          <div v-if="errors?.kvKey" class="error-text">{{ errors.kvKey }}</div>
+        </div>
+
+        <div class="form-row">
+          <label>JSONPath (optional)</label>
+          <input 
+            :value="kvConfig.jsonPath"
+            @input="updateKvField('jsonPath', ($event.target as HTMLInputElement).value)"
+            type="text" 
+            class="form-input"
+            placeholder="$.status"
+          />
+        </div>
+      </template>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { MapMarkerAction, MapActionSwitchConfig } from '@/types/dashboard'
-
-/**
- * Marker Action Editor Component
- * 
- * Grug say: Edit single action. Can be publish or switch type.
- * Switch type has nested config for KV or Core mode.
- * 
- * Fixed: No longer mutates props directly. Uses emit to update parent.
- */
+import type { MapMarkerItem, MapItemSwitchConfig, MapItemTextConfig, MapItemKvConfig, MapItemType } from '@/types/dashboard'
+import { createDefaultItem } from '@/types/dashboard'
 
 const props = defineProps<{
-  action: MapMarkerAction
+  item: MapMarkerItem
   errors?: Record<string, string>
 }>()
 
 const emit = defineEmits<{
   remove: []
-  'update:action': [action: MapMarkerAction]
+  'update:item': [item: MapMarkerItem]
 }>()
 
+function getItemIcon(type: MapItemType) {
+  switch (type) {
+    case 'publish': return '📤'
+    case 'switch': return '🔄'
+    case 'text': return '📝'
+    case 'kv': return '🗄️'
+    default: return '?'
+  }
+}
+
 /**
- * Get switch config with defaults (read-only)
+ * Get configs with defaults (read-only)
  */
-const switchConfig = computed<MapActionSwitchConfig>(() => {
-  return props.action.switchConfig || {
+const switchConfig = computed<MapItemSwitchConfig>(() => {
+  return props.item.switchConfig || {
     mode: 'kv',
     kvBucket: '',
     kvKey: '',
     onPayload: { state: 'on' },
     offPayload: { state: 'off' },
     labels: { on: 'ON', off: 'OFF' }
+  }
+})
+
+const textConfig = computed<MapItemTextConfig>(() => {
+  return props.item.textConfig || {
+    subject: '',
+    jsonPath: '',
+    unit: ''
+  }
+})
+
+const kvConfig = computed<MapItemKvConfig>(() => {
+  return props.item.kvConfig || {
+    kvBucket: '',
+    kvKey: '',
+    jsonPath: ''
   }
 })
 
@@ -259,25 +357,41 @@ const offPayloadStr = computed(() => {
 })
 
 /**
- * Emit updated action to parent
+ * Emit updated item to parent
  */
-function emitUpdate(updates: Partial<MapMarkerAction>) {
-  emit('update:action', { ...props.action, ...updates })
+function emitUpdate(updates: Partial<MapMarkerItem>) {
+  emit('update:item', { ...props.item, ...updates })
 }
 
 /**
- * Update a top-level field on the action
+ * Update a top-level field on the item
  */
-function updateField(field: keyof MapMarkerAction, value: any) {
+function updateField(field: keyof MapMarkerItem, value: any) {
   emitUpdate({ [field]: value })
 }
 
 /**
  * Update a field in switchConfig
  */
-function updateSwitchField(field: keyof MapActionSwitchConfig, value: any) {
+function updateSwitchField(field: keyof MapItemSwitchConfig, value: any) {
   const newSwitchConfig = { ...switchConfig.value, [field]: value }
   emitUpdate({ switchConfig: newSwitchConfig })
+}
+
+/**
+ * Update a field in textConfig
+ */
+function updateTextField(field: keyof MapItemTextConfig, value: any) {
+  const newTextConfig = { ...textConfig.value, [field]: value }
+  emitUpdate({ textConfig: newTextConfig })
+}
+
+/**
+ * Update a field in kvConfig
+ */
+function updateKvField(field: keyof MapItemKvConfig, value: any) {
+  const newKvConfig = { ...kvConfig.value, [field]: value }
+  emitUpdate({ kvConfig: newKvConfig })
 }
 
 /**
@@ -309,44 +423,26 @@ function updatePayload(which: 'on' | 'off', value: string) {
  * Handle type change - reset type-specific fields
  */
 function handleTypeChange(event: Event) {
-  const newType = (event.target as HTMLSelectElement).value as 'publish' | 'switch'
+  const newType = (event.target as HTMLSelectElement).value as MapItemType
+  const newItem = createDefaultItem(newType)
   
-  if (newType === 'publish') {
-    // Switching to publish - clear switch config, set defaults for publish
-    emitUpdate({
-      type: 'publish',
-      switchConfig: undefined,
-      subject: props.action.subject || '',
-      payload: props.action.payload || '{}'
-    })
-  } else {
-    // Switching to switch - clear publish fields, set defaults for switch
-    emitUpdate({
-      type: 'switch',
-      subject: undefined,
-      payload: undefined,
-      switchConfig: {
-        mode: 'kv',
-        kvBucket: '',
-        kvKey: '',
-        onPayload: { state: 'on' },
-        offPayload: { state: 'off' },
-        labels: { on: 'ON', off: 'OFF' }
-      }
-    })
-  }
+  // Preserve common fields
+  newItem.id = props.item.id
+  newItem.label = props.item.label
+  
+  emit('update:item', newItem)
 }
 </script>
 
 <style scoped>
-.action-editor {
+.item-editor {
   background: rgba(0, 0, 0, 0.15);
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
 }
 
-.action-header {
+.item-header {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -355,20 +451,17 @@ function handleTypeChange(event: Event) {
   border-bottom: 1px solid var(--border);
 }
 
-.action-badge {
+.item-badge {
   font-size: 16px;
   line-height: 1;
 }
 
-.action-badge.switch {
-  color: var(--color-warning);
-}
+.item-badge.switch { color: var(--color-warning); }
+.item-badge.publish { color: var(--color-info); }
+.item-badge.text { color: var(--color-success); }
+.item-badge.kv { color: var(--color-secondary); }
 
-.action-badge.publish {
-  color: var(--color-info);
-}
-
-.action-label {
+.item-label {
   flex: 1;
   font-size: 13px;
   font-weight: 500;
@@ -394,7 +487,7 @@ function handleTypeChange(event: Event) {
   color: var(--color-error);
 }
 
-.action-body {
+.item-body {
   padding: 12px;
   display: flex;
   flex-direction: column;

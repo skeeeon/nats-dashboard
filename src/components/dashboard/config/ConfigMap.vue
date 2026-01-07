@@ -67,7 +67,7 @@
           v-for="(marker, index) in form.mapMarkers"
           :key="marker.id"
           :marker="marker"
-          :action-errors="getMarkerActionErrors(index)"
+          :item-errors="getMarkerItemErrors(index)"
           @remove="removeMarker(index)"
           @use-center="useMapCenterForMarker(index)"
           @update:marker="updateMarker(index, $event)"
@@ -102,7 +102,7 @@
       <div class="tip">
         <span class="tip-icon">🔄</span>
         <span class="tip-text">
-          <strong>Switch actions</strong> create live toggles. 
+          <strong>Switch items</strong> create live toggles. 
           State updates when popup is open.
         </span>
       </div>
@@ -110,7 +110,7 @@
         <span class="tip-icon">📊</span>
         <span class="tip-text">
           <strong>Limits:</strong> {{ MAX_MARKERS }} markers per map, 
-          {{ MAX_ACTIONS_PER_MARKER }} actions per marker.
+          {{ MAX_ITEMS_PER_MARKER }} items per marker.
         </span>
       </div>
     </div>
@@ -129,15 +129,13 @@ import type { WidgetFormState } from '@/types/config'
  * 
  * Grug say: Full V2 implementation.
  * - Multiple markers (max 50)
- * - Multiple actions per marker (max 10)
- * - Publish and Switch action types
- * 
- * Uses MarkerEditor for each marker, which uses MarkerActionEditor for each action.
+ * - Multiple items per marker (max 10)
+ * - Publish, Switch, Text, KV item types
  */
 
 // Use centralized limits from types
 const MAX_MARKERS = MAP_LIMITS.MAX_MARKERS
-const MAX_ACTIONS_PER_MARKER = MAP_LIMITS.MAX_ACTIONS_PER_MARKER
+const MAX_ITEMS_PER_MARKER = MAP_LIMITS.MAX_ITEMS_PER_MARKER
 
 const props = defineProps<{
   form: WidgetFormState
@@ -189,25 +187,24 @@ function useMapCenterForMarker(index: number) {
 }
 
 /**
- * Get errors for a specific marker's actions
- * Grug say: Errors are keyed by "marker_X_action_Y_field"
- * We extract and restructure for the MarkerEditor
+ * Get errors for a specific marker's items
+ * Grug say: Errors are keyed by "marker_X_item_Y_field"
  */
-function getMarkerActionErrors(markerIndex: number): Record<number, Record<string, string>> {
+function getMarkerItemErrors(markerIndex: number): Record<number, Record<string, string>> {
   const result: Record<number, Record<string, string>> = {}
-  const prefix = `marker_${markerIndex}_action_`
+  const prefix = `marker_${markerIndex}_item_`
   
   for (const [key, value] of Object.entries(props.errors)) {
     if (key.startsWith(prefix)) {
-      // Extract action index and field name
+      // Extract item index and field name
       const rest = key.substring(prefix.length)
       const underscorePos = rest.indexOf('_')
       if (underscorePos > 0) {
-        const actionIndex = parseInt(rest.substring(0, underscorePos))
+        const itemIndex = parseInt(rest.substring(0, underscorePos))
         const field = rest.substring(underscorePos + 1)
-        if (!isNaN(actionIndex)) {
-          if (!result[actionIndex]) result[actionIndex] = {}
-          result[actionIndex][field] = value
+        if (!isNaN(itemIndex)) {
+          if (!result[itemIndex]) result[itemIndex] = {}
+          result[itemIndex][field] = value
         }
       }
     }

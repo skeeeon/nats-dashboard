@@ -2,16 +2,15 @@
  * Leaflet Map Composable
  * 
  * Grug say: Handle all Leaflet stuff in one place.
- * Theme switching, marker rendering, popup actions.
+ * Theme switching, marker rendering, popup items.
  * 
- * V2: Supports both publish (button) and switch (toggle) actions.
- * Fixed: Proper callback interface, popup event handling. Unused vars fix.
+ * V2: Supports publish, switch, text, and kv items.
  */
 
 import { ref, shallowRef } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import type { MapMarker, MapMarkerAction } from '@/types/dashboard'
+import type { MapMarker, MapMarkerItem } from '@/types/dashboard'
 
 // Tile providers
 const TILE_URLS = {
@@ -25,8 +24,8 @@ const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyrigh
  * Popup event callbacks - EXPORTED for use by MapWidget
  */
 export interface PopupCallbacks {
-  onPublishAction: (action: MapMarkerAction) => void
-  onSwitchToggle: (action: MapMarkerAction) => void
+  onPublishItem: (item: MapMarkerItem) => void
+  onSwitchToggle: (item: MapMarkerItem) => void
   onPopupOpen: (markerId: string, popupElement: HTMLElement) => void
   onPopupClose: (markerId: string) => void
 }
@@ -126,12 +125,12 @@ export function useLeafletMap() {
     markerInstances.clear()
 
     markers.forEach(markerConfig => {
-      const { id, lat, lon, label, actions } = markerConfig
+      const { id, lat, lon, label, items } = markerConfig
 
       const marker = L.marker([lat, lon], { title: label })
 
       // Build popup content with callbacks wired up
-      const popupContent = createPopupContent(id, label, actions, callbacks)
+      const popupContent = createPopupContent(id, label, items, callbacks)
       const popup = L.popup({
         className: 'nats-map-popup',
         minWidth: 180,
@@ -167,12 +166,12 @@ export function useLeafletMap() {
   }
 
   /**
-   * Create popup HTML content with action buttons/toggles
+   * Create popup HTML content with item buttons/toggles/displays
    */
   function createPopupContent(
     _markerId: string,
     label: string,
-    actions: MapMarkerAction[],
+    items: MapMarkerItem[],
     callbacks: PopupCallbacks
   ): HTMLElement {
     const container = document.createElement('div')
@@ -184,26 +183,29 @@ export function useLeafletMap() {
     header.textContent = label
     container.appendChild(header)
 
-    // Actions
-    if (actions.length > 0) {
-      const actionList = document.createElement('div')
-      actionList.className = 'map-popup-actions'
+    // Items
+    if (items.length > 0) {
+      const itemList = document.createElement('div')
+      itemList.className = 'map-popup-items'
 
-      actions.forEach(action => {
-        if (action.type === 'publish') {
-          const btn = createPublishButton(action, callbacks.onPublishAction)
-          actionList.appendChild(btn)
-        } else if (action.type === 'switch') {
-          const toggle = createSwitchToggle(action, callbacks.onSwitchToggle)
-          actionList.appendChild(toggle)
+      items.forEach(item => {
+        if (item.type === 'publish') {
+          const btn = createPublishButton(item, callbacks.onPublishItem)
+          itemList.appendChild(btn)
+        } else if (item.type === 'switch') {
+          const toggle = createSwitchToggle(item, callbacks.onSwitchToggle)
+          itemList.appendChild(toggle)
+        } else if (item.type === 'text' || item.type === 'kv') {
+          const display = createValueDisplay(item)
+          itemList.appendChild(display)
         }
       })
 
-      container.appendChild(actionList)
+      container.appendChild(itemList)
     } else {
       const hint = document.createElement('div')
-      hint.className = 'map-popup-no-actions'
-      hint.textContent = 'No actions configured'
+      hint.className = 'map-popup-no-items'
+      hint.textContent = 'No items configured'
       container.appendChild(hint)
     }
 
@@ -211,20 +213,20 @@ export function useLeafletMap() {
   }
 
   /**
-   * Create publish action button
+   * Create publish item button
    */
   function createPublishButton(
-    action: MapMarkerAction,
-    onAction: (action: MapMarkerAction) => void
+    item: MapMarkerItem,
+    onAction: (item: MapMarkerItem) => void
   ): HTMLElement {
     const btn = document.createElement('button')
-    btn.className = 'map-popup-action-btn publish'
-    btn.dataset.actionId = action.id
-    btn.textContent = action.label
+    btn.className = 'map-popup-item-btn publish'
+    btn.dataset.itemId = item.id
+    btn.textContent = item.label
 
     btn.onclick = (e) => {
       e.stopPropagation()
-      onAction(action)
+      onAction(item)
       
       // Visual feedback
       btn.classList.add('action-success')
@@ -240,20 +242,20 @@ export function useLeafletMap() {
   }
 
   /**
-   * Create switch action toggle
+   * Create switch item toggle
    */
   function createSwitchToggle(
-    action: MapMarkerAction,
-    onToggle: (action: MapMarkerAction) => void
+    item: MapMarkerItem,
+    onToggle: (item: MapMarkerItem) => void
   ): HTMLElement {
     const container = document.createElement('div')
     container.className = 'map-popup-switch'
-    container.dataset.actionId = action.id
+    container.dataset.itemId = item.id
 
     // Label
     const label = document.createElement('span')
     label.className = 'switch-label'
-    label.textContent = action.label
+    label.textContent = item.label
 
     // Toggle track
     const track = document.createElement('button')
@@ -272,7 +274,7 @@ export function useLeafletMap() {
 
     track.onclick = (e) => {
       e.stopPropagation()
-      onToggle(action)
+      onToggle(item)
     }
 
     container.appendChild(label)
@@ -283,17 +285,45 @@ export function useLeafletMap() {
   }
 
   /**
+   * Create value display for Text/KV items
+   */
+  function createValueDisplay(item: MapMarkerItem): HTMLElement {
+    const container = document.createElement('div')
+    container.className = 'map-popup-value-display'
+    container.dataset.itemId = item.id
+
+    const label = document.createElement('span')
+    label.className = 'value-label'
+    label.textContent = item.label
+
+    const value = document.createElement('span')
+    value.className = 'value-text'
+    value.textContent = '...' // Placeholder
+
+    const unit = document.createElement('span')
+    unit.className = 'value-unit'
+    if (item.type === 'text' && item.textConfig?.unit) {
+      unit.textContent = item.textConfig.unit
+    }
+
+    container.appendChild(label)
+    container.appendChild(value)
+    if (unit.textContent) container.appendChild(unit)
+
+    return container
+  }
+
+  /**
    * Update switch toggle state in popup
-   * Called by MapWidget when switch state changes
    */
   function updateSwitchState(
-    actionId: string,
+    itemId: string,
     state: 'on' | 'off' | 'pending' | 'unknown',
     labels?: { on?: string; off?: string }
   ) {
     // Find the switch element in any open popup
     const switchEl = document.querySelector(
-      `.map-popup-switch[data-action-id="${actionId}"]`
+      `.map-popup-switch[data-item-id="${itemId}"]`
     ) as HTMLElement | null
 
     if (!switchEl) return
@@ -324,6 +354,22 @@ export function useLeafletMap() {
         default:
           stateText.textContent = '?'
       }
+    }
+  }
+
+  /**
+   * Update value display in popup
+   */
+  function updateItemValue(itemId: string, value: string) {
+    const displayEl = document.querySelector(
+      `.map-popup-value-display[data-item-id="${itemId}"]`
+    ) as HTMLElement | null
+
+    if (!displayEl) return
+
+    const valueText = displayEl.querySelector('.value-text')
+    if (valueText) {
+      valueText.textContent = value
     }
   }
 
@@ -371,6 +417,7 @@ export function useLeafletMap() {
     updateTheme,
     renderMarkers,
     updateSwitchState,
+    updateItemValue,
     setView,
     invalidateSize,
     getMarker,

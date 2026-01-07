@@ -368,7 +368,7 @@ function validate(): boolean {
       if (!jsonResult.valid) errors.value.jsonPath = jsonResult.error!
     }
   } else if (widget.type === 'map') {
-    // Validate map markers and actions
+    // Validate map markers and items
     validateMapConfig()
   }
   
@@ -380,26 +380,26 @@ function validate(): boolean {
  */
 function validateMapConfig() {
   form.value.mapMarkers.forEach((marker, mIdx) => {
-    marker.actions.forEach((action, aIdx) => {
-      const prefix = `marker_${mIdx}_action_${aIdx}_`
+    marker.items.forEach((item, iIdx) => {
+      const prefix = `marker_${mIdx}_item_${iIdx}_`
       
-      if (action.type === 'publish') {
-        // Validate publish action
-        if (action.subject) {
-          const subjectResult = validator.validateSubject(action.subject)
+      if (item.type === 'publish') {
+        // Validate publish item
+        if (item.subject) {
+          const subjectResult = validator.validateSubject(item.subject)
           if (!subjectResult.valid) {
             errors.value[`${prefix}subject`] = subjectResult.error!
           }
         }
-        if (action.payload) {
-          const jsonResult = validator.validateJson(action.payload)
+        if (item.payload) {
+          const jsonResult = validator.validateJson(item.payload)
           if (!jsonResult.valid) {
             errors.value[`${prefix}payload`] = jsonResult.error!
           }
         }
-      } else if (action.type === 'switch' && action.switchConfig) {
-        // Validate switch action
-        const cfg = action.switchConfig
+      } else if (item.type === 'switch' && item.switchConfig) {
+        // Validate switch item
+        const cfg = item.switchConfig
         if (cfg.mode === 'kv') {
           if (cfg.kvBucket) {
             const bucketResult = validator.validateKvBucket(cfg.kvBucket)
@@ -419,6 +419,49 @@ function validateMapConfig() {
             if (!subjectResult.valid) {
               errors.value[`${prefix}publishSubject`] = subjectResult.error!
             }
+          }
+        }
+      } else if (item.type === 'text' && item.textConfig) {
+        // Validate text item
+        if (item.textConfig.subject) {
+          const subjectResult = validator.validateSubject(item.textConfig.subject)
+          if (!subjectResult.valid) {
+            errors.value[`${prefix}subject`] = subjectResult.error!
+          }
+        } else {
+          errors.value[`${prefix}subject`] = 'Subject required'
+        }
+        
+        if (item.textConfig.jsonPath) {
+          const jsonResult = validator.validateJsonPath(item.textConfig.jsonPath)
+          if (!jsonResult.valid) {
+            errors.value[`${prefix}jsonPath`] = jsonResult.error!
+          }
+        }
+      } else if (item.type === 'kv' && item.kvConfig) {
+        // Validate kv item
+        if (item.kvConfig.kvBucket) {
+          const bucketResult = validator.validateKvBucket(item.kvConfig.kvBucket)
+          if (!bucketResult.valid) {
+            errors.value[`${prefix}kvBucket`] = bucketResult.error!
+          }
+        } else {
+          errors.value[`${prefix}kvBucket`] = 'Bucket required'
+        }
+        
+        if (item.kvConfig.kvKey) {
+          const keyResult = validator.validateKvKey(item.kvConfig.kvKey)
+          if (!keyResult.valid) {
+            errors.value[`${prefix}kvKey`] = keyResult.error!
+          }
+        } else {
+          errors.value[`${prefix}kvKey`] = 'Key required'
+        }
+        
+        if (item.kvConfig.jsonPath) {
+          const jsonResult = validator.validateJsonPath(item.kvConfig.jsonPath)
+          if (!jsonResult.valid) {
+            errors.value[`${prefix}jsonPath`] = jsonResult.error!
           }
         }
       }

@@ -127,12 +127,12 @@ export interface GaugeWidgetConfig {
 
 export const MAP_LIMITS = {
   MAX_MARKERS: 50,
-  MAX_ACTIONS_PER_MARKER: 10,
+  MAX_ITEMS_PER_MARKER: 10,
 } as const
 
-export type MapActionType = 'publish' | 'switch'
+export type MapItemType = 'publish' | 'switch' | 'text' | 'kv'
 
-export interface MapActionSwitchConfig {
+export interface MapItemSwitchConfig {
   mode: 'kv' | 'core'
   kvBucket?: string
   kvKey?: string
@@ -147,13 +147,29 @@ export interface MapActionSwitchConfig {
   }
 }
 
-export interface MapMarkerAction {
+export interface MapItemTextConfig {
+  subject: string
+  jsonPath?: string
+  unit?: string
+}
+
+export interface MapItemKvConfig {
+  kvBucket: string
+  kvKey: string
+  jsonPath?: string
+}
+
+export interface MapMarkerItem {
   id: string
-  type: MapActionType
+  type: MapItemType
   label: string
+  // Legacy/Shared fields (Publish)
   subject?: string
   payload?: string
-  switchConfig?: MapActionSwitchConfig
+  // Type specific configs
+  switchConfig?: MapItemSwitchConfig
+  textConfig?: MapItemTextConfig
+  kvConfig?: MapItemKvConfig
 }
 
 export interface MapMarker {
@@ -162,7 +178,7 @@ export interface MapMarker {
   lat: number
   lon: number
   color?: string
-  actions: MapMarkerAction[]
+  items: MapMarkerItem[] // Renamed from actions
 }
 
 export interface MapWidgetConfig {
@@ -208,12 +224,12 @@ export interface Dashboard {
   created: number
   modified: number
   widgets: WidgetConfig[]
-  variables?: DashboardVariable[] // New field
+  variables?: DashboardVariable[]
   
   // Storage Metadata
   storage?: StorageType
-  kvKey?: string      // The key in the KV bucket (e.g. "ops.prod.main")
-  kvRevision?: number // The revision number for CAS (Optimistic Locking)
+  kvKey?: string
+  kvRevision?: number
 }
 
 // --- Default Widget Sizes ---
@@ -329,7 +345,7 @@ export function createDefaultDashboard(name: string): Dashboard {
     created: now,
     modified: now,
     widgets: [],
-    variables: [], // Initialize empty variables
+    variables: [],
     storage: 'local'
   }
 }
@@ -340,12 +356,12 @@ export function createDefaultMarker(): MapMarker {
     label: 'New Marker',
     lat: 0,
     lon: 0,
-    actions: []
+    items: [] // Renamed from actions
   }
 }
 
-export function createDefaultAction(type: MapActionType = 'publish'): MapMarkerAction {
-  const id = `action_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+export function createDefaultItem(type: MapItemType = 'publish'): MapMarkerItem {
+  const id = `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
   
   if (type === 'switch') {
     return {
@@ -359,6 +375,26 @@ export function createDefaultAction(type: MapActionType = 'publish'): MapMarkerA
         onPayload: { state: 'on' },
         offPayload: { state: 'off' },
         labels: { on: 'ON', off: 'OFF' }
+      }
+    }
+  } else if (type === 'text') {
+    return {
+      id,
+      type: 'text',
+      label: 'Value',
+      textConfig: {
+        subject: 'data.subject',
+        unit: ''
+      }
+    }
+  } else if (type === 'kv') {
+    return {
+      id,
+      type: 'kv',
+      label: 'KV Value',
+      kvConfig: {
+        kvBucket: 'my-bucket',
+        kvKey: 'my-key'
       }
     }
   }
