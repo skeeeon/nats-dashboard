@@ -64,13 +64,12 @@
         <!-- Row 2: Actions -->
         <div class="toolbar-actions">
           <!-- Variable Toggle -->
-          <!-- Grug change: Show if variables exist OR if we can add them (unlocked) -->
           <button 
             v-if="hasVariables || !dashboardStore.isLocked"
             class="btn-icon"
             :class="{ 'is-active': showVariableBar }"
             @click="showVariableBar = !showVariableBar"
-            title="Toggle Variables"
+            title="Toggle Variables (V)"
           >
             <span class="var-icon">{ }</span>
           </button>
@@ -111,7 +110,6 @@
       
       <!-- Variable Bar (Collapsible) -->
       <Transition name="slide-fade">
-        <!-- Grug change: Only show when explicitly toggled -->
         <div v-if="showVariableBar" class="variable-bar-wrapper">
           <VariableBar 
             @edit="showVariableModal = true" 
@@ -408,6 +406,15 @@ const { shortcuts } = useKeyboardShortcuts([
     key: 'b', 
     description: 'Toggle Sidebar', 
     handler: toggleSidebar 
+  },
+  { 
+    key: 'v', 
+    description: 'Toggle Variables', 
+    handler: () => {
+      if (hasVariables.value || !dashboardStore.isLocked) {
+        showVariableBar.value = !showVariableBar.value
+      }
+    }
   },
   { 
     key: 'l', 
