@@ -65,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useDashboardStore } from '@/stores/dashboard'
 
 // Define recursive structure
@@ -143,6 +143,33 @@ function handleClickOutside(event: MouseEvent) {
     }
   }
 }
+
+// --- Auto-Expand Logic ---
+
+/**
+ * Recursively check if a folder structure contains the target key
+ */
+function containsKey(item: TreeStructure | string, targetKey: string): boolean {
+  if (typeof item === 'string') {
+    return item === targetKey
+  }
+  // It's a folder/object, check values
+  return Object.values(item).some(child => containsKey(child, targetKey))
+}
+
+/**
+ * Watch activeId and structure to auto-expand folders
+ */
+watch([() => props.activeId, folders], ([newId, currentFolders]) => {
+  if (!newId) return
+  
+  for (const [folderName, content] of Object.entries(currentFolders)) {
+    // If this folder contains the active dashboard, open it
+    if (containsKey(content, newId)) {
+      openFolders.value[folderName] = true
+    }
+  }
+}, { immediate: true })
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)

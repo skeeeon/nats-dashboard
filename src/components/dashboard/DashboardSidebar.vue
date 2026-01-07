@@ -470,6 +470,15 @@ watch(isMobile, (mobile) => {
 watch(() => dashboardStore.enableSharedDashboards, (enabled) => {
   if (!enabled) activeTab.value = 'local'
 })
+
+// NEW: Watch active dashboard storage to switch tabs automatically (e.g. on startup load)
+watch(() => dashboardStore.activeDashboard?.storage, (storage) => {
+  if (storage === 'kv' && dashboardStore.enableSharedDashboards) {
+    activeTab.value = 'shared'
+  } else if (storage === 'local') {
+    activeTab.value = 'local'
+  }
+})
 </script>
 
 <style scoped>
