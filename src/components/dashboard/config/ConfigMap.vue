@@ -53,7 +53,7 @@
       <div class="section-header">
         <span class="section-icon">📍</span>
         <span class="section-title">Markers</span>
-        <span class="section-count">{{ form.mapMarkers.length }}</span>
+        <span class="section-count">{{ form.mapMarkers.length }}/{{ MAX_MARKERS }}</span>
       </div>
       
       <div v-if="form.mapMarkers.length === 0" class="empty-markers">
@@ -70,10 +70,20 @@
           :action-errors="getMarkerActionErrors(index)"
           @remove="removeMarker(index)"
           @use-center="useMapCenterForMarker(index)"
+          @update:marker="updateMarker(index, $event)"
         />
       </div>
       
-      <button class="btn-add-marker" @click="addMarker">
+      <!-- Marker limit warning -->
+      <div v-if="isAtMarkerLimit" class="limit-warning">
+        ⚠️ Maximum {{ MAX_MARKERS }} markers per map widget
+      </div>
+      
+      <button 
+        v-else
+        class="btn-add-marker" 
+        @click="addMarker"
+      >
         <span class="btn-icon">+</span>
         <span class="btn-text">Add Marker</span>
       </button>
@@ -96,35 +106,52 @@
           State updates when popup is open.
         </span>
       </div>
+      <div class="tip">
+        <span class="tip-icon">📊</span>
+        <span class="tip-text">
+          <strong>Limits:</strong> {{ MAX_MARKERS }} markers per map, 
+          {{ MAX_ACTIONS_PER_MARKER }} actions per marker.
+        </span>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import MarkerEditor from './MarkerEditor.vue'
-import { createDefaultMarker } from '@/types/dashboard'
+import { createDefaultMarker, MAP_LIMITS } from '@/types/dashboard'
+import type { MapMarker } from '@/types/dashboard'
 import type { WidgetFormState } from '@/types/config'
 
 /**
  * Map Widget Configuration Form
  * 
  * Grug say: Full V2 implementation.
- * - Multiple markers
- * - Multiple actions per marker
+ * - Multiple markers (max 50)
+ * - Multiple actions per marker (max 10)
  * - Publish and Switch action types
  * 
  * Uses MarkerEditor for each marker, which uses MarkerActionEditor for each action.
  */
+
+// Use centralized limits from types
+const MAX_MARKERS = MAP_LIMITS.MAX_MARKERS
+const MAX_ACTIONS_PER_MARKER = MAP_LIMITS.MAX_ACTIONS_PER_MARKER
 
 const props = defineProps<{
   form: WidgetFormState
   errors: Record<string, string>
 }>()
 
+const isAtMarkerLimit = computed(() => props.form.mapMarkers.length >= MAX_MARKERS)
+
 /**
  * Add new marker
  */
 function addMarker() {
+  if (isAtMarkerLimit.value) return
+  
   const marker = createDefaultMarker()
   // Default to map center
   marker.lat = props.form.mapCenterLat || 39.8283
@@ -140,13 +167,24 @@ function removeMarker(index: number) {
 }
 
 /**
+ * Update a marker at specific index
+ */
+function updateMarker(index: number, updatedMarker: MapMarker) {
+  props.form.mapMarkers[index] = updatedMarker
+}
+
+/**
  * Set marker coords to map center
  */
 function useMapCenterForMarker(index: number) {
   const marker = props.form.mapMarkers[index]
   if (marker) {
-    marker.lat = props.form.mapCenterLat
-    marker.lon = props.form.mapCenterLon
+    // Create new marker object to trigger reactivity properly
+    props.form.mapMarkers[index] = {
+      ...marker,
+      lat: props.form.mapCenterLat,
+      lon: props.form.mapCenterLon
+    }
   }
 }
 
@@ -314,6 +352,18 @@ function getMarkerActionErrors(markerIndex: number): Record<number, Record<strin
   flex-direction: column;
   gap: 16px;
   margin-bottom: 16px;
+}
+
+/* Limit warning */
+.limit-warning {
+  padding: 12px 16px;
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  border-radius: 6px;
+  color: var(--color-warning);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
 }
 
 /* Add marker button */

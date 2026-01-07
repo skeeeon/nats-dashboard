@@ -112,6 +112,17 @@ export interface GaugeWidgetConfig {
 // --- Map Widget Types ---
 
 /**
+ * Map Widget Limits
+ * Grug say: Reasonable limits for localStorage and UI usability.
+ * - 50 markers max: Leaflet handles more, but config storage and UI get unwieldy
+ * - 10 actions max: A popup with 10 buttons/switches is already crowded
+ */
+export const MAP_LIMITS = {
+  MAX_MARKERS: 50,
+  MAX_ACTIONS_PER_MARKER: 10,
+} as const
+
+/**
  * Map Action Type
  * Grug say: Two types. Publish is fire-and-forget. Switch is stateful toggle.
  */

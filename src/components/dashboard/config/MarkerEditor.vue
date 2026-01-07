@@ -29,7 +29,8 @@
         <div class="form-row">
           <label>Label</label>
           <input 
-            v-model="marker.label" 
+            :value="marker.label"
+            @input="updateMarkerField('label', ($event.target as HTMLInputElement).value)"
             type="text" 
             class="form-input"
             placeholder="Building A"
@@ -40,7 +41,8 @@
           <div class="form-row">
             <label>Latitude</label>
             <input 
-              v-model.number="marker.lat" 
+              :value="marker.lat"
+              @input="updateMarkerField('lat', parseFloat(($event.target as HTMLInputElement).value) || 0)"
               type="number" 
               class="form-input"
               step="any"
@@ -50,7 +52,8 @@
           <div class="form-row">
             <label>Longitude</label>
             <input 
-              v-model.number="marker.lon" 
+              :value="marker.lon"
+              @input="updateMarkerField('lon', parseFloat(($event.target as HTMLInputElement).value) || 0)"
               type="number" 
               class="form-input"
               step="any"
@@ -72,7 +75,7 @@
       <div class="marker-section">
         <div class="section-title">
           Actions
-          <span class="section-hint">({{ marker.actions.length }})</span>
+          <span class="section-hint">({{ marker.actions.length }}/{{ MAX_ACTIONS_PER_MARKER }})</span>
         </div>
         
         <div v-if="marker.actions.length === 0" class="empty-actions">
@@ -86,10 +89,16 @@
             :action="action"
             :errors="actionErrors[index]"
             @remove="removeAction(index)"
+            @update:action="updateAction(index, $event)"
           />
         </div>
         
-        <div class="add-action-row">
+        <!-- Action limit warning -->
+        <div v-if="isAtActionLimit" class="limit-warning">
+          ⚠️ Maximum {{ MAX_ACTIONS_PER_MARKER }} actions per marker
+        </div>
+        
+        <div v-else class="add-action-row">
           <button class="btn-add" @click="addAction('publish')">
             + Add Publish Action
           </button>
@@ -103,43 +112,78 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import MarkerActionEditor from './MarkerActionEditor.vue'
-import { createDefaultAction } from '@/types/dashboard'
-import type { MapMarker, MapActionType } from '@/types/dashboard'
+import { createDefaultAction, MAP_LIMITS } from '@/types/dashboard'
+import type { MapMarker, MapMarkerAction, MapActionType } from '@/types/dashboard'
 
 /**
  * Marker Editor Component
  * 
  * Grug say: Edit single marker with its location and actions.
  * Collapsible to keep UI manageable with many markers.
+ * 
+ * Now enforces action limit per marker.
  */
+
+const MAX_ACTIONS_PER_MARKER = MAP_LIMITS.MAX_ACTIONS_PER_MARKER
 
 const props = defineProps<{
   marker: MapMarker
   actionErrors?: Record<number, Record<string, string>>
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   remove: []
   'use-center': []
+  'update:marker': [marker: MapMarker]
 }>()
 
 const isExpanded = ref(true)
+
+const isAtActionLimit = computed(() => props.marker.actions.length >= MAX_ACTIONS_PER_MARKER)
+
+/**
+ * Emit updated marker to parent
+ */
+function emitMarkerUpdate(updates: Partial<MapMarker>) {
+  emit('update:marker', { ...props.marker, ...updates })
+}
+
+/**
+ * Update a field on the marker
+ */
+function updateMarkerField(field: keyof MapMarker, value: any) {
+  emitMarkerUpdate({ [field]: value })
+}
 
 /**
  * Add new action to marker
  */
 function addAction(type: MapActionType) {
+  if (isAtActionLimit.value) return
+  
   const action = createDefaultAction(type)
-  props.marker.actions.push(action)
+  const newActions = [...props.marker.actions, action]
+  emitMarkerUpdate({ actions: newActions })
 }
 
 /**
  * Remove action from marker
  */
 function removeAction(index: number) {
-  props.marker.actions.splice(index, 1)
+  const newActions = [...props.marker.actions]
+  newActions.splice(index, 1)
+  emitMarkerUpdate({ actions: newActions })
+}
+
+/**
+ * Update a specific action
+ */
+function updateAction(index: number, updatedAction: MapMarkerAction) {
+  const newActions = [...props.marker.actions]
+  newActions[index] = updatedAction
+  emitMarkerUpdate({ actions: newActions })
 }
 </script>
 
@@ -322,6 +366,17 @@ function removeAction(index: number) {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.limit-warning {
+  padding: 8px 12px;
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  border-radius: 4px;
+  color: var(--color-warning);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: center;
 }
 
 .add-action-row {

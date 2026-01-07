@@ -49,7 +49,7 @@ import type { WidgetConfig, MapMarkerAction } from '@/types/dashboard'
  * Grug say: Show map with markers. Click marker, see popup with actions.
  * Actions can be publish (fire-and-forget) or switch (stateful toggle).
  * 
- * Fixed: Proper callback interface, fullscreen support, switch state management.
+ * Fixed: Proper watch cleanup for switch states.
  */
 
 const props = withDefaults(defineProps<{
@@ -75,7 +75,11 @@ const mapReady = ref(false)
 const actionFeedback = ref<{ type: 'success' | 'error'; message: string } | null>(null)
 
 // Track active switch states for each action (keyed by action ID)
-const activeSwitchStates = new Map<string, SwitchState>()
+interface SwitchStateEntry {
+  switchState: SwitchState
+  stopWatch: () => void  // Store the watch cleanup function
+}
+const activeSwitchStates = new Map<string, SwitchStateEntry>()
 
 // Track which marker popup is currently open
 const openMarkerId = ref<string | null>(null)
@@ -129,14 +133,14 @@ function handleSwitchToggle(action: MapMarkerAction) {
     return
   }
 
-  const switchState = activeSwitchStates.get(action.id)
-  if (!switchState) {
+  const entry = activeSwitchStates.get(action.id)
+  if (!entry) {
     console.warn('[MapWidget] No switch state found for action:', action.id)
     return
   }
 
   // Toggle the switch
-  switchState.toggle()
+  entry.switchState.toggle()
 }
 
 /**
@@ -185,7 +189,7 @@ async function startSwitchStateWatcher(action: MapMarkerAction) {
   // Don't start if already active
   if (activeSwitchStates.has(action.id)) {
     const existing = activeSwitchStates.get(action.id)!
-    if (existing.isActive()) return
+    if (existing.switchState.isActive()) return
   }
 
   // Create switch state instance
@@ -200,8 +204,6 @@ async function startSwitchStateWatcher(action: MapMarkerAction) {
     defaultState: 'off'
   })
 
-  activeSwitchStates.set(action.id, switchState)
-
   // Start watching
   await switchState.start()
 
@@ -213,12 +215,19 @@ async function startSwitchStateWatcher(action: MapMarkerAction) {
   )
 
   // Watch for state changes and update popup UI
-  watch(switchState.state, (newState) => {
+  // Store the stop function so we can clean up properly
+  const stopWatch = watch(switchState.state, (newState) => {
     updateSwitchState(
       action.id,
       newState,
       action.switchConfig?.labels
     )
+  })
+
+  // Store both the switch state and the watch cleanup function
+  activeSwitchStates.set(action.id, {
+    switchState,
+    stopWatch
   })
 }
 
@@ -226,9 +235,12 @@ async function startSwitchStateWatcher(action: MapMarkerAction) {
  * Stop a switch state watcher
  */
 function stopSwitchStateWatcher(actionId: string) {
-  const switchState = activeSwitchStates.get(actionId)
-  if (switchState) {
-    switchState.stop()
+  const entry = activeSwitchStates.get(actionId)
+  if (entry) {
+    // Stop the Vue watch first
+    entry.stopWatch()
+    // Then stop the switch state (KV watcher / subscription)
+    entry.switchState.stop()
     activeSwitchStates.delete(actionId)
   }
 }
@@ -237,8 +249,9 @@ function stopSwitchStateWatcher(actionId: string) {
  * Stop all switch state watchers
  */
 function stopAllSwitchStateWatchers() {
-  for (const [actionId, switchState] of activeSwitchStates) {
-    switchState.stop()
+  for (const [actionId, entry] of activeSwitchStates) {
+    entry.stopWatch()
+    entry.switchState.stop()
   }
   activeSwitchStates.clear()
 }
@@ -291,14 +304,48 @@ function updateMarkers() {
   renderMarkers(markers.value, popupCallbacks)
 }
 
+// ResizeObserver instance - declare at module level for proper cleanup
+let resizeObserver: ResizeObserver | null = null
+let resizeObserverTimeout: number | null = null
+
 // Initialize on mount
 onMounted(() => {
   initializeMap()
+  
+  // Setup resize observer with safety check
+  resizeObserver = new ResizeObserver(() => {
+    if (mapReady.value) {
+      invalidateSize()
+    }
+  })
+  
+  // Delay observation to ensure container exists
+  resizeObserverTimeout = window.setTimeout(() => {
+    const container = document.getElementById(mapContainerId.value)
+    if (container?.parentElement && resizeObserver) {
+      resizeObserver.observe(container.parentElement)
+    }
+  }, 100)
 })
 
 // Cleanup on unmount
 onUnmounted(() => {
+  // Clear pending timeout first
+  if (resizeObserverTimeout !== null) {
+    clearTimeout(resizeObserverTimeout)
+    resizeObserverTimeout = null
+  }
+  
+  // Disconnect resize observer
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
+  
+  // Stop all switch watchers (includes Vue watch cleanup)
   stopAllSwitchStateWatchers()
+  
+  // Cleanup Leaflet map
   cleanup()
 })
 
@@ -317,29 +364,6 @@ watch([mapCenter, mapZoom], () => {
   mapReady.value = false
   initializeMap()
 }, { deep: true })
-
-// Handle resize when widget is resized
-const resizeObserver = new ResizeObserver(() => {
-  if (mapReady.value) {
-    invalidateSize()
-  }
-})
-
-onMounted(() => {
-  // Wait for map to be ready before observing
-  const checkAndObserve = () => {
-    const container = document.getElementById(mapContainerId.value)
-    if (container?.parentElement) {
-      resizeObserver.observe(container.parentElement)
-    }
-  }
-  // Delay to ensure container exists
-  setTimeout(checkAndObserve, 100)
-})
-
-onUnmounted(() => {
-  resizeObserver.disconnect()
-})
 </script>
 
 <style scoped>

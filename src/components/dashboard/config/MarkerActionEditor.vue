@@ -18,7 +18,7 @@
       <!-- Action Type -->
       <div class="form-row">
         <label>Type</label>
-        <select v-model="action.type" class="form-input" @change="handleTypeChange">
+        <select :value="action.type" @change="handleTypeChange" class="form-input">
           <option value="publish">Publish (Button)</option>
           <option value="switch">Switch (Toggle)</option>
         </select>
@@ -28,7 +28,8 @@
       <div class="form-row">
         <label>Label</label>
         <input 
-          v-model="action.label" 
+          :value="action.label"
+          @input="updateField('label', ($event.target as HTMLInputElement).value)"
           type="text" 
           class="form-input"
           placeholder="Action label"
@@ -40,7 +41,8 @@
         <div class="form-row">
           <label>Subject</label>
           <input 
-            v-model="action.subject" 
+            :value="action.subject"
+            @input="updateField('subject', ($event.target as HTMLInputElement).value)"
             type="text" 
             class="form-input"
             :class="{ 'has-error': errors?.subject }"
@@ -52,7 +54,8 @@
         <div class="form-row">
           <label>Payload</label>
           <textarea 
-            v-model="action.payload" 
+            :value="action.payload"
+            @input="updateField('payload', ($event.target as HTMLTextAreaElement).value)"
             class="form-textarea"
             :class="{ 'has-error': errors?.payload }"
             rows="2"
@@ -66,7 +69,11 @@
       <template v-if="action.type === 'switch'">
         <div class="form-row">
           <label>Mode</label>
-          <select v-model="switchConfig.mode" class="form-input">
+          <select 
+            :value="switchConfig.mode" 
+            @change="updateSwitchField('mode', ($event.target as HTMLSelectElement).value)"
+            class="form-input"
+          >
             <option value="kv">KV (Stateful)</option>
             <option value="core">CORE (Pub/Sub)</option>
           </select>
@@ -77,7 +84,8 @@
           <div class="form-row">
             <label>KV Bucket</label>
             <input 
-              v-model="switchConfig.kvBucket" 
+              :value="switchConfig.kvBucket"
+              @input="updateSwitchField('kvBucket', ($event.target as HTMLInputElement).value)"
               type="text" 
               class="form-input"
               :class="{ 'has-error': errors?.kvBucket }"
@@ -89,7 +97,8 @@
           <div class="form-row">
             <label>KV Key</label>
             <input 
-              v-model="switchConfig.kvKey" 
+              :value="switchConfig.kvKey"
+              @input="updateSwitchField('kvKey', ($event.target as HTMLInputElement).value)"
               type="text" 
               class="form-input"
               :class="{ 'has-error': errors?.kvKey }"
@@ -104,7 +113,8 @@
           <div class="form-row">
             <label>Publish Subject</label>
             <input 
-              v-model="switchConfig.publishSubject" 
+              :value="switchConfig.publishSubject"
+              @input="updateSwitchField('publishSubject', ($event.target as HTMLInputElement).value)"
               type="text" 
               class="form-input"
               :class="{ 'has-error': errors?.publishSubject }"
@@ -116,7 +126,8 @@
           <div class="form-row">
             <label>State Subject (optional)</label>
             <input 
-              v-model="switchConfig.stateSubject" 
+              :value="switchConfig.stateSubject"
+              @input="updateSwitchField('stateSubject', ($event.target as HTMLInputElement).value)"
               type="text" 
               class="form-input"
               placeholder="device.state"
@@ -130,7 +141,8 @@
           <div class="form-row">
             <label>ON Payload</label>
             <input 
-              v-model="onPayloadStr" 
+              :value="onPayloadStr"
+              @input="updatePayload('on', ($event.target as HTMLInputElement).value)"
               type="text" 
               class="form-input"
               placeholder='{"state":"on"}'
@@ -139,7 +151,8 @@
           <div class="form-row">
             <label>OFF Payload</label>
             <input 
-              v-model="offPayloadStr" 
+              :value="offPayloadStr"
+              @input="updatePayload('off', ($event.target as HTMLInputElement).value)"
               type="text" 
               class="form-input"
               placeholder='{"state":"off"}'
@@ -152,7 +165,8 @@
           <div class="form-row">
             <label>ON Label</label>
             <input 
-              v-model="switchLabels.on" 
+              :value="switchLabels.on"
+              @input="updateSwitchLabel('on', ($event.target as HTMLInputElement).value)"
               type="text" 
               class="form-input"
               placeholder="ON"
@@ -161,7 +175,8 @@
           <div class="form-row">
             <label>OFF Label</label>
             <input 
-              v-model="switchLabels.off" 
+              :value="switchLabels.off"
+              @input="updateSwitchLabel('off', ($event.target as HTMLInputElement).value)"
               type="text" 
               class="form-input"
               placeholder="OFF"
@@ -172,7 +187,11 @@
         <!-- Confirm toggle -->
         <div class="form-row">
           <label class="checkbox-label">
-            <input type="checkbox" v-model="switchConfig.confirmOnChange" />
+            <input 
+              type="checkbox" 
+              :checked="switchConfig.confirmOnChange"
+              @change="updateSwitchField('confirmOnChange', ($event.target as HTMLInputElement).checked)"
+            />
             <span>Require confirmation before toggle</span>
           </label>
         </div>
@@ -190,6 +209,8 @@ import type { MapMarkerAction, MapActionSwitchConfig } from '@/types/dashboard'
  * 
  * Grug say: Edit single action. Can be publish or switch type.
  * Switch type has nested config for KV or Core mode.
+ * 
+ * Fixed: No longer mutates props directly. Uses emit to update parent.
  */
 
 const props = defineProps<{
@@ -197,81 +218,114 @@ const props = defineProps<{
   errors?: Record<string, string>
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   remove: []
+  'update:action': [action: MapMarkerAction]
 }>()
 
 /**
- * Ensure switchConfig exists with defaults
+ * Get switch config with defaults (read-only)
  */
 const switchConfig = computed<MapActionSwitchConfig>(() => {
-  if (!props.action.switchConfig) {
-    props.action.switchConfig = {
-      mode: 'kv',
-      kvBucket: '',
-      kvKey: '',
-      onPayload: { state: 'on' },
-      offPayload: { state: 'off' },
-      labels: { on: 'ON', off: 'OFF' }
-    }
+  return props.action.switchConfig || {
+    mode: 'kv',
+    kvBucket: '',
+    kvKey: '',
+    onPayload: { state: 'on' },
+    offPayload: { state: 'off' },
+    labels: { on: 'ON', off: 'OFF' }
   }
-  return props.action.switchConfig
 })
 
 /**
- * Labels helper with defaults
+ * Labels helper with defaults (read-only)
  */
 const switchLabels = computed(() => {
-  if (!switchConfig.value.labels) {
-    switchConfig.value.labels = { on: 'ON', off: 'OFF' }
-  }
-  return switchConfig.value.labels
+  return switchConfig.value.labels || { on: 'ON', off: 'OFF' }
 })
 
 /**
  * ON payload as string for input binding
  */
-const onPayloadStr = computed({
-  get: () => JSON.stringify(switchConfig.value.onPayload || { state: 'on' }),
-  set: (val: string) => {
-    try {
-      switchConfig.value.onPayload = JSON.parse(val)
-    } catch {
-      switchConfig.value.onPayload = val
-    }
-  }
+const onPayloadStr = computed(() => {
+  return JSON.stringify(switchConfig.value.onPayload || { state: 'on' })
 })
 
 /**
  * OFF payload as string for input binding
  */
-const offPayloadStr = computed({
-  get: () => JSON.stringify(switchConfig.value.offPayload || { state: 'off' }),
-  set: (val: string) => {
-    try {
-      switchConfig.value.offPayload = JSON.parse(val)
-    } catch {
-      switchConfig.value.offPayload = val
-    }
-  }
+const offPayloadStr = computed(() => {
+  return JSON.stringify(switchConfig.value.offPayload || { state: 'off' })
 })
+
+/**
+ * Emit updated action to parent
+ */
+function emitUpdate(updates: Partial<MapMarkerAction>) {
+  emit('update:action', { ...props.action, ...updates })
+}
+
+/**
+ * Update a top-level field on the action
+ */
+function updateField(field: keyof MapMarkerAction, value: any) {
+  emitUpdate({ [field]: value })
+}
+
+/**
+ * Update a field in switchConfig
+ */
+function updateSwitchField(field: keyof MapActionSwitchConfig, value: any) {
+  const newSwitchConfig = { ...switchConfig.value, [field]: value }
+  emitUpdate({ switchConfig: newSwitchConfig })
+}
+
+/**
+ * Update switch label
+ */
+function updateSwitchLabel(which: 'on' | 'off', value: string) {
+  const newLabels = { ...switchLabels.value, [which]: value }
+  const newSwitchConfig = { ...switchConfig.value, labels: newLabels }
+  emitUpdate({ switchConfig: newSwitchConfig })
+}
+
+/**
+ * Update payload (parse JSON if possible)
+ */
+function updatePayload(which: 'on' | 'off', value: string) {
+  let parsed: any
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    parsed = value
+  }
+  
+  const field = which === 'on' ? 'onPayload' : 'offPayload'
+  const newSwitchConfig = { ...switchConfig.value, [field]: parsed }
+  emitUpdate({ switchConfig: newSwitchConfig })
+}
 
 /**
  * Handle type change - reset type-specific fields
  */
-function handleTypeChange() {
-  if (props.action.type === 'publish') {
-    // Clear switch config when switching to publish
-    props.action.switchConfig = undefined
-    if (!props.action.subject) props.action.subject = ''
-    if (!props.action.payload) props.action.payload = '{}'
+function handleTypeChange(event: Event) {
+  const newType = (event.target as HTMLSelectElement).value as 'publish' | 'switch'
+  
+  if (newType === 'publish') {
+    // Switching to publish - clear switch config, set defaults for publish
+    emitUpdate({
+      type: 'publish',
+      switchConfig: undefined,
+      subject: props.action.subject || '',
+      payload: props.action.payload || '{}'
+    })
   } else {
-    // Clear publish fields when switching to switch
-    props.action.subject = undefined
-    props.action.payload = undefined
-    // Ensure switch config exists
-    if (!props.action.switchConfig) {
-      props.action.switchConfig = {
+    // Switching to switch - clear publish fields, set defaults for switch
+    emitUpdate({
+      type: 'switch',
+      subject: undefined,
+      payload: undefined,
+      switchConfig: {
         mode: 'kv',
         kvBucket: '',
         kvKey: '',
@@ -279,7 +333,7 @@ function handleTypeChange() {
         offPayload: { state: 'off' },
         labels: { on: 'ON', off: 'OFF' }
       }
-    }
+    })
   }
 }
 </script>
