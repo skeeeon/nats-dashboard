@@ -87,7 +87,7 @@
             v-for="(action, index) in marker.actions"
             :key="action.id"
             :action="action"
-            :errors="actionErrors[index]"
+            :errors="actionErrors ? actionErrors[index] : undefined"
             @remove="removeAction(index)"
             @update:action="updateAction(index, $event)"
           />

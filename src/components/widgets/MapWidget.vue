@@ -49,7 +49,7 @@ import type { WidgetConfig, MapMarkerAction } from '@/types/dashboard'
  * Grug say: Show map with markers. Click marker, see popup with actions.
  * Actions can be publish (fire-and-forget) or switch (stateful toggle).
  * 
- * Fixed: Proper watch cleanup for switch states.
+ * Fixed: Proper watch cleanup for switch states. Unused vars prefixed with _.
  */
 
 const props = withDefaults(defineProps<{
@@ -146,7 +146,7 @@ function handleSwitchToggle(action: MapMarkerAction) {
 /**
  * Handle popup open - start switch state watchers
  */
-function handlePopupOpen(markerId: string, popupElement: HTMLElement) {
+function handlePopupOpen(markerId: string, _popupElement: HTMLElement) {
   console.log('[MapWidget] Popup opened for marker:', markerId)
   openMarkerId.value = markerId
 
@@ -249,7 +249,7 @@ function stopSwitchStateWatcher(actionId: string) {
  * Stop all switch state watchers
  */
 function stopAllSwitchStateWatchers() {
-  for (const [actionId, entry] of activeSwitchStates) {
+  for (const entry of activeSwitchStates.values()) {
     entry.stopWatch()
     entry.switchState.stop()
   }

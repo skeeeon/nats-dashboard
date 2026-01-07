@@ -5,7 +5,7 @@
  * Theme switching, marker rendering, popup actions.
  * 
  * V2: Supports both publish (button) and switch (toggle) actions.
- * Fixed: Proper callback interface, popup event handling.
+ * Fixed: Proper callback interface, popup event handling. Unused vars fix.
  */
 
 import { ref, shallowRef } from 'vue'
@@ -170,7 +170,7 @@ export function useLeafletMap() {
    * Create popup HTML content with action buttons/toggles
    */
   function createPopupContent(
-    markerId: string,
+    _markerId: string,
     label: string,
     actions: MapMarkerAction[],
     callbacks: PopupCallbacks
