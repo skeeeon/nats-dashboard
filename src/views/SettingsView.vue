@@ -136,6 +136,51 @@
           </div>
         </div>
         
+        <!-- Shared Dashboards Config -->
+        <div class="setting-section">
+          <h3>Shared Dashboards</h3>
+          <label class="checkbox-label">
+            <input 
+              v-model="dashboardStore.enableSharedDashboards"
+              type="checkbox"
+              @change="dashboardStore.saveToStorage()"
+            />
+            <span>Enable Shared Dashboards (KV)</span>
+          </label>
+          
+          <div v-if="dashboardStore.enableSharedDashboards" class="mt-4">
+            <label class="method-label">KV Bucket Name</label>
+            <input 
+              v-model="dashboardStore.kvBucketName"
+              type="text"
+              placeholder="dashboards"
+              class="input-field"
+              @change="dashboardStore.saveToStorage()"
+            />
+            <div class="help-text">
+              NATS KV bucket used to store shared dashboards. Default: <code>dashboards</code>
+            </div>
+          </div>
+        </div>
+
+        <!-- Startup Dashboard -->
+        <div class="setting-section">
+          <h3>Startup Dashboard</h3>
+          <div v-if="dashboardStore.startupDashboard" class="startup-info">
+            <div class="startup-details">
+              <span class="startup-icon">🏠</span>
+              <span class="startup-id">{{ dashboardStore.startupDashboard.id }}</span>
+              <span class="startup-type">({{ dashboardStore.startupDashboard.storage }})</span>
+            </div>
+            <button class="btn-icon-small danger" @click="dashboardStore.clearStartupDashboard()">
+              Clear
+            </button>
+          </div>
+          <div v-else class="help-text">
+            No startup dashboard set. Set one from the dashboard sidebar menu.
+          </div>
+        </div>
+        
         <!-- Auto-connect -->
         <div class="setting-section">
           <h3>Auto-connect</h3>
@@ -178,10 +223,12 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNatsStore } from '@/stores/nats'
+import { useDashboardStore } from '@/stores/dashboard'
 import LoadingState from '@/components/common/LoadingState.vue'
 
 const router = useRouter()
 const natsStore = useNatsStore()
+const dashboardStore = useDashboardStore()
 
 // Form fields
 const serverUrl = ref('')
@@ -293,6 +340,7 @@ async function handleDisconnect() {
 
 onMounted(() => {
   natsStore.loadSettings()
+  dashboardStore.loadFromStorage() // Ensure settings are loaded
   
   if (natsStore.serverUrls.length > 0) {
     serverUrl.value = natsStore.serverUrls[0]
@@ -512,6 +560,13 @@ watch(serverUrl, (newUrl) => {
   line-height: 1.4;
 }
 
+.help-text code {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-family: var(--mono);
+}
+
 .auth-method {
   margin-bottom: 20px;
 }
@@ -668,6 +723,33 @@ watch(serverUrl, (newUrl) => {
 .action-buttons {
   display: flex;
   gap: 12px;
+}
+
+.mt-4 {
+  margin-top: 16px;
+}
+
+.startup-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: var(--color-info-bg);
+  border: 1px solid var(--color-info-border);
+  border-radius: 6px;
+}
+
+.startup-details {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.startup-type {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 /* Mobile Adjustments */

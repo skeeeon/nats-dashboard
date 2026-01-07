@@ -22,32 +22,76 @@
         </button>
       </div>
       
+      <!-- Storage Tabs (Only if Shared is enabled) -->
+      <div v-if="dashboardStore.enableSharedDashboards" class="storage-tabs">
+        <button 
+          class="tab-btn" 
+          :class="{ active: activeTab === 'local' }"
+          @click="activeTab = 'local'"
+        >
+          Local
+        </button>
+        <button 
+          class="tab-btn" 
+          :class="{ active: activeTab === 'shared' }"
+          @click="activeTab = 'shared'"
+        >
+          Shared
+        </button>
+      </div>
+      
       <!-- Dashboard list -->
       <div class="sidebar-body">
-        <div v-if="dashboards.length === 0" class="empty-state">
-          <div class="empty-icon">📊</div>
-          <div class="empty-text">No dashboards</div>
-        </div>
-        
-        <div v-else class="dashboard-list">
-          <DashboardListItem
-            v-for="dashboard in dashboards"
-            :key="dashboard.id"
-            :dashboard="dashboard"
-            :is-active="dashboard.id === activeDashboardId"
-            @select="selectDashboard(dashboard.id)"
-            @rename="startRename(dashboard.id)"
-            @duplicate="duplicateDashboard(dashboard.id)"
-            @export="exportDashboard(dashboard.id)"
-            @delete="confirmDelete(dashboard.id)"
-          />
-        </div>
+        <!-- LOCAL TAB -->
+        <template v-if="activeTab === 'local'">
+          <div v-if="dashboards.length === 0" class="empty-state">
+            <div class="empty-icon">📊</div>
+            <div class="empty-text">No local dashboards</div>
+          </div>
+          
+          <div v-else class="dashboard-list">
+            <DashboardListItem
+              v-for="dashboard in dashboards"
+              :key="dashboard.id"
+              :dashboard="dashboard"
+              :is-active="dashboard.id === activeDashboardId"
+              @select="selectDashboard(dashboard)"
+              @rename="startRename(dashboard.id)"
+              @duplicate="duplicateDashboard(dashboard.id)"
+              @export="exportDashboard(dashboard.id)"
+              @delete="confirmDelete(dashboard.id, 'local')"
+            />
+          </div>
+        </template>
+
+        <!-- SHARED TAB -->
+        <template v-if="activeTab === 'shared'">
+          <div v-if="!natsStore.isConnected" class="empty-state">
+            <div class="empty-icon">🔌</div>
+            <div class="empty-text">Connect to NATS to view shared dashboards</div>
+          </div>
+          
+          <div v-else-if="remoteKeys.length === 0" class="empty-state">
+            <div class="empty-icon">☁️</div>
+            <div class="empty-text">No shared dashboards found</div>
+            <div class="empty-subtext">Bucket: {{ dashboardStore.kvBucketName }}</div>
+          </div>
+          
+          <div v-else class="dashboard-tree-container">
+            <DashboardTree 
+              :structure="remoteTree"
+              :active-id="activeDashboardId"
+              @select="selectRemoteDashboard"
+              @delete="confirmDelete($event, 'remote')"
+            />
+          </div>
+        </template>
       </div>
       
       <!-- Footer with actions -->
       <div class="sidebar-footer">
-        <!-- Storage indicator -->
-        <div class="storage-indicator" :class="storageClass">
+        <!-- Storage indicator (Local only) -->
+        <div v-if="activeTab === 'local'" class="storage-indicator" :class="storageClass">
           <div class="storage-bar-bg">
             <div 
               class="storage-bar-fill"
@@ -59,41 +103,45 @@
           </div>
         </div>
         
-        <!-- Dashboard count & limit -->
-        <div v-if="isApproachingLimit" class="limit-warning">
-          ⚠️ {{ dashboardCount }} / {{ MAX_DASHBOARDS }} dashboards
-        </div>
-        
         <!-- Action buttons -->
         <div class="action-buttons">
           <button 
             class="btn-action btn-new"
-            :disabled="isAtLimit"
             @click="createNewDashboard"
-            :title="isAtLimit ? `Dashboard limit reached (${MAX_DASHBOARDS})` : 'Create new dashboard'"
           >
             <span class="btn-icon">+</span>
-            <span class="btn-text">New Dashboard</span>
+            <span class="btn-text">New {{ activeTab === 'local' ? 'Local' : 'Shared' }}</span>
           </button>
           
-          <button 
-            class="btn-action"
-            @click="showImport = true"
-            title="Import dashboards from file"
-          >
-            <span class="btn-icon">📥</span>
-            <span class="btn-text">Import</span>
-          </button>
+          <template v-if="activeTab === 'local'">
+            <button 
+              class="btn-action"
+              @click="showImport = true"
+            >
+              <span class="btn-icon">📥</span>
+              <span class="btn-text">Import</span>
+            </button>
+            
+            <button 
+              class="btn-action"
+              :disabled="dashboards.length === 0"
+              @click="exportAllDashboards"
+            >
+              <span class="btn-icon">💾</span>
+              <span class="btn-text">Export All</span>
+            </button>
+          </template>
           
-          <button 
-            class="btn-action"
-            :disabled="dashboards.length === 0"
-            @click="exportAllDashboards"
-            title="Export all dashboards"
-          >
-            <span class="btn-icon">💾</span>
-            <span class="btn-text">Export All</span>
-          </button>
+          <template v-if="activeTab === 'shared'">
+             <button 
+              class="btn-action"
+              @click="dashboardStore.refreshRemoteKeys()"
+              :disabled="!natsStore.isConnected"
+            >
+              <span class="btn-icon">🔄</span>
+              <span class="btn-text">Refresh</span>
+            </button>
+          </template>
         </div>
       </div>
     </aside>
@@ -179,23 +227,20 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useDashboardStore } from '@/stores/dashboard'
+import { useNatsStore } from '@/stores/nats'
 import DashboardListItem from './DashboardListItem.vue'
+import DashboardTree from './DashboardTree.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-
-/**
- * Dashboard Sidebar Component
- * 
- * Grug say: List of dashboards on left side.
- * Can create, rename, delete, import, export.
- * Remembers if open or closed.
- */
+import type { Dashboard } from '@/types/dashboard'
 
 const dashboardStore = useDashboardStore()
+const natsStore = useNatsStore()
 
 // Sidebar state
 const STORAGE_KEY = 'sidebar_open'
 const isOpen = ref(true)
 const isMobile = ref(false)
+const activeTab = ref<'local' | 'shared'>('local')
 
 // Rename state
 const showRename = ref(false)
@@ -210,14 +255,44 @@ const importResults = ref<{ success: number; skipped: number; errors: string[] }
 // Delete confirmation state
 const showConfirmDelete = ref(false)
 const deleteId = ref<string | null>(null)
+const deleteType = ref<'local' | 'remote'>('local')
 
 // Computed
-const dashboards = computed(() => dashboardStore.dashboards)
-const activeDashboardId = computed(() => dashboardStore.activeDashboardId)
-const isAtLimit = computed(() => dashboardStore.isAtLimit)
-const isApproachingLimit = computed(() => dashboardStore.isApproachingLimit)
-const dashboardCount = computed(() => dashboardStore.dashboardCount)
-const MAX_DASHBOARDS = dashboardStore.MAX_DASHBOARDS
+const dashboards = computed(() => dashboardStore.localDashboards)
+const remoteKeys = computed(() => dashboardStore.remoteKeys)
+const activeDashboardId = computed(() => {
+  // If active dashboard storage matches active tab, show it as selected
+  if (activeTab.value === 'local' && dashboardStore.activeDashboard?.storage === 'local') {
+    return dashboardStore.activeDashboardId
+  }
+  if (activeTab.value === 'shared' && dashboardStore.activeDashboard?.storage === 'kv') {
+    return dashboardStore.activeDashboard.kvKey || null
+  }
+  return null
+})
+
+// Build Tree from Remote Keys
+const remoteTree = computed(() => {
+  const tree: any = {}
+  
+  for (const key of remoteKeys.value) {
+    const parts = key.split('.')
+    let current = tree
+    
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]
+      if (i === parts.length - 1) {
+        // Leaf node
+        current[part] = key
+      } else {
+        // Folder node
+        if (!current[part]) current[part] = {}
+        current = current[part]
+      }
+    }
+  }
+  return tree
+})
 
 /**
  * Storage usage
@@ -232,100 +307,56 @@ const storageClass = computed(() => {
   return 'storage-ok'
 })
 
-/**
- * Dashboard being deleted
- */
-const deleteDashboardName = computed(() => {
-  if (!deleteId.value) return ''
-  const dashboard = dashboards.value.find(d => d.id === deleteId.value)
-  return dashboard?.name || ''
-})
-
-const deleteDashboardWidgetCount = computed(() => {
-  if (!deleteId.value) return 0
-  const dashboard = dashboards.value.find(d => d.id === deleteId.value)
-  return dashboard?.widgets.length || 0
-})
-
-/**
- * Delete confirmation dialog text
- * Grug say: Build strings in script, not in template. Easier to read.
- */
 const deleteConfirmTitle = computed(() => {
-  return `Delete "${deleteDashboardName.value}"?`
+  return deleteType.value === 'local' ? 'Delete Local Dashboard?' : 'Delete Shared Dashboard?'
 })
 
 const deleteConfirmMessage = computed(() => {
-  const count = deleteDashboardWidgetCount.value
-  const plural = count !== 1 ? 's' : ''
-  return `This will permanently delete ${count} widget${plural}.`
+  return `This will permanently delete the dashboard.`
 })
 
-/**
- * Check if mobile
- */
 function checkMobile() {
   isMobile.value = window.innerWidth < 768
-  
-  // On mobile, close sidebar by default
   if (isMobile.value && isOpen.value) {
     isOpen.value = false
   }
 }
 
-/**
- * Toggle sidebar open/closed
- * Exposed to parent component for hamburger menu
- */
 function toggleSidebar() {
   isOpen.value = !isOpen.value
   localStorage.setItem(STORAGE_KEY, String(isOpen.value))
 }
 
-/**
- * Close sidebar (for mobile backdrop)
- */
 function closeSidebar() {
   isOpen.value = false
   localStorage.setItem(STORAGE_KEY, String(isOpen.value))
 }
 
-/**
- * Expose methods to parent
- * Grug say: Parent need to call toggleSidebar, so we expose it
- */
-defineExpose({
-  toggleSidebar
-})
+defineExpose({ toggleSidebar })
 
-/**
- * Select dashboard
- */
-function selectDashboard(id: string) {
-  dashboardStore.setActiveDashboard(id)
-  
-  // Close sidebar on mobile after selection
-  if (isMobile.value) {
-    closeSidebar()
-  }
+function selectDashboard(dashboard: Dashboard) {
+  dashboardStore.setActiveDashboard(dashboard)
+  if (isMobile.value) closeSidebar()
 }
 
-/**
- * Create new dashboard
- */
+function selectRemoteDashboard(key: string) {
+  dashboardStore.loadRemoteDashboard(key)
+  if (isMobile.value) closeSidebar()
+}
+
 function createNewDashboard() {
   const name = prompt('Dashboard name:', 'New Dashboard')
   if (!name) return
   
-  const dashboard = dashboardStore.createDashboard(name)
-  if (dashboard) {
-    console.log('[Sidebar] Created dashboard:', dashboard.name)
+  if (activeTab.value === 'local') {
+    dashboardStore.createDashboard(name)
+  } else {
+    // For shared, ask for folder (optional)
+    const folder = prompt('Folder path (optional, dot separated e.g. ops.prod):', '')
+    dashboardStore.createRemoteDashboard(name, folder || '')
   }
 }
 
-/**
- * Start rename flow
- */
 function startRename(id: string) {
   const dashboard = dashboards.value.find(d => d.id === id)
   if (!dashboard) return
@@ -334,66 +365,38 @@ function startRename(id: string) {
   renameName.value = dashboard.name
   showRename.value = true
   
-  // Focus input after modal opens
   nextTick(() => {
     renameInput.value?.focus()
     renameInput.value?.select()
   })
 }
 
-/**
- * Save rename
- */
 function saveRename() {
-  if (!renameId.value || !renameName.value.trim()) {
-    return
-  }
-  
-  const success = dashboardStore.renameDashboard(renameId.value, renameName.value)
-  if (success) {
-    console.log('[Sidebar] Renamed dashboard to:', renameName.value)
-  }
-  
+  if (!renameId.value || !renameName.value.trim()) return
+  dashboardStore.renameDashboard(renameId.value, renameName.value)
   showRename.value = false
   renameId.value = null
   renameName.value = ''
 }
 
-/**
- * Duplicate dashboard
- */
 function duplicateDashboard(id: string) {
-  const clone = dashboardStore.duplicateDashboard(id)
-  if (clone) {
-    console.log('[Sidebar] Duplicated dashboard:', clone.name)
-  }
+  dashboardStore.duplicateDashboard(id)
 }
 
-/**
- * Export single dashboard
- */
 function exportDashboard(id: string) {
   const json = dashboardStore.exportDashboard(id)
   if (!json) return
-  
   const dashboard = dashboards.value.find(d => d.id === id)
   if (!dashboard) return
-  
   downloadJSON(json, `${dashboard.name}.json`)
 }
 
-/**
- * Export all dashboards
- */
 function exportAllDashboards() {
   const json = dashboardStore.exportAllDashboards()
   const timestamp = new Date().toISOString().split('T')[0]
   downloadJSON(json, `nats-dashboards-${timestamp}.json`)
 }
 
-/**
- * Download JSON file
- */
 function downloadJSON(json: string, filename: string) {
   const blob = new Blob([json], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
@@ -404,81 +407,68 @@ function downloadJSON(json: string, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-/**
- * Handle import file selection
- */
 async function handleImportFile(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
-  
   if (!file) return
   
   try {
     const text = await file.text()
     const results = dashboardStore.importDashboards(text, 'merge')
     importResults.value = results
-    
-    console.log('[Sidebar] Import results:', results)
-    
-    // Clear file input
     target.value = ''
-    
   } catch (err) {
     console.error('[Sidebar] Import error:', err)
-    importResults.value = {
-      success: 0,
-      skipped: 0,
-      errors: ['Failed to read file']
-    }
+    importResults.value = { success: 0, skipped: 0, errors: ['Failed to read file'] }
   }
 }
 
-/**
- * Confirm delete
- */
-function confirmDelete(id: string) {
-  deleteId.value = id
+function confirmDelete(idOrKey: string, type: 'local' | 'remote') {
+  deleteId.value = idOrKey
+  deleteType.value = type
   showConfirmDelete.value = true
 }
 
-/**
- * Handle delete
- */
 function handleDelete() {
   if (!deleteId.value) return
   
-  const success = dashboardStore.deleteDashboard(deleteId.value)
-  if (success) {
-    console.log('[Sidebar] Deleted dashboard')
+  if (deleteType.value === 'local') {
+    dashboardStore.deleteDashboard(deleteId.value)
+  } else {
+    dashboardStore.deleteRemoteDashboard(deleteId.value)
   }
   
   deleteId.value = null
 }
 
-/**
- * Load sidebar state from localStorage
- */
 onMounted(() => {
   const stored = localStorage.getItem(STORAGE_KEY)
-  if (stored !== null) {
-    isOpen.value = stored === 'true'
-  }
-  
+  if (stored !== null) isOpen.value = stored === 'true'
   checkMobile()
   window.addEventListener('resize', checkMobile)
+  
+  // If we have an active remote dashboard, switch tab to shared
+  if (dashboardStore.activeDashboard?.storage === 'kv') {
+    activeTab.value = 'shared'
+  }
+  
+  // If shared disabled, force local
+  if (!dashboardStore.enableSharedDashboards) {
+    activeTab.value = 'local'
+  }
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
 })
 
-/**
- * Watch for mobile changes - close sidebar on mobile
- */
 watch(isMobile, (mobile) => {
-  if (mobile && isOpen.value) {
-    isOpen.value = false
-  }
+  if (mobile && isOpen.value) isOpen.value = false
+})
+
+// Watch setting change to force local tab if disabled
+watch(() => dashboardStore.enableSharedDashboards, (enabled) => {
+  if (!enabled) activeTab.value = 'local'
 })
 </script>
 
@@ -487,10 +477,6 @@ watch(isMobile, (mobile) => {
   position: relative;
   height: 100%;
   transition: width 0.3s ease;
-}
-
-/* Desktop: sidebar takes up space, pushes content */
-.sidebar-container {
   width: 280px;
   flex-shrink: 0;
 }
@@ -499,7 +485,6 @@ watch(isMobile, (mobile) => {
   width: 0;
 }
 
-/* Sidebar */
 .sidebar {
   position: relative;
   width: 280px;
@@ -544,10 +529,48 @@ watch(isMobile, (mobile) => {
   padding: 4px;
 }
 
+/* Tabs */
+.storage-tabs {
+  display: flex;
+  padding: 12px;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  color: var(--text);
+  border-color: var(--color-accent);
+}
+
+.tab-btn.active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: white;
+}
+
 .sidebar-body {
   flex: 1;
   overflow-y: auto;
   padding: 12px;
+}
+
+.dashboard-tree-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .empty-state {
@@ -557,6 +580,7 @@ watch(isMobile, (mobile) => {
   justify-content: center;
   padding: 40px 20px;
   color: var(--muted);
+  text-align: center;
 }
 
 .empty-icon {
@@ -567,6 +591,13 @@ watch(isMobile, (mobile) => {
 
 .empty-text {
   font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.empty-subtext {
+  font-size: 11px;
+  font-family: var(--mono);
+  opacity: 0.7;
 }
 
 .dashboard-list {
@@ -612,16 +643,6 @@ watch(isMobile, (mobile) => {
   font-size: 11px;
   color: var(--muted);
   text-align: center;
-}
-
-.limit-warning {
-  font-size: 12px;
-  color: var(--color-warning);
-  text-align: center;
-  margin-bottom: 12px;
-  padding: 6px;
-  background: var(--color-warning-bg);
-  border-radius: 4px;
 }
 
 .action-buttons {

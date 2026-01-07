@@ -6,7 +6,10 @@
   >
     <div class="item-content">
       <!-- Icon -->
-      <div class="item-icon">📊</div>
+      <div class="item-icon">
+        <span v-if="isStartup" title="Startup Dashboard">🏠</span>
+        <span v-else>📊</span>
+      </div>
       
       <!-- Info -->
       <div class="item-info">
@@ -29,6 +32,11 @@
         
         <!-- Dropdown menu -->
         <div v-if="showMenu" class="action-menu">
+          <button class="menu-item" @click="handleSetStartup">
+            <span class="menu-icon">🏠</span>
+            <span class="menu-text">Set as Startup</span>
+          </button>
+          <div class="menu-divider"></div>
           <button class="menu-item" @click="handleRename">
             <span class="menu-icon">✏️</span>
             <span class="menu-text">Rename</span>
@@ -53,22 +61,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import type { Dashboard } from '@/types/dashboard'
+import { useDashboardStore } from '@/stores/dashboard'
 
-/**
- * Dashboard List Item Component
- * 
- * Grug say: One dashboard in sidebar list.
- * Show name, widget count, actions menu.
- */
-
-interface Props {
+const props = defineProps<{
   dashboard: Dashboard
   isActive: boolean
-}
-
-defineProps<Props>()
+}>()
 
 const emit = defineEmits<{
   select: []
@@ -78,18 +78,18 @@ const emit = defineEmits<{
   delete: []
 }>()
 
+const dashboardStore = useDashboardStore()
 const showMenu = ref(false)
 
-/**
- * Toggle actions menu
- */
+const isStartup = computed(() => {
+  return dashboardStore.startupDashboard?.id === props.dashboard.id && 
+         dashboardStore.startupDashboard?.storage === 'local'
+})
+
 function toggleMenu() {
   showMenu.value = !showMenu.value
 }
 
-/**
- * Close menu when clicking outside
- */
 function handleClickOutside(event: MouseEvent) {
   if (showMenu.value) {
     const target = event.target as HTMLElement
@@ -99,9 +99,11 @@ function handleClickOutside(event: MouseEvent) {
   }
 }
 
-/**
- * Handle actions
- */
+function handleSetStartup() {
+  showMenu.value = false
+  dashboardStore.setStartupDashboard(props.dashboard.id, 'local')
+}
+
 function handleRename() {
   showMenu.value = false
   emit('rename')
@@ -122,7 +124,6 @@ function handleDelete() {
   emit('delete')
 }
 
-// Register click outside listener
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
 })
@@ -161,6 +162,8 @@ onUnmounted(() => {
   font-size: 24px;
   line-height: 1;
   flex-shrink: 0;
+  width: 24px;
+  text-align: center;
 }
 
 .item-info {

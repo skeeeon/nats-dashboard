@@ -1,7 +1,10 @@
 // src/stores/dashboard.ts
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-import type { Dashboard, WidgetConfig } from '@/types/dashboard'
+import { ref, computed, watch } from 'vue'
+import { useNatsStore } from './nats'
+import { Kvm, type KV } from '@nats-io/kv'
+import { decodeBytes, encodeString } from '@/utils/encoding'
+import type { Dashboard, WidgetConfig, StorageType } from '@/types/dashboard'
 import { createDefaultDashboard } from '@/types/dashboard'
 
 /**
@@ -23,45 +26,64 @@ interface DashboardExportFile {
  * Dashboard Store
  */
 export const useDashboardStore = defineStore('dashboard', () => {
+  const natsStore = useNatsStore()
+
   // ============================================================================
   // STATE
   // ============================================================================
   
-  const dashboards = ref<Dashboard[]>([])
-  const activeDashboardId = ref<string | null>(null)
-  const storageError = ref<string | null>(null)
-  const isLocked = ref(false) // New Lock State
-  const MAX_DASHBOARDS = 25
+  // Local Dashboards (Full objects loaded from localStorage)
+  const localDashboards = ref<Dashboard[]>([])
   
+  // Remote Keys (List of keys available in KV bucket)
+  const remoteKeys = ref<string[]>([])
+  
+  // Active Dashboard (The one currently displayed)
+  const activeDashboard = ref<Dashboard | null>(null)
+  
+  // Settings
+  const kvBucketName = ref('dashboards')
+  const enableSharedDashboards = ref(true)
+  const startupDashboard = ref<{ id: string, storage: StorageType } | null>(null)
+  
+  // UI State
+  const storageError = ref<string | null>(null)
+  const isLocked = ref(false)
+  const isDirty = ref(false) // Has unsaved changes?
+  const remoteChanged = ref(false) // Has remote changed since load?
+  
+  const MAX_DASHBOARDS = 25
+  const STORAGE_KEY = 'nats_dashboards'
+  const SETTINGS_KEY = 'nats_dashboard_settings'
+
+  // KV Watcher reference
+  let activeWatcher: any = null
+
   // ============================================================================
   // COMPUTED
   // ============================================================================
   
-  const activeDashboard = computed<Dashboard | null>(() => {
-    if (!activeDashboardId.value) return null
-    return dashboards.value.find(d => d.id === activeDashboardId.value) || null
-  })
+  const activeDashboardId = computed(() => activeDashboard.value?.id || null)
   
   const activeWidgets = computed<WidgetConfig[]>(() => {
     return activeDashboard.value?.widgets || []
   })
   
+  // Combined count for limits (mostly relevant for local)
   const isAtLimit = computed(() => {
-    return dashboards.value.length >= MAX_DASHBOARDS
+    return localDashboards.value.length >= MAX_DASHBOARDS
   })
   
   const isApproachingLimit = computed(() => {
-    return dashboards.value.length >= Math.floor(MAX_DASHBOARDS * 0.8)
+    return localDashboards.value.length >= Math.floor(MAX_DASHBOARDS * 0.8)
   })
   
-  const dashboardCount = computed(() => dashboards.value.length)
-  
+  const dashboardCount = computed(() => localDashboards.value.length)
+
   // ============================================================================
-  // PERSISTENCE (localStorage)
+  // HELPERS
   // ============================================================================
-  
-  const STORAGE_KEY = 'nats_dashboards'
-  
+
   function detectStorageErrorType(error: any): StorageErrorType {
     if (!error) return 'unknown'
     const errorString = error.toString().toLowerCase()
@@ -82,7 +104,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     
     switch (errorType) {
       case 'quota_exceeded':
-        storageError.value = 'Storage quota exceeded. Please delete old dashboards.'
+        storageError.value = 'Storage quota exceeded. Please delete old local dashboards.'
         break
       case 'security_error':
         storageError.value = 'Browser storage is disabled or blocked.'
@@ -92,55 +114,98 @@ export const useDashboardStore = defineStore('dashboard', () => {
         break
     }
   }
+
+  function clearStorageError() {
+    storageError.value = null
+  }
+
+  // ============================================================================
+  // LOCAL STORAGE PERSISTENCE
+  // ============================================================================
   
   function loadFromStorage() {
     try {
       storageError.value = null
+      
+      // Load settings
+      const storedSettings = localStorage.getItem(SETTINGS_KEY)
+      if (storedSettings) {
+        const parsed = JSON.parse(storedSettings)
+        kvBucketName.value = parsed.kvBucketName || 'dashboards'
+        enableSharedDashboards.value = parsed.enableSharedDashboards ?? true
+        startupDashboard.value = parsed.startupDashboard || null
+      }
+
+      // Load dashboards
       const stored = localStorage.getItem(STORAGE_KEY)
       if (stored) {
         const parsed = JSON.parse(stored)
-        dashboards.value = parsed.dashboards || []
-        activeDashboardId.value = parsed.activeDashboardId || null
-        // Load lock state, default to false if not present
-        isLocked.value = parsed.isLocked || false 
-        console.log(`[Dashboard] Loaded ${dashboards.value.length} dashboards from storage`)
+        localDashboards.value = parsed.dashboards || []
+        isLocked.value = parsed.isLocked || false
+        
+        // Determine which dashboard to load
+        let dashboardToLoad: Dashboard | undefined
+
+        // 1. Try Startup Dashboard (if local)
+        if (startupDashboard.value?.storage === 'local') {
+          dashboardToLoad = localDashboards.value.find(d => d.id === startupDashboard.value?.id)
+        }
+
+        // 2. Fallback to last active session
+        if (!dashboardToLoad && parsed.activeDashboardId) {
+           dashboardToLoad = localDashboards.value.find(d => d.id === parsed.activeDashboardId)
+        }
+
+        if (dashboardToLoad) {
+          setActiveDashboard(dashboardToLoad)
+        }
+        
+        console.log(`[Dashboard] Loaded ${localDashboards.value.length} local dashboards`)
       } else {
+        // First run
         const defaultDash = createDefaultDashboard('My Dashboard')
-        dashboards.value = [defaultDash]
-        activeDashboardId.value = defaultDash.id
+        localDashboards.value = [defaultDash]
+        setActiveDashboard(defaultDash)
         saveToStorage()
       }
     } catch (err) {
       console.error('[Dashboard] Failed to load:', err)
       handleStorageError(err, 'load')
+      // Fallback
       const defaultDash = createDefaultDashboard('My Dashboard')
-      dashboards.value = [defaultDash]
-      activeDashboardId.value = defaultDash.id
+      localDashboards.value = [defaultDash]
+      setActiveDashboard(defaultDash)
     }
   }
   
   function saveToStorage() {
     try {
       storageError.value = null
+      
+      // Save settings
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        kvBucketName: kvBucketName.value,
+        enableSharedDashboards: enableSharedDashboards.value,
+        startupDashboard: startupDashboard.value
+      }))
+
+      // Save dashboards
       const data = {
-        dashboards: dashboards.value,
-        activeDashboardId: activeDashboardId.value,
-        isLocked: isLocked.value, // Persist lock state
+        dashboards: localDashboards.value,
+        activeDashboardId: activeDashboard.value?.storage === 'local' ? activeDashboard.value.id : null,
+        isLocked: isLocked.value,
       }
       const json = JSON.stringify(data)
-      const sizeKB = new Blob([json]).size / 1024
-      
       localStorage.setItem(STORAGE_KEY, json)
-      console.log(`[Dashboard] Saved dashboards to storage (${sizeKB.toFixed(1)}KB)`)
     } catch (err) {
       handleStorageError(err, 'save')
     }
   }
-  
+
   function getStorageSize(): { sizeKB: number; sizePercent: number } {
     try {
       const data = { 
-        dashboards: dashboards.value, 
+        dashboards: localDashboards.value, 
         activeDashboardId: activeDashboardId.value,
         isLocked: isLocked.value
       }
@@ -152,22 +217,197 @@ export const useDashboardStore = defineStore('dashboard', () => {
       return { sizeKB: 0, sizePercent: 0 }
     }
   }
-  
-  function clearStorageError() {
-    storageError.value = null
+
+  function setStartupDashboard(id: string, storage: StorageType) {
+    startupDashboard.value = { id, storage }
+    saveToStorage()
   }
-  
+
+  function clearStartupDashboard() {
+    startupDashboard.value = null
+    saveToStorage()
+  }
+
+  // ============================================================================
+  // REMOTE (KV) STORAGE
+  // ============================================================================
+
+  async function getKv(): Promise<KV> {
+    if (!natsStore.nc || !natsStore.isConnected) throw new Error('Not connected to NATS')
+    const kvm = new Kvm(natsStore.nc)
+    return await kvm.open(kvBucketName.value)
+  }
+
+  async function refreshRemoteKeys() {
+    if (!natsStore.isConnected || !enableSharedDashboards.value) return
+    try {
+      const kv = await getKv()
+      const iter = await kv.keys()
+      const keys: string[] = []
+      for await (const key of iter) {
+        keys.push(key)
+      }
+      remoteKeys.value = keys
+    } catch (err: any) {
+      if (err.message?.includes('stream not found') || err.message?.includes('no stream')) {
+        remoteKeys.value = []
+      } else {
+        console.error('[Dashboard] Failed to list remote keys:', err)
+        remoteKeys.value = []
+      }
+    }
+  }
+
+  async function loadRemoteDashboard(key: string) {
+    if (!enableSharedDashboards.value) return
+    try {
+      const kv = await getKv()
+      const entry = await kv.get(key)
+      if (!entry) throw new Error('Dashboard not found')
+
+      const json = decodeBytes(entry.value)
+      const dashboard = JSON.parse(json) as Dashboard
+      
+      dashboard.storage = 'kv'
+      dashboard.kvKey = key
+      dashboard.kvRevision = entry.revision
+      
+      setActiveDashboard(dashboard)
+      watchRemoteKey(key, entry.revision)
+      
+    } catch (err: any) {
+      console.error('[Dashboard] Failed to load remote:', err)
+      storageError.value = `Failed to load: ${err.message}`
+    }
+  }
+
+  async function saveRemoteDashboard() {
+    if (!activeDashboard.value || activeDashboard.value.storage !== 'kv' || !enableSharedDashboards.value) return
+    
+    try {
+      const kv = await getKv()
+      const key = activeDashboard.value.kvKey
+      if (!key) throw new Error('No KV key defined')
+
+      const toSave = { ...activeDashboard.value }
+      delete toSave.storage
+      delete toSave.kvKey
+      delete toSave.kvRevision
+      toSave.modified = Date.now()
+      
+      const data = encodeString(JSON.stringify(toSave))
+      const opts = activeDashboard.value.kvRevision ? { previousSeq: activeDashboard.value.kvRevision } : undefined
+      
+      const newRevision = await kv.put(key, data, opts)
+      
+      activeDashboard.value.kvRevision = newRevision
+      activeDashboard.value.modified = toSave.modified
+      isDirty.value = false
+      remoteChanged.value = false
+      
+      console.log(`[Dashboard] Saved remote dashboard ${key} rev ${newRevision}`)
+      refreshRemoteKeys()
+      
+    } catch (err: any) {
+      console.error('[Dashboard] Failed to save remote:', err)
+      if (err.message?.includes('wrong last sequence')) {
+        storageError.value = 'Conflict: Dashboard has been modified on server. Please reload.'
+        remoteChanged.value = true
+      } else {
+        storageError.value = `Save failed: ${err.message}`
+      }
+    }
+  }
+
+  async function createRemoteDashboard(name: string, folder: string = '') {
+    if (!enableSharedDashboards.value) return
+    const dashboard = createDefaultDashboard(name)
+    dashboard.storage = 'kv'
+    
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+    const id = Math.random().toString(36).substr(2, 6)
+    let key = `${slug}-${id}`
+    if (folder) {
+      key = `${folder}.${key}`
+    }
+    
+    dashboard.kvKey = key
+    
+    setActiveDashboard(dashboard)
+    isDirty.value = true
+    await saveRemoteDashboard()
+  }
+
+  async function deleteRemoteDashboard(key: string) {
+    if (!enableSharedDashboards.value) return
+    try {
+      const kv = await getKv()
+      await kv.delete(key)
+      await refreshRemoteKeys()
+      
+      if (activeDashboard.value?.kvKey === key) {
+        activeDashboard.value = null
+      }
+    } catch (err: any) {
+      console.error('[Dashboard] Failed to delete remote:', err)
+      storageError.value = err.message
+    }
+  }
+
+  function watchRemoteKey(key: string, currentRevision: number) {
+    if (activeWatcher) {
+      try { activeWatcher.stop() } catch {}
+      activeWatcher = null
+    }
+    
+    remoteChanged.value = false
+    
+    if (!natsStore.isConnected || !enableSharedDashboards.value) return
+    
+    ;(async () => {
+      try {
+        const kv = await getKv()
+        const iter = await kv.watch({ key })
+        activeWatcher = iter
+        
+        for await (const e of iter) {
+          if (e.key === key && e.revision > currentRevision) {
+            console.log(`[Dashboard] Remote change detected! Rev ${e.revision} > ${currentRevision}`)
+            remoteChanged.value = true
+          }
+        }
+      } catch (err) { }
+    })()
+  }
+
   // ============================================================================
   // DASHBOARD ACTIONS
   // ============================================================================
   
   function toggleLock() {
     isLocked.value = !isLocked.value
-    saveToStorage()
+    if (activeDashboard.value?.storage === 'local') {
+      saveToStorage()
+    }
+  }
+
+  function setActiveDashboard(dashboard: Dashboard) {
+    if (activeWatcher) {
+      try { activeWatcher.stop() } catch {}
+      activeWatcher = null
+    }
+    
+    activeDashboard.value = dashboard
+    isDirty.value = false
+    remoteChanged.value = false
+    
+    if (dashboard.storage === 'local') {
+      saveToStorage()
+    }
   }
 
   // ============================================================================
-  // DASHBOARD CRUD
+  // CRUD (Unified)
   // ============================================================================
   
   function createDashboard(name: string): Dashboard | null {
@@ -176,75 +416,105 @@ export const useDashboardStore = defineStore('dashboard', () => {
       return null
     }
     const dashboard = createDefaultDashboard(name)
-    dashboards.value.push(dashboard)
-    activeDashboardId.value = dashboard.id
+    localDashboards.value.push(dashboard)
+    setActiveDashboard(dashboard)
     saveToStorage()
     return dashboard
   }
   
   function deleteDashboard(id: string): boolean {
-    const index = dashboards.value.findIndex(d => d.id === id)
+    const index = localDashboards.value.findIndex(d => d.id === id)
     if (index === -1) return false
-    if (dashboards.value.length === 1) {
-      storageError.value = 'Cannot delete the last dashboard'
+    
+    if (localDashboards.value.length === 1) {
+      storageError.value = 'Cannot delete the last local dashboard'
       return false
     }
-    dashboards.value.splice(index, 1)
+    
+    localDashboards.value.splice(index, 1)
     if (activeDashboardId.value === id) {
-      activeDashboardId.value = dashboards.value.length > 0 ? dashboards.value[0].id : null
+      const next = localDashboards.value[0]
+      setActiveDashboard(next)
     }
+    
+    // Clear startup if deleted
+    if (startupDashboard.value?.id === id && startupDashboard.value?.storage === 'local') {
+      clearStartupDashboard()
+    }
+    
     saveToStorage()
     return true
   }
   
   function updateDashboard(id: string, updates: Partial<Dashboard>) {
-    const dashboard = dashboards.value.find(d => d.id === id)
-    if (!dashboard) return
-    Object.assign(dashboard, updates)
-    dashboard.modified = Date.now()
-    saveToStorage()
+    if (!activeDashboard.value || activeDashboard.value.id !== id) return
+    
+    Object.assign(activeDashboard.value, updates)
+    activeDashboard.value.modified = Date.now()
+    
+    if (activeDashboard.value.storage === 'local') {
+      saveToStorage()
+    } else {
+      isDirty.value = true
+    }
   }
   
   function renameDashboard(id: string, newName: string): boolean {
     if (!newName.trim()) return false
-    const dashboard = dashboards.value.find(d => d.id === id)
-    if (!dashboard) return false
-    dashboard.name = newName.trim()
-    dashboard.modified = Date.now()
-    saveToStorage()
-    return true
+    
+    if (activeDashboard.value && activeDashboard.value.id === id) {
+      activeDashboard.value.name = newName.trim()
+      activeDashboard.value.modified = Date.now()
+      
+      if (activeDashboard.value.storage === 'local') {
+        saveToStorage()
+      } else {
+        isDirty.value = true
+      }
+      return true
+    }
+    
+    const local = localDashboards.value.find(d => d.id === id)
+    if (local) {
+      local.name = newName.trim()
+      local.modified = Date.now()
+      saveToStorage()
+      return true
+    }
+    
+    return false
   }
   
   function duplicateDashboard(id: string): Dashboard | null {
+    const source = activeDashboard.value?.id === id 
+      ? activeDashboard.value 
+      : localDashboards.value.find(d => d.id === id)
+      
+    if (!source) return null
+    
     if (isAtLimit.value) {
       storageError.value = `Limit of ${MAX_DASHBOARDS} dashboards reached.`
       return null
     }
-    const original = dashboards.value.find(d => d.id === id)
-    if (!original) return null
     
-    const clone = JSON.parse(JSON.stringify(original)) as Dashboard
+    const clone = JSON.parse(JSON.stringify(source)) as Dashboard
     const now = Date.now()
     clone.id = `dashboard_${now}_${Math.random().toString(36).substr(2, 9)}`
-    clone.name = `${original.name} (Copy)`
+    clone.name = `${source.name} (Copy)`
     clone.created = now
     clone.modified = now
+    clone.storage = 'local'
+    delete clone.kvKey
+    delete clone.kvRevision
+    
     clone.widgets = clone.widgets.map(w => ({
       ...w,
       id: `widget_${now}_${Math.random().toString(36).substr(2, 9)}`
     }))
     
-    dashboards.value.push(clone)
+    localDashboards.value.push(clone)
     saveToStorage()
     return clone
-  }
-  
-  function setActiveDashboard(id: string) {
-    const exists = dashboards.value.some(d => d.id === id)
-    if (exists) {
-      activeDashboardId.value = id
-      saveToStorage()
-    }
   }
   
   // ============================================================================
@@ -255,7 +525,12 @@ export const useDashboardStore = defineStore('dashboard', () => {
     if (!activeDashboard.value) return
     activeDashboard.value.widgets.push(widget)
     activeDashboard.value.modified = Date.now()
-    saveToStorage()
+    
+    if (activeDashboard.value.storage === 'local') {
+      saveToStorage()
+    } else {
+      isDirty.value = true
+    }
   }
   
   function updateWidget(widgetId: string, updates: Partial<WidgetConfig>) {
@@ -264,7 +539,12 @@ export const useDashboardStore = defineStore('dashboard', () => {
     if (!widget) return
     Object.assign(widget, updates)
     activeDashboard.value.modified = Date.now()
-    saveToStorage()
+    
+    if (activeDashboard.value.storage === 'local') {
+      saveToStorage()
+    } else {
+      isDirty.value = true
+    }
   }
   
   function removeWidget(widgetId: string) {
@@ -273,7 +553,12 @@ export const useDashboardStore = defineStore('dashboard', () => {
     if (index === -1) return
     activeDashboard.value.widgets.splice(index, 1)
     activeDashboard.value.modified = Date.now()
-    saveToStorage()
+    
+    if (activeDashboard.value.storage === 'local') {
+      saveToStorage()
+    } else {
+      isDirty.value = true
+    }
   }
   
   function getWidget(widgetId: string): WidgetConfig | null {
@@ -281,9 +566,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
     return activeDashboard.value.widgets.find(w => w.id === widgetId) || null
   }
   
-  /**
-   * Update widget position/size (Single)
-   */
   function updateWidgetLayout(widgetId: string, layout: { x: number; y: number; w: number; h: number }) {
     if (!activeDashboard.value) return
     const widget = activeDashboard.value.widgets.find(w => w.id === widgetId)
@@ -295,13 +577,14 @@ export const useDashboardStore = defineStore('dashboard', () => {
     widget.h = layout.h
     
     activeDashboard.value.modified = Date.now()
-    saveToStorage()
+    
+    if (activeDashboard.value.storage === 'local') {
+      saveToStorage()
+    } else {
+      isDirty.value = true
+    }
   }
 
-  /**
-   * Batch Update Layout (Optimized)
-   * Updates multiple widgets in memory and saves to storage ONCE.
-   */
   function batchUpdateLayout(updates: Array<{ id: string; x: number; y: number; w: number; h: number }>) {
     if (!activeDashboard.value) return
 
@@ -310,7 +593,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
     updates.forEach(update => {
       const widget = activeDashboard.value!.widgets.find(w => w.id === update.id)
       if (widget) {
-        // Only mark changed if values actually differ to avoid unnecessary saves
         if (widget.x !== update.x || widget.y !== update.y || widget.w !== update.w || widget.h !== update.h) {
           widget.x = update.x
           widget.y = update.y
@@ -323,7 +605,11 @@ export const useDashboardStore = defineStore('dashboard', () => {
 
     if (hasChanges) {
       activeDashboard.value.modified = Date.now()
-      saveToStorage()
+      if (activeDashboard.value.storage === 'local') {
+        saveToStorage()
+      } else {
+        isDirty.value = true
+      }
     }
   }
   
@@ -332,14 +618,23 @@ export const useDashboardStore = defineStore('dashboard', () => {
   // ============================================================================
   
   function exportDashboard(id: string): string | null {
-    const dashboard = dashboards.value.find(d => d.id === id)
+    const dashboard = activeDashboard.value?.id === id 
+      ? activeDashboard.value 
+      : localDashboards.value.find(d => d.id === id)
+      
     if (!dashboard) return null
-    return JSON.stringify(dashboard, null, 2)
+    
+    const exportObj = { ...dashboard }
+    delete exportObj.storage
+    delete exportObj.kvKey
+    delete exportObj.kvRevision
+    
+    return JSON.stringify(exportObj, null, 2)
   }
   
   function exportDashboards(ids: string[]): string {
     const selectedDashboards = ids
-      .map(id => dashboards.value.find(d => d.id === id))
+      .map(id => localDashboards.value.find(d => d.id === id))
       .filter(Boolean) as Dashboard[]
     
     const exportData: DashboardExportFile = {
@@ -352,7 +647,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
   }
   
   function exportAllDashboards(): string {
-    const ids = dashboards.value.map(d => d.id)
+    const ids = localDashboards.value.map(d => d.id)
     return exportDashboards(ids)
   }
   
@@ -364,7 +659,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
       }
       dashboard.id = `dashboard_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
       dashboard.modified = Date.now()
-      dashboards.value.push(dashboard)
+      dashboard.storage = 'local'
+      
+      localDashboards.value.push(dashboard)
       saveToStorage()
       return dashboard
     } catch (err) {
@@ -379,15 +676,15 @@ export const useDashboardStore = defineStore('dashboard', () => {
       const data = JSON.parse(json) as DashboardExportFile
       if (!data.version || !Array.isArray(data.dashboards)) throw new Error('Invalid export file')
       
-      const finalCount = strategy === 'replace' ? data.dashboards.length : dashboards.value.length + data.dashboards.length
+      const finalCount = strategy === 'replace' ? data.dashboards.length : localDashboards.value.length + data.dashboards.length
       if (finalCount > MAX_DASHBOARDS) {
         results.errors.push(`Import would exceed limit (${MAX_DASHBOARDS})`)
         return results
       }
       
       if (strategy === 'replace') {
-        dashboards.value = []
-        activeDashboardId.value = null
+        localDashboards.value = []
+        activeDashboard.value = null
       }
       
       for (const dashboard of data.dashboards) {
@@ -401,14 +698,15 @@ export const useDashboardStore = defineStore('dashboard', () => {
             ...dashboard,
             id: `dashboard_${now}_${Math.random().toString(36).substr(2, 9)}`,
             modified: now,
+            storage: 'local',
             widgets: dashboard.widgets.map(w => ({
               ...w,
               id: `widget_${now}_${Math.random().toString(36).substr(2, 9)}`
             }))
           }
-          dashboards.value.push(newDashboard)
+          localDashboards.value.push(newDashboard)
           results.success++
-          if (dashboards.value.length === 1) activeDashboardId.value = newDashboard.id
+          if (localDashboards.value.length === 1) setActiveDashboard(newDashboard)
         } catch (err: any) {
           results.errors.push(`Failed to import "${dashboard.name}": ${err.message}`)
           results.skipped++
@@ -421,8 +719,24 @@ export const useDashboardStore = defineStore('dashboard', () => {
     return results
   }
   
+  // Watch for connection to refresh remote list and load startup dashboard
+  watch(() => natsStore.isConnected, (connected) => {
+    if (connected) {
+      if (enableSharedDashboards.value) {
+        refreshRemoteKeys()
+      }
+      
+      // Load remote startup dashboard if configured
+      if (startupDashboard.value?.storage === 'kv' && enableSharedDashboards.value) {
+        loadRemoteDashboard(startupDashboard.value.id)
+      }
+    }
+  })
+  
   return {
-    dashboards,
+    // State
+    localDashboards,
+    remoteKeys,
     activeDashboardId,
     activeDashboard,
     activeWidgets,
@@ -430,25 +744,47 @@ export const useDashboardStore = defineStore('dashboard', () => {
     dashboardCount,
     isAtLimit,
     isApproachingLimit,
-    isLocked, // New
-    toggleLock, // New
+    isLocked,
+    isDirty,
+    remoteChanged,
+    kvBucketName,
+    enableSharedDashboards,
+    startupDashboard,
     MAX_DASHBOARDS,
+    
+    // Actions
     loadFromStorage,
     saveToStorage,
     getStorageSize,
     clearStorageError,
+    toggleLock,
+    setActiveDashboard,
+    setStartupDashboard,
+    clearStartupDashboard,
+    
+    // Local CRUD
     createDashboard,
     deleteDashboard,
+    
+    // Remote CRUD
+    refreshRemoteKeys,
+    loadRemoteDashboard,
+    saveRemoteDashboard,
+    createRemoteDashboard,
+    deleteRemoteDashboard,
+    
+    // Unified CRUD
     updateDashboard,
     renameDashboard,
     duplicateDashboard,
-    setActiveDashboard,
     addWidget,
     updateWidget,
     removeWidget,
     getWidget,
     updateWidgetLayout,
     batchUpdateLayout,
+    
+    // Import/Export
     exportDashboard,
     exportDashboards,
     exportAllDashboards,

@@ -7,8 +7,8 @@
     <div class="dashboard-main">
       <!-- Top toolbar -->
       <div class="dashboard-toolbar">
-        <div class="toolbar-left">
-          <!-- Hamburger menu -->
+        <!-- Row 1: Nav | Title | Connection -->
+        <div class="toolbar-top-row">
           <button 
             class="hamburger-btn"
             @click="toggleSidebar"
@@ -17,27 +17,59 @@
             ☰
           </button>
           
-          <h1 class="dashboard-name">
-            {{ dashboardStore.activeDashboard?.name || 'Dashboard' }}
-          </h1>
+          <div class="dashboard-title-container">
+            <h1 class="dashboard-name">{{ dashboardStore.activeDashboard?.name || 'Dashboard' }}</h1>
+            
+            <!-- Unified Status Pill -->
+            <!-- Priority 1: Remote Update Available -->
+            <button
+              v-if="dashboardStore.remoteChanged"
+              class="badge-shared is-stale"
+              @click="handleReloadRemote"
+              title="Remote changes detected. Click to Reload."
+            >
+              Update ↻
+            </button>
+
+            <!-- Priority 2: Local Unsaved Changes -->
+            <button
+              v-else-if="dashboardStore.isDirty"
+              class="badge-shared is-dirty"
+              @click="handleSave"
+              title="Unsaved changes. Click to Save."
+            >
+              Save ●
+            </button>
+
+            <!-- Priority 3: Synced/Shared Read-Only -->
+            <span
+              v-else-if="dashboardStore.activeDashboard?.storage === 'kv'"
+              class="badge-shared"
+              title="Dashboard is synced with NATS KV"
+            >
+              Shared
+            </span>
+          </div>
           
-          <!-- Connection Status -->
-          <div v-if="natsStore.isConnected" class="connection-status connected">
+          <!-- Connection Status (Clickable for Debug) -->
+          <button 
+            class="connection-status" 
+            :class="natsStore.isConnected ? 'connected' : 'disconnected'"
+            @click="showDebugPanel = true"
+            title="Connection Status"
+          >
             <div class="status-dot"></div>
-            <span class="status-label">Connected</span>
-            <span v-if="natsStore.rtt" class="rtt">{{ natsStore.rtt }}ms</span>
-          </div>
-          <div v-else class="connection-status disconnected">
-            <div class="status-dot"></div>
-            <span class="status-label">Disconnected</span>
-          </div>
+            <span class="status-label">{{ natsStore.isConnected ? 'Connected' : 'Disconnected' }}</span>
+            <span v-if="natsStore.isConnected && natsStore.rtt" class="rtt">{{ natsStore.rtt }}ms</span>
+          </button>
         </div>
         
-        <div class="toolbar-right">
+        <!-- Row 2: Actions -->
+        <div class="toolbar-actions">
           <!-- Lock Toggle -->
           <button 
             class="btn-icon" 
-            :title="dashboardStore.isLocked ? 'Unlock Dashboard (U)' : 'Lock Dashboard (L)'"
+            :title="dashboardStore.isLocked ? 'Unlock (U)' : 'Lock (L)'"
             @click="dashboardStore.toggleLock()"
             :class="{ 'lock-active': dashboardStore.isLocked }"
           >
@@ -47,27 +79,27 @@
           <!-- Theme Toggle -->
           <button 
             class="btn-icon" 
-            :title="`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`"
+            title="Toggle Theme"
             @click="toggleTheme"
           >
             {{ theme === 'dark' ? '☀️' : '🌙' }}
           </button>
           
-          <!-- Add Widget: Hidden when locked -->
+          <!-- Add Widget -->
           <button 
             v-if="!dashboardStore.isLocked"
             class="btn-primary" 
             @click="showAddWidget = true" 
             title="Add Widget (N)"
           >
-            <span class="btn-text">+ Add Widget</span>
             <span class="btn-icon-only">+</span>
+            <span class="btn-text">Add Widget</span>
           </button>
           
           <!-- Settings -->
           <button class="btn-secondary" @click="$router.push('/settings')" title="Settings">
-            <span class="btn-text">⚙️ Settings</span>
             <span class="btn-icon-only">⚙️</span>
+            <span class="btn-text">Settings</span>
           </button>
         </div>
       </div>
@@ -184,8 +216,8 @@
       @confirm="handleGlobalConfirm"
     />
     
-    <!-- Debug Panel -->
-    <DebugPanel />
+    <!-- Debug Panel (Now controlled by prop) -->
+    <DebugPanel v-model="showDebugPanel" />
   </div>
 </template>
 
@@ -237,6 +269,7 @@ const sidebarRef = ref<InstanceType<typeof DashboardSidebar> | null>(null)
 const showAddWidget = ref(false)
 const showConfigWidget = ref(false)
 const showShortcutsModal = ref(false)
+const showDebugPanel = ref(false)
 const configWidgetId = ref<string | null>(null)
 
 // Fullscreen state
@@ -313,12 +346,39 @@ function handleShowShortcuts() {
   showShortcutsModal.value = true
 }
 
+function handleSave() {
+  if (dashboardStore.activeDashboard?.storage === 'kv') {
+    dashboardStore.saveRemoteDashboard()
+  } else {
+    dashboardStore.saveToStorage()
+  }
+}
+
+function handleReloadRemote() {
+  if (dashboardStore.isDirty) {
+    requestConfirm(
+      'Discard Changes?',
+      'Reloading will discard your unsaved changes. Continue?',
+      () => {
+        if (dashboardStore.activeDashboard?.kvKey) {
+          dashboardStore.loadRemoteDashboard(dashboardStore.activeDashboard.kvKey)
+        }
+      },
+      'Reload'
+    )
+  } else {
+    if (dashboardStore.activeDashboard?.kvKey) {
+      dashboardStore.loadRemoteDashboard(dashboardStore.activeDashboard.kvKey)
+    }
+  }
+}
+
 const { shortcuts } = useKeyboardShortcuts([
   { 
     key: 's', 
     description: 'Save Dashboard', 
     handler: () => {
-      dashboardStore.saveToStorage()
+      handleSave()
       console.log('Dashboard saved via shortcut')
     } 
   },
@@ -371,6 +431,7 @@ const { shortcuts } = useKeyboardShortcuts([
         showConfigWidget.value = false
         showAddWidget.value = false
         showShortcutsModal.value = false
+        showDebugPanel.value = false
       }
     }
   }
@@ -446,20 +507,20 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   gap: 12px;
-  flex-wrap: wrap;
 }
 
-.toolbar-left {
+/* Desktop Layout: Everything in one row */
+.toolbar-top-row {
   display: flex;
   align-items: center;
   gap: 20px;
-  flex-wrap: wrap;
+  flex: 1;
 }
 
-.toolbar-right {
+.toolbar-actions {
   display: flex;
   gap: 12px;
-  flex-wrap: wrap;
+  align-items: center;
 }
 
 .hamburger-btn {
@@ -483,14 +544,70 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   border-color: var(--color-accent);
 }
 
+.dashboard-title-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .dashboard-name {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
   color: var(--text);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
+/* Shared/Save Badge */
+.badge-shared {
+  font-size: 10px;
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  padding: 2px 8px;
+  border: 1px solid var(--color-info-border);
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+  cursor: default;
+  transition: all 0.3s ease;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Dirty State (Orange) */
+.badge-shared.is-dirty {
+  background: var(--color-warning);
+  color: white;
+  border-color: var(--color-warning);
+  cursor: pointer;
+  animation: pulse-badge 2s infinite;
+}
+
+/* Stale State (Update Available - Purple/Accent) */
+.badge-shared.is-stale {
+  background: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
+  cursor: pointer;
+  animation: pulse-badge 2s infinite;
+}
+
+.badge-shared.is-dirty:hover,
+.badge-shared.is-stale:hover {
+  transform: scale(1.05);
+}
+
+@keyframes pulse-badge {
+  0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4); }
+  70% { box-shadow: 0 0 0 4px rgba(255, 255, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+}
+
+/* Connection Status */
 .connection-status {
   display: flex;
   align-items: center;
@@ -501,6 +618,14 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   font-weight: 500;
   border: 2px solid;
   white-space: nowrap;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: inherit;
+}
+
+.connection-status:hover {
+  filter: brightness(1.1);
 }
 
 .connection-status.connected {
@@ -528,6 +653,7 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   font-size: 11px;
 }
 
+/* Buttons */
 .btn-primary,
 .btn-secondary,
 .btn-icon {
@@ -577,6 +703,29 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 
 .btn-secondary:hover {
   background: rgba(255, 255, 255, 0.15);
+}
+
+.remote-update-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--color-info-bg);
+  border: 1px solid var(--color-info-border);
+  border-radius: 4px;
+  color: var(--color-info);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  text-decoration: underline;
+  color: inherit;
+  cursor: pointer;
+  font-weight: bold;
+  padding: 0;
 }
 
 .dashboard-content {
@@ -694,48 +843,76 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   }
 }
 
+/* ==========================================================================
+   MOBILE LAYOUT (< 600px)
+   ========================================================================== */
 @media (max-width: 600px) {
   .dashboard-toolbar {
     flex-direction: column;
     align-items: stretch;
     padding: 12px;
+    gap: 12px;
   }
 
-  .toolbar-left {
-    justify-content: space-between;
+  /* Row 1: Nav | Title | Connection */
+  .toolbar-top-row {
     width: 100%;
-    margin-bottom: 8px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 12px;
   }
 
-  .toolbar-right {
-    justify-content: space-between;
-    width: 100%;
+  .dashboard-title-container {
+    justify-self: center;
+    justify-content: center;
   }
 
-  .btn-primary,
-  .btn-secondary,
-  .btn-icon {
-    flex: 1;
-  }
-}
-
-@media (max-width: 400px) {
-  .btn-text {
-    display: none;
-  }
-
-  .btn-icon-only {
-    display: inline;
+  .dashboard-name {
     font-size: 16px;
+  }
+
+  /* Compact Connection Status (Dot only) */
+  .connection-status {
+    padding: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    justify-content: center;
+  }
+
+  .status-dot { margin: 0; }
+  .status-label, .rtt { display: none; }
+
+  /* Row 2: Actions Grid */
+  .toolbar-actions {
+    width: 100%;
+    display: grid;
+    /* Create equal width columns for actions */
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  /* Bigger Touch Targets for Mobile */
+  .btn-icon, .btn-primary, .btn-secondary {
+    height: 44px;
+    padding: 0;
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Hide text labels on mobile actions to save space */
+  .btn-text { display: none; }
+  .btn-icon-only { 
+    display: inline-block; 
+    font-size: 18px;
     font-weight: bold;
   }
-
-  .rtt {
-    display: none;
-  }
-
-  .status-label {
-    font-size: 12px;
+  
+  /* Ensure hamburger is touch-friendly */
+  .hamburger-btn {
+    width: 36px;
+    height: 36px;
   }
 }
 </style>

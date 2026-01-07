@@ -1,3 +1,5 @@
+// src/types/dashboard.ts
+
 /**
  * Widget Types
  */
@@ -111,27 +113,13 @@ export interface GaugeWidgetConfig {
 
 // --- Map Widget Types ---
 
-/**
- * Map Widget Limits
- * Grug say: Reasonable limits for localStorage and UI usability.
- * - 50 markers max: Leaflet handles more, but config storage and UI get unwieldy
- * - 10 actions max: A popup with 10 buttons/switches is already crowded
- */
 export const MAP_LIMITS = {
   MAX_MARKERS: 50,
   MAX_ACTIONS_PER_MARKER: 10,
 } as const
 
-/**
- * Map Action Type
- * Grug say: Two types. Publish is fire-and-forget. Switch is stateful toggle.
- */
 export type MapActionType = 'publish' | 'switch'
 
-/**
- * Map Marker Action - Switch Configuration
- * Grug say: Same structure as SwitchWidget config, embedded in action.
- */
 export interface MapActionSwitchConfig {
   mode: 'kv' | 'core'
   kvBucket?: string
@@ -147,25 +135,15 @@ export interface MapActionSwitchConfig {
   }
 }
 
-/**
- * Map Marker Action
- * Grug say: Click action in popup. Can be publish (like button) or switch (stateful toggle).
- */
 export interface MapMarkerAction {
   id: string
   type: MapActionType
   label: string
-  // For publish type
   subject?: string
   payload?: string
-  // For switch type
   switchConfig?: MapActionSwitchConfig
 }
 
-/**
- * Map Marker
- * Grug say: Point on map. Has location and multiple actions.
- */
 export interface MapMarker {
   id: string
   label: string
@@ -175,11 +153,6 @@ export interface MapMarker {
   actions: MapMarkerAction[]
 }
 
-/**
- * Map Widget Configuration
- * Grug say: Show map with markers. Click markers to do things.
- * Supports multiple markers, each with multiple actions (publish or switch).
- */
 export interface MapWidgetConfig {
   center: {
     lat: number
@@ -213,6 +186,9 @@ export interface WidgetConfig {
   mapConfig?: MapWidgetConfig
 }
 
+// Storage Types
+export type StorageType = 'local' | 'kv'
+
 export interface Dashboard {
   id: string
   name: string
@@ -220,6 +196,11 @@ export interface Dashboard {
   created: number
   modified: number
   widgets: WidgetConfig[]
+  
+  // Storage Metadata
+  storage?: StorageType
+  kvKey?: string      // The key in the KV bucket (e.g. "ops.prod.main")
+  kvRevision?: number // The revision number for CAS (Optimistic Locking)
 }
 
 // --- Default Widget Sizes ---
@@ -316,7 +297,7 @@ export function createDefaultWidget(type: WidgetType, position: { x: number; y: 
       break
     case 'map':
       base.mapConfig = {
-        center: { lat: 39.8283, lon: -98.5795 }, // US center
+        center: { lat: 39.8283, lon: -98.5795 },
         zoom: 4,
         markers: []
       }
@@ -335,10 +316,10 @@ export function createDefaultDashboard(name: string): Dashboard {
     created: now,
     modified: now,
     widgets: [],
+    storage: 'local' // Default to local
   }
 }
 
-// --- Helper: Create default marker ---
 export function createDefaultMarker(): MapMarker {
   return {
     id: `marker_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -349,7 +330,6 @@ export function createDefaultMarker(): MapMarker {
   }
 }
 
-// --- Helper: Create default action ---
 export function createDefaultAction(type: MapActionType = 'publish'): MapMarkerAction {
   const id = `action_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
   
