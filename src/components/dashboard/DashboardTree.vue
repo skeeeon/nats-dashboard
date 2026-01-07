@@ -6,6 +6,7 @@
         class="folder-header" 
         @click="toggleFolder(folderName)"
         :class="{ 'is-open': openFolders[folderName] }"
+        :title="folderName"
       >
         <span class="folder-icon">{{ openFolders[folderName] ? '📂' : '📁' }}</span>
         <span class="folder-name">{{ folderName }}</span>
@@ -29,6 +30,7 @@
         class="dashboard-item"
         :class="{ 'is-active': item.key === activeId }"
         @click="$emit('select', item.key)"
+        :title="item.name"
       >
         <span class="item-icon">
           <span v-if="isStartup(item.key)" title="Startup Dashboard">🏠</span>
@@ -146,25 +148,17 @@ function handleClickOutside(event: MouseEvent) {
 
 // --- Auto-Expand Logic ---
 
-/**
- * Recursively check if a folder structure contains the target key
- */
 function containsKey(item: TreeStructure | string, targetKey: string): boolean {
   if (typeof item === 'string') {
     return item === targetKey
   }
-  // It's a folder/object, check values
   return Object.values(item).some(child => containsKey(child, targetKey))
 }
 
-/**
- * Watch activeId and structure to auto-expand folders
- */
 watch([() => props.activeId, folders], ([newId, currentFolders]) => {
   if (!newId) return
   
   for (const [folderName, content] of Object.entries(currentFolders)) {
-    // If this folder contains the active dashboard, open it
     if (containsKey(content, newId)) {
       openFolders.value[folderName] = true
     }
@@ -201,6 +195,9 @@ onUnmounted(() => {
   color: var(--muted);
   font-size: 13px;
   user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .folder-header:hover {
@@ -208,14 +205,21 @@ onUnmounted(() => {
   color: var(--text);
 }
 
+/* Tighter indentation */
 .folder-content {
-  padding-left: 16px;
+  padding-left: 12px;
   border-left: 1px solid rgba(255, 255, 255, 0.1);
-  margin-left: 7px;
+  margin-left: 6px;
 }
 
 .folder-icon {
   font-size: 14px;
+  flex-shrink: 0;
+}
+
+.folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tree-item {
@@ -249,6 +253,7 @@ onUnmounted(() => {
   opacity: 0.7;
   width: 16px;
   text-align: center;
+  flex-shrink: 0;
 }
 
 .item-name {
@@ -260,6 +265,7 @@ onUnmounted(() => {
 
 .item-actions {
   position: relative;
+  flex-shrink: 0;
 }
 
 .action-btn {

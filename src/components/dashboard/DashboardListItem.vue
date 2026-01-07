@@ -3,6 +3,7 @@
     class="dashboard-item"
     :class="{ 'is-active': isActive }"
     @click="$emit('select')"
+    :title="dashboard.name"
   >
     <div class="item-content">
       <!-- Icon -->
@@ -36,7 +37,19 @@
             <span class="menu-icon">🏠</span>
             <span class="menu-text">Set as Startup</span>
           </button>
+          
+          <!-- Share to KV (Only if enabled and connected) -->
+          <button 
+            v-if="dashboardStore.enableSharedDashboards && natsStore.isConnected"
+            class="menu-item" 
+            @click="handleShare"
+          >
+            <span class="menu-icon">☁️</span>
+            <span class="menu-text">Share to KV</span>
+          </button>
+          
           <div class="menu-divider"></div>
+          
           <button class="menu-item" @click="handleRename">
             <span class="menu-icon">✏️</span>
             <span class="menu-text">Rename</span>
@@ -64,6 +77,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import type { Dashboard } from '@/types/dashboard'
 import { useDashboardStore } from '@/stores/dashboard'
+import { useNatsStore } from '@/stores/nats'
 
 const props = defineProps<{
   dashboard: Dashboard
@@ -76,9 +90,11 @@ const emit = defineEmits<{
   duplicate: []
   export: []
   delete: []
+  share: []
 }>()
 
 const dashboardStore = useDashboardStore()
+const natsStore = useNatsStore()
 const showMenu = ref(false)
 
 const isStartup = computed(() => {
@@ -102,6 +118,11 @@ function handleClickOutside(event: MouseEvent) {
 function handleSetStartup() {
   showMenu.value = false
   dashboardStore.setStartupDashboard(props.dashboard.id, 'local')
+}
+
+function handleShare() {
+  showMenu.value = false
+  emit('share')
 }
 
 function handleRename() {

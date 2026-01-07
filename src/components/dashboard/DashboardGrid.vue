@@ -44,10 +44,6 @@
       </div>
     </div>
     
-    <!-- Mobile drag disabled indicator -->
-    <div v-if="isMobile && widgets.length > 0 && !dashboardStore.isLocked" class="mobile-hint">
-      💡 Switch to desktop to rearrange widgets
-    </div>
   </div>
 </template>
 

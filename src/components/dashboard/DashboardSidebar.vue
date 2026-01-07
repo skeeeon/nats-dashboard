@@ -1,5 +1,9 @@
 <template>
-  <div class="sidebar-container" :class="{ 'is-collapsed': !isOpen, 'is-mobile': isMobile }">
+  <div 
+    class="sidebar-container" 
+    :class="{ 'is-collapsed': !isOpen, 'is-mobile': isMobile, 'is-resizing': isResizing }"
+    :style="containerStyle"
+  >
     <!-- Backdrop for mobile -->
     <div 
       v-if="isMobile && isOpen"
@@ -60,6 +64,7 @@
               @duplicate="duplicateDashboard(dashboard.id)"
               @export="exportDashboard(dashboard.id)"
               @delete="confirmDelete(dashboard.id, 'local')"
+              @share="handleShare(dashboard.id)"
             />
           </div>
         </template>
@@ -144,6 +149,13 @@
           </template>
         </div>
       </div>
+
+      <!-- Resize Handle (Desktop Only) -->
+      <div 
+        v-if="!isMobile" 
+        class="resize-handle" 
+        @mousedown="startResizing"
+      ></div>
     </aside>
     
     <!-- Rename Modal -->
@@ -167,6 +179,71 @@
         <div class="modal-actions">
           <button class="btn-secondary" @click="showRename = false">Cancel</button>
           <button class="btn-primary" @click="saveRename">Rename</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Share / Create Remote Modal -->
+    <div v-if="showShareModal" class="modal-overlay" @click.self="showShareModal = false">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>{{ modalMode === 'create' ? 'Create Shared Dashboard' : 'Share to KV' }}</h3>
+          <button class="close-btn" @click="showShareModal = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Dashboard Name</label>
+            <input 
+              v-model="shareForm.name"
+              type="text"
+              class="form-input"
+              placeholder="My Dashboard"
+              @keyup.enter="handleModalSubmit"
+            />
+          </div>
+          
+          <div class="form-group">
+            <label>Folder</label>
+            <div class="folder-selection-mode">
+              <label class="radio-label">
+                <input type="radio" v-model="shareForm.mode" value="existing" :disabled="knownFolders.length === 0">
+                Existing
+              </label>
+              <label class="radio-label">
+                <input type="radio" v-model="shareForm.mode" value="new">
+                New
+              </label>
+            </div>
+            
+            <select 
+              v-if="shareForm.mode === 'existing'" 
+              v-model="shareForm.folder" 
+              class="form-input"
+            >
+              <option value="">(Root)</option>
+              <option v-for="folder in knownFolders" :key="folder" :value="folder">
+                {{ folder }}
+              </option>
+            </select>
+            
+            <input 
+              v-else
+              v-model="shareForm.folder"
+              type="text"
+              class="form-input"
+              placeholder="e.g. ops.prod"
+              @keyup.enter="handleModalSubmit"
+            />
+            <div class="help-text">
+              Use dots for subfolders (e.g. <code>ops.prod</code>)
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-secondary" @click="showShareModal = false">Cancel</button>
+          <button class="btn-primary" @click="handleModalSubmit">
+            {{ modalMode === 'create' ? 'Create' : 'Share' }}
+          </button>
         </div>
       </div>
     </div>
@@ -238,15 +315,28 @@ const natsStore = useNatsStore()
 
 // Sidebar state
 const STORAGE_KEY = 'sidebar_open'
+const WIDTH_KEY = 'sidebar_width'
 const isOpen = ref(true)
 const isMobile = ref(false)
 const activeTab = ref<'local' | 'shared'>('local')
+const sidebarWidth = ref(280)
+const isResizing = ref(false)
 
 // Rename state
 const showRename = ref(false)
 const renameId = ref<string | null>(null)
 const renameName = ref('')
 const renameInput = ref<HTMLInputElement | null>(null)
+
+// Share/Create Remote state
+const showShareModal = ref(false)
+const modalMode = ref<'share' | 'create'>('share')
+const shareForm = ref({
+  id: '',
+  name: '',
+  folder: '',
+  mode: 'existing' as 'existing' | 'new'
+})
 
 // Import state
 const showImport = ref(false)
@@ -260,8 +350,9 @@ const deleteType = ref<'local' | 'remote'>('local')
 // Computed
 const dashboards = computed(() => dashboardStore.localDashboards)
 const remoteKeys = computed(() => dashboardStore.remoteKeys)
+const knownFolders = computed(() => dashboardStore.knownFolders)
+
 const activeDashboardId = computed(() => {
-  // If active dashboard storage matches active tab, show it as selected
   if (activeTab.value === 'local' && dashboardStore.activeDashboard?.storage === 'local') {
     return dashboardStore.activeDashboardId
   }
@@ -271,21 +362,16 @@ const activeDashboardId = computed(() => {
   return null
 })
 
-// Build Tree from Remote Keys
 const remoteTree = computed(() => {
   const tree: any = {}
-  
   for (const key of remoteKeys.value) {
     const parts = key.split('.')
     let current = tree
-    
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i]
       if (i === parts.length - 1) {
-        // Leaf node
         current[part] = key
       } else {
-        // Folder node
         if (!current[part]) current[part] = {}
         current = current[part]
       }
@@ -294,9 +380,6 @@ const remoteTree = computed(() => {
   return tree
 })
 
-/**
- * Storage usage
- */
 const storageInfo = computed(() => dashboardStore.getStorageSize())
 const storageKB = computed(() => (storageInfo.value.sizeKB / 1024).toFixed(2))
 const storagePercent = computed(() => Math.min(storageInfo.value.sizePercent, 100))
@@ -313,6 +396,11 @@ const deleteConfirmTitle = computed(() => {
 
 const deleteConfirmMessage = computed(() => {
   return `This will permanently delete the dashboard.`
+})
+
+const containerStyle = computed(() => {
+  if (isMobile.value) return {}
+  return { width: isOpen.value ? `${sidebarWidth.value}px` : '0px' }
 })
 
 function checkMobile() {
@@ -334,6 +422,30 @@ function closeSidebar() {
 
 defineExpose({ toggleSidebar })
 
+// --- Resize Logic ---
+function startResizing() {
+  isResizing.value = true
+  document.addEventListener('mousemove', handleResizing)
+  document.addEventListener('mouseup', stopResizing)
+  // Prevent text selection while dragging
+  document.body.style.userSelect = 'none'
+}
+
+function handleResizing(e: MouseEvent) {
+  if (!isResizing.value) return
+  // Constrain width between 200px and 600px
+  const newWidth = Math.max(200, Math.min(600, e.clientX))
+  sidebarWidth.value = newWidth
+}
+
+function stopResizing() {
+  isResizing.value = false
+  document.removeEventListener('mousemove', handleResizing)
+  document.removeEventListener('mouseup', stopResizing)
+  document.body.style.userSelect = ''
+  localStorage.setItem(WIDTH_KEY, String(sidebarWidth.value))
+}
+
 function selectDashboard(dashboard: Dashboard) {
   dashboardStore.setActiveDashboard(dashboard)
   if (isMobile.value) closeSidebar()
@@ -345,26 +457,27 @@ function selectRemoteDashboard(key: string) {
 }
 
 function createNewDashboard() {
-  const name = prompt('Dashboard name:', 'New Dashboard')
-  if (!name) return
-  
   if (activeTab.value === 'local') {
-    dashboardStore.createDashboard(name)
+    const name = prompt('Dashboard name:', 'New Dashboard')
+    if (name) dashboardStore.createDashboard(name)
   } else {
-    // For shared, ask for folder (optional)
-    const folder = prompt('Folder path (optional, dot separated e.g. ops.prod):', '')
-    dashboardStore.createRemoteDashboard(name, folder || '')
+    shareForm.value = {
+      id: '',
+      name: 'New Dashboard',
+      folder: '',
+      mode: knownFolders.value.length > 0 ? 'existing' : 'new'
+    }
+    modalMode.value = 'create'
+    showShareModal.value = true
   }
 }
 
 function startRename(id: string) {
   const dashboard = dashboards.value.find(d => d.id === id)
   if (!dashboard) return
-  
   renameId.value = id
   renameName.value = dashboard.name
   showRename.value = true
-  
   nextTick(() => {
     renameInput.value?.focus()
     renameInput.value?.select()
@@ -411,7 +524,6 @@ async function handleImportFile(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
   if (!file) return
-  
   try {
     const text = await file.text()
     const results = dashboardStore.importDashboards(text, 'merge')
@@ -431,28 +543,58 @@ function confirmDelete(idOrKey: string, type: 'local' | 'remote') {
 
 function handleDelete() {
   if (!deleteId.value) return
-  
   if (deleteType.value === 'local') {
     dashboardStore.deleteDashboard(deleteId.value)
   } else {
     dashboardStore.deleteRemoteDashboard(deleteId.value)
   }
-  
   deleteId.value = null
+}
+
+function handleShare(id: string) {
+  const dashboard = dashboards.value.find(d => d.id === id)
+  if (!dashboard) return
+  shareForm.value = {
+    id: id,
+    name: dashboard.name,
+    folder: '',
+    mode: knownFolders.value.length > 0 ? 'existing' : 'new'
+  }
+  modalMode.value = 'share'
+  showShareModal.value = true
+}
+
+function handleModalSubmit() {
+  if (!shareForm.value.name.trim()) return
+  if (modalMode.value === 'share') {
+    dashboardStore.uploadLocalToRemote(
+      shareForm.value.id, 
+      shareForm.value.folder.trim(),
+      shareForm.value.name.trim()
+    )
+  } else {
+    dashboardStore.createRemoteDashboard(
+      shareForm.value.name.trim(),
+      shareForm.value.folder.trim()
+    )
+  }
+  showShareModal.value = false
+  if (isMobile.value) closeSidebar()
 }
 
 onMounted(() => {
   const stored = localStorage.getItem(STORAGE_KEY)
   if (stored !== null) isOpen.value = stored === 'true'
+  
+  const storedWidth = localStorage.getItem(WIDTH_KEY)
+  if (storedWidth) sidebarWidth.value = parseInt(storedWidth)
+  
   checkMobile()
   window.addEventListener('resize', checkMobile)
   
-  // If we have an active remote dashboard, switch tab to shared
   if (dashboardStore.activeDashboard?.storage === 'kv') {
     activeTab.value = 'shared'
   }
-  
-  // If shared disabled, force local
   if (!dashboardStore.enableSharedDashboards) {
     activeTab.value = 'local'
   }
@@ -466,12 +608,10 @@ watch(isMobile, (mobile) => {
   if (mobile && isOpen.value) isOpen.value = false
 })
 
-// Watch setting change to force local tab if disabled
 watch(() => dashboardStore.enableSharedDashboards, (enabled) => {
   if (!enabled) activeTab.value = 'local'
 })
 
-// NEW: Watch active dashboard storage to switch tabs automatically (e.g. on startup load)
 watch(() => dashboardStore.activeDashboard?.storage, (storage) => {
   if (storage === 'kv' && dashboardStore.enableSharedDashboards) {
     activeTab.value = 'shared'
@@ -485,29 +625,45 @@ watch(() => dashboardStore.activeDashboard?.storage, (storage) => {
 .sidebar-container {
   position: relative;
   height: 100%;
-  transition: width 0.3s ease;
+  transition: width 0.1s ease;
   width: 280px;
   flex-shrink: 0;
+  display: flex;
 }
 
 .sidebar-container.is-collapsed {
-  width: 0;
+  width: 0 !important;
+}
+
+.sidebar-container.is-resizing {
+  transition: none;
 }
 
 .sidebar {
   position: relative;
-  width: 280px;
+  width: 100%;
   height: 100%;
   background: var(--panel);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  transition: transform 0.3s ease;
   overflow: hidden;
 }
 
-.sidebar-container.is-collapsed .sidebar {
-  transform: translateX(-100%);
+.resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 10;
+  transition: background 0.2s;
+}
+
+.resize-handle:hover,
+.sidebar-container.is-resizing .resize-handle {
+  background: var(--color-accent);
 }
 
 .sidebar-header {
@@ -526,6 +682,7 @@ watch(() => dashboardStore.activeDashboard?.storage, (storage) => {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text);
+  white-space: nowrap;
 }
 
 .close-btn {
@@ -675,6 +832,7 @@ watch(() => dashboardStore.activeDashboard?.storage, (storage) => {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
+  white-space: nowrap;
 }
 
 .btn-action:hover:not(:disabled) {
@@ -708,7 +866,7 @@ watch(() => dashboardStore.activeDashboard?.storage, (storage) => {
 
 /* Mobile Styles */
 .sidebar-container.is-mobile {
-  width: 0;
+  width: 0 !important;
   position: relative;
   z-index: 100;
 }
@@ -785,6 +943,32 @@ watch(() => dashboardStore.activeDashboard?.storage, (storage) => {
 .modal-body {
   padding: 20px;
   overflow-y: auto;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.folder-selection-mode {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
 }
 
 .form-input {

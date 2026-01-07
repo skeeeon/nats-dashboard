@@ -80,6 +80,20 @@ export const useDashboardStore = defineStore('dashboard', () => {
   
   const dashboardCount = computed(() => localDashboards.value.length)
 
+  // Extract unique folder paths from remote keys
+  const knownFolders = computed(() => {
+    const folders = new Set<string>()
+    remoteKeys.value.forEach(key => {
+      // Key format: folder.subfolder.slug-id
+      // We want everything BEFORE the last dot
+      const lastDotIndex = key.lastIndexOf('.')
+      if (lastDotIndex > 0) {
+        folders.add(key.substring(0, lastDotIndex))
+      }
+    })
+    return Array.from(folders).sort()
+  })
+
   // ============================================================================
   // HELPERS
   // ============================================================================
@@ -334,6 +348,37 @@ export const useDashboardStore = defineStore('dashboard', () => {
     dashboard.kvKey = key
     
     setActiveDashboard(dashboard)
+    isDirty.value = true
+    await saveRemoteDashboard()
+  }
+
+  async function uploadLocalToRemote(localId: string, folder: string = '', newName?: string) {
+    if (!enableSharedDashboards.value || !natsStore.isConnected) return
+    
+    const local = localDashboards.value.find(d => d.id === localId)
+    if (!local) return
+
+    // Clone and prepare for remote
+    const remote = JSON.parse(JSON.stringify(local)) as Dashboard
+    remote.storage = 'kv'
+    delete remote.kvRevision
+    
+    // Use new name if provided
+    if (newName) {
+      remote.name = newName
+    }
+    
+    // Generate Key
+    const slug = remote.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+    const rand = Math.random().toString(36).substr(2, 6)
+    let key = `${slug}-${rand}`
+    if (folder) {
+      key = `${folder}.${key}`
+    }
+    remote.kvKey = key
+    
+    // Set as active and save immediately
+    setActiveDashboard(remote)
     isDirty.value = true
     await saveRemoteDashboard()
   }
@@ -751,6 +796,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     enableSharedDashboards,
     startupDashboard,
     MAX_DASHBOARDS,
+    knownFolders,
     
     // Actions
     loadFromStorage,
@@ -772,6 +818,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     saveRemoteDashboard,
     createRemoteDashboard,
     deleteRemoteDashboard,
+    uploadLocalToRemote,
     
     // Unified CRUD
     updateDashboard,
