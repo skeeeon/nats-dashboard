@@ -63,9 +63,10 @@
         
         <!-- Row 2: Actions -->
         <div class="toolbar-actions">
-          <!-- Variable Toggle (Only if variables exist) -->
+          <!-- Variable Toggle -->
+          <!-- Grug change: Show if variables exist OR if we can add them (unlocked) -->
           <button 
-            v-if="hasVariables"
+            v-if="hasVariables || !dashboardStore.isLocked"
             class="btn-icon"
             :class="{ 'is-active': showVariableBar }"
             @click="showVariableBar = !showVariableBar"
@@ -110,7 +111,8 @@
       
       <!-- Variable Bar (Collapsible) -->
       <Transition name="slide-fade">
-        <div v-if="showVariableBar || (!dashboardStore.isLocked && !hasVariables)" class="variable-bar-wrapper">
+        <!-- Grug change: Only show when explicitly toggled -->
+        <div v-if="showVariableBar" class="variable-bar-wrapper">
           <VariableBar 
             @edit="showVariableModal = true" 
             @close="showVariableBar = false"

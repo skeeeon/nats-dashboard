@@ -1,6 +1,7 @@
 <template>
-  <div v-if="hasVariables" class="variable-bar">
-    <div class="variables-list">
+  <div class="variable-bar">
+    <!-- Case A: Has Variables -->
+    <div v-if="hasVariables" class="variables-list">
       <div 
         v-for="variable in variables" 
         :key="variable.id" 
@@ -31,21 +32,23 @@
       </div>
     </div>
     
+    <!-- Case B: Empty State -->
+    <div v-else class="empty-state">
+      <span class="empty-text">No variables defined</span>
+      <button class="add-variable-btn" @click="$emit('edit')">
+        + Add Variable
+      </button>
+    </div>
+    
+    <!-- Actions (Always visible) -->
     <div class="bar-actions">
-      <button class="action-btn" @click="$emit('edit')" title="Edit Variables">
+      <button v-if="hasVariables" class="action-btn" @click="$emit('edit')" title="Edit Variables">
         ✎
       </button>
-      <button class="action-btn close-mobile" @click="$emit('close')" title="Close">
+      <button class="action-btn" @click="$emit('close')" title="Close">
         ✕
       </button>
     </div>
-  </div>
-  
-  <!-- Empty state button if no variables but unlocked -->
-  <div v-else-if="!dashboardStore.isLocked" class="variable-bar empty">
-    <button class="add-variable-btn" @click="$emit('edit')">
-      + Add Variable
-    </button>
   </div>
 </template>
 
@@ -81,19 +84,13 @@ function handleTextInput(name: string, value: string) {
 <style scoped>
 .variable-bar {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
   padding: 12px 24px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-}
-
-.variable-bar.empty {
-  padding: 4px 24px;
-  justify-content: center;
-  border-bottom: none;
-  background: transparent;
+  min-height: 56px;
 }
 
 .variables-list {
@@ -102,6 +99,16 @@ function handleTextInput(name: string, value: string) {
   gap: 16px;
   flex: 1;
   align-items: center;
+}
+
+.empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  font-style: italic;
 }
 
 .variable-item {
@@ -136,6 +143,7 @@ function handleTextInput(name: string, value: string) {
 .bar-actions {
   display: flex;
   gap: 8px;
+  margin-left: auto;
 }
 
 .action-btn {
@@ -156,24 +164,21 @@ function handleTextInput(name: string, value: string) {
   color: var(--text);
 }
 
-.close-mobile {
-  display: none;
-}
-
 .add-variable-btn {
   background: transparent;
   border: 1px dashed var(--border);
-  color: var(--muted);
-  font-size: 11px;
-  padding: 4px 12px;
+  color: var(--color-accent);
+  font-size: 12px;
+  padding: 6px 12px;
   border-radius: 12px;
   cursor: pointer;
   transition: all 0.2s;
+  font-style: normal;
 }
 
 .add-variable-btn:hover {
   border-color: var(--color-accent);
-  color: var(--color-accent);
+  background: var(--color-info-bg);
 }
 
 /* Mobile Optimization */
@@ -189,6 +194,11 @@ function handleTextInput(name: string, value: string) {
     grid-template-columns: 1fr 1fr; /* 2 columns */
     gap: 12px;
     width: 100%;
+  }
+
+  .empty-state {
+    justify-content: center;
+    padding: 8px 0;
   }
 
   .variable-item {
@@ -207,10 +217,6 @@ function handleTextInput(name: string, value: string) {
     position: absolute;
     top: 8px;
     right: 8px;
-  }
-
-  .close-mobile {
-    display: flex;
   }
 }
 </style>
