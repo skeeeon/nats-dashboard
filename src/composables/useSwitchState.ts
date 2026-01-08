@@ -1,12 +1,11 @@
 // src/composables/useSwitchState.ts
-import { ref, type Ref } from 'vue'
+import { ref, type Ref, onMounted, onUnmounted, watch, isRef } from 'vue'
 import { useNatsStore } from '@/stores/nats'
 import { Kvm } from '@nats-io/kv'
 import { decodeBytes, encodeString } from '@/utils/encoding'
 
 /**
  * Switch State Configuration
- * Grug say: Same config for SwitchWidget and Map switch actions
  */
 export interface SwitchStateConfig {
   mode: 'kv' | 'core'
@@ -23,7 +22,6 @@ export type SwitchStateValue = 'on' | 'off' | 'pending' | 'unknown'
 
 /**
  * Switch State Instance
- * Returned by createSwitchState factory
  */
 export interface SwitchState {
   state: Ref<SwitchStateValue>
@@ -36,32 +34,20 @@ export interface SwitchState {
 }
 
 /**
- * Create Switch State Instance
- * 
- * Grug say: Factory function. Create one per switch action.
- * Call start() to begin watching, stop() to cleanup.
- * Can be used outside Vue lifecycle.
- * 
- * @param config - Switch configuration
- * @returns SwitchState instance with reactive state and control methods
+ * Create Switch State Instance (Factory)
  */
 export function createSwitchState(config: SwitchStateConfig): SwitchState {
   const natsStore = useNatsStore()
   
-  // Reactive state
   const state = ref<SwitchStateValue>('unknown')
   const error = ref<string | null>(null)
   const isPending = ref(false)
   
-  // Internal references for cleanup
   let kvWatcher: any = null
   let kvInstance: any = null
   let subscription: any = null
   let active = false
   
-  /**
-   * Start watching for state changes
-   */
   async function start(): Promise<void> {
     if (active) return
     if (!natsStore.nc || !natsStore.isConnected) {
@@ -71,49 +57,38 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
     
     active = true
     error.value = null
+    isPending.value = true // Lock UI while initializing
     
-    if (config.mode === 'kv') {
-      await initializeKvMode()
-    } else {
-      await initializeCoreMode()
+    try {
+      if (config.mode === 'kv') {
+        await initializeKvMode()
+      } else {
+        await initializeCoreMode()
+      }
+    } catch (err: any) {
+      error.value = err.message
+      isPending.value = false
     }
   }
   
-  /**
-   * Stop watching and cleanup
-   */
   function stop(): void {
     active = false
-    
-    if (kvWatcher) {
-      try { kvWatcher.stop() } catch {}
-      kvWatcher = null
-    }
+    if (kvWatcher) { try { kvWatcher.stop() } catch {} kvWatcher = null }
     kvInstance = null
-    
-    if (subscription) {
-      try { subscription.unsubscribe() } catch {}
-      subscription = null
-    }
+    if (subscription) { try { subscription.unsubscribe() } catch {} subscription = null }
+    isPending.value = false
   }
   
-  /**
-   * Check if currently active
-   */
   function isActive(): boolean {
     return active
   }
   
-  /**
-   * Initialize KV mode watcher
-   */
   async function initializeKvMode(): Promise<void> {
     const bucket = config.kvBucket
     const key = config.kvKey
     
     if (!bucket || !key) {
-      error.value = 'KV bucket and key required'
-      return
+      throw new Error('KV bucket and key required')
     }
     
     try {
@@ -121,7 +96,7 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
       const kv = await kvm.open(bucket)
       kvInstance = kv
       
-      // Try to get current value
+      // Get initial value
       try {
         const entry = await kv.get(key)
         if (entry) {
@@ -135,7 +110,10 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
         state.value = config.defaultState || 'off'
       }
       
-      // Start watching
+      // Initialization done, unlock UI
+      isPending.value = false
+      
+      // Start watching for updates
       const iter = await kv.watch({ key })
       kvWatcher = iter
       
@@ -155,63 +133,42 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
             }
           }
         } catch (err: any) {
-          if (active && !err.message?.includes('connection closed')) {
-            console.error('[SwitchState] KV watch error:', err)
-            error.value = 'KV watch failed'
-          }
+          // Ignore connection closed errors
         }
       })()
       
     } catch (err: any) {
-      console.error('[SwitchState] KV init error:', err)
       if (err.message?.includes('stream not found')) {
-        error.value = `Bucket "${bucket}" not found`
-      } else {
-        error.value = err.message || 'Failed to initialize KV'
+        throw new Error(`Bucket "${bucket}" not found`)
       }
+      throw err
     }
   }
   
-  /**
-   * Initialize Core mode subscription
-   */
   async function initializeCoreMode(): Promise<void> {
     state.value = config.defaultState || 'off'
     const stateSubject = config.stateSubject || config.publishSubject
     
-    if (!stateSubject) {
-      error.value = 'No state subject configured'
-      return
-    }
+    if (!stateSubject) throw new Error('No state subject configured')
+    
+    // Core mode doesn't fetch initial state, so we unlock immediately
+    isPending.value = false
     
     try {
       subscription = natsStore.nc!.subscribe(stateSubject)
-      
       ;(async () => {
-        try {
-          for await (const msg of subscription) {
-            if (!active) break
-            const data = parseMessage(msg.data)
-            updateStateFromValue(data)
-            isPending.value = false
-          }
-        } catch (err: any) {
-          if (active && !err.message?.includes('connection closed')) {
-            console.error('[SwitchState] Subscription error:', err)
-            error.value = 'Subscription failed'
-          }
+        for await (const msg of subscription) {
+          if (!active) break
+          const data = parseMessage(msg.data)
+          updateStateFromValue(data)
+          isPending.value = false
         }
       })()
-      
     } catch (err: any) {
-      console.error('[SwitchState] CORE init error:', err)
-      error.value = err.message || 'Failed to subscribe'
+      throw err
     }
   }
   
-  /**
-   * Parse incoming message
-   */
   function parseMessage(data: Uint8Array): any {
     try {
       const text = decodeBytes(data)
@@ -219,31 +176,18 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
     } catch { return null }
   }
   
-  /**
-   * Update state based on incoming value
-   */
   function updateStateFromValue(value: any): void {
     if (matchesPayload(value, config.onPayload)) {
       state.value = 'on'
     } else if (matchesPayload(value, config.offPayload)) {
       state.value = 'off'
-    } else {
-      console.warn('[SwitchState] Value does not match on/off payloads:', value)
     }
   }
   
-  /**
-   * Check if value matches payload
-   */
   function matchesPayload(value: any, payload: any): boolean {
     return JSON.stringify(value) === JSON.stringify(payload)
   }
   
-  /**
-   * Toggle the switch
-   * 
-   * @param requestConfirm - Optional confirmation callback
-   */
   async function toggle(requestConfirm?: (onConfirm: () => void) => void): Promise<void> {
     if (!natsStore.isConnected) {
       error.value = 'Not connected'
@@ -259,9 +203,6 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
     }
   }
   
-  /**
-   * Execute the toggle action
-   */
   async function executeToggle(targetState: 'on' | 'off'): Promise<void> {
     error.value = null
     isPending.value = true
@@ -283,18 +224,18 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
         const data = serializePayload(payload)
         natsStore.nc.publish(subject, data)
         
-        // If no state subject, assume success immediately
         if (!config.stateSubject) {
           state.value = targetState
           isPending.value = false
         }
       }
       
-      // Timeout for confirmation
+      // Confirmation timeout watchdog
       setTimeout(() => {
-        if (isPending.value) {
+        if (isPending.value && state.value === 'pending') {
           isPending.value = false
-          error.value = 'No confirmation received'
+          // Don't revert state visually, just stop spinner. 
+          // If we revert, we might flicker if the ACK comes 1ms later.
         }
       }, 5000)
       
@@ -306,9 +247,6 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
     }
   }
   
-  /**
-   * Serialize payload to bytes
-   */
   function serializePayload(payload: any): Uint8Array {
     if (typeof payload === 'string') return encodeString(payload)
     if (typeof payload === 'number' || typeof payload === 'boolean') {
@@ -317,24 +255,81 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
     return encodeString(JSON.stringify(payload))
   }
   
-  return {
-    state,
-    error,
-    isPending,
-    start,
-    stop,
-    toggle,
-    isActive,
-  }
+  return { state, error, isPending, start, stop, toggle, isActive }
 }
 
 /**
- * Composable wrapper for use in Vue components
- * Grug say: Use this in SwitchWidget. Handles lifecycle automatically.
+ * Composable wrapper that HANDLES LIFECYCLE
  */
-export function useSwitchState(config: Ref<SwitchStateConfig> | SwitchStateConfig) {
-  // This is a simple wrapper that returns createSwitchState
-  // For more complex lifecycle management, components can use createSwitchState directly
-  const resolvedConfig = 'value' in config ? config.value : config
-  return createSwitchState(resolvedConfig)
+export function useSwitchState(configSource: Ref<SwitchStateConfig> | SwitchStateConfig) {
+  const natsStore = useNatsStore()
+  
+  // Create stable refs to return to the component
+  const state = ref<SwitchStateValue>('unknown')
+  const error = ref<string | null>(null)
+  const isPending = ref(true) // Default to true so button is disabled until init
+  
+  let instance: SwitchState | null = null
+  let stateWatcherStop: (() => void) | null = null
+
+  // Function to tear down old instance and create new one
+  function init() {
+    // 1. Cleanup old
+    if (instance) {
+      instance.stop()
+      if (stateWatcherStop) stateWatcherStop()
+    }
+
+    // 2. Create new
+    const cfg = isRef(configSource) ? configSource.value : configSource
+    instance = createSwitchState(cfg)
+
+    // 3. Sync initial values
+    state.value = instance.state.value
+    error.value = instance.error.value
+    isPending.value = instance.isPending.value
+
+    // 4. Watch internal instance state and update our proxy refs
+    stateWatcherStop = watch(
+      [instance.state, instance.error, instance.isPending], 
+      ([s, e, p]) => {
+        state.value = s
+        error.value = e
+        isPending.value = p
+      }
+    )
+
+    // 5. Start if connected
+    if (natsStore.isConnected) {
+      instance.start()
+    }
+  }
+
+  // Lifecycle Hooks
+  onMounted(() => {
+    init()
+  })
+
+  onUnmounted(() => {
+    if (instance) instance.stop()
+    if (stateWatcherStop) stateWatcherStop()
+  })
+
+  // Watch for variable changes (config update)
+  if (isRef(configSource)) {
+    watch(configSource, () => init(), { deep: true })
+  }
+
+  // Watch for connection changes
+  watch(() => natsStore.isConnected, (connected) => {
+    if (connected && instance) instance.start()
+    else if (!connected && instance) instance.stop()
+  })
+
+  // Proxy the toggle method
+  const toggle = async (cb?: (c: () => void) => void) => {
+    if (instance) await instance.toggle(cb)
+  }
+
+  return { state, error, isPending, toggle }
 }

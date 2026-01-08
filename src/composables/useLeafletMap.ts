@@ -61,15 +61,29 @@ export function useLeafletMap() {
     zoom: number,
     isDarkMode: boolean
   ) {
-    // Clean up existing map if any
+    // 1. Clean up existing map instance managed by this composable
     if (map.value) {
       map.value.remove()
       map.value = null
     }
     markerInstances.clear()
-
     fixLeafletIcons()
 
+    // 2. Safety Check: Check for zombie Leaflet instance on the DOM element
+    // This handles the "Map container is already initialized" error on mobile re-renders
+    const container = document.getElementById(containerId)
+    if (container) {
+      if ((container as any)._leaflet_id) {
+        // Leaflet thinks this container is in use, but our state says otherwise.
+        // Force a reset by clearing the Leaflet ID.
+        ;(container as any)._leaflet_id = null
+      }
+    } else {
+      // Container not found in DOM, cannot init
+      return
+    }
+
+    // 3. Create Map
     const mapInstance = L.map(containerId, {
       center: [center.lat, center.lon],
       zoom: zoom,

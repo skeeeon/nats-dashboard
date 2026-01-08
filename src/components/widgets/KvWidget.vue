@@ -1,60 +1,83 @@
 <template>
-  <div class="kv-widget" :class="{ 'single-value-mode': isSingleValue }">
+  <div class="kv-widget" :class="{ 'single-value-mode': isSingleValue, 'card-layout': layoutMode === 'card' }">
     <div v-if="loading" class="kv-loading">
       <LoadingState size="small" inline />
     </div>
     
     <div v-else-if="error" class="kv-error">
       <div class="error-icon">⚠️</div>
-      <div class="error-text">{{ error }}</div>
+      <div class="error-text">{{ layoutMode === 'card' ? 'Error' : error }}</div>
     </div>
     
     <div v-else-if="kvValue !== null" class="kv-content">
-      <!-- Header: Only show for complex objects -->
-      <div v-if="!isSingleValue" class="kv-header">
-        <div class="kv-bucket">{{ resolvedConfig.bucket }}</div>
-        <div class="kv-key">{{ resolvedConfig.key }}</div>
-      </div>
       
-      <div class="kv-value">
-        <!-- Single Value Mode -->
-        <div 
-          v-if="isSingleValue" 
-          class="value-display"
-          :style="{ color: valueColor }"
-        >
-          {{ displayContent }}
+      <!-- CARD LAYOUT (Mobile/Compact) -->
+      <template v-if="layoutMode === 'card'">
+        
+        <!-- Case A: Simple Value (Row Layout) -->
+        <div v-if="isSingleValue" class="card-content">
+          <div class="card-icon">🗄️</div>
+          <div class="card-info">
+            <div class="card-title">{{ config.title }}</div>
+            <div class="card-value" :style="{ color: valueColor }">
+              {{ displayContent }}
+            </div>
+          </div>
+        </div>
+
+        <!-- Case B: Complex/JSON Value (Stacked Layout) -->
+        <div v-else class="card-content-stacked">
+          <div class="card-header-row">
+            <div class="card-icon small">🗄️</div>
+            <div class="card-title">{{ config.title }}</div>
+          </div>
+          <div class="card-json-body">
+            <pre>{{ displayContent }}</pre>
+          </div>
+          <div class="card-footer">
+             <span class="meta-label">Rev:</span> {{ revision }}
+          </div>
+        </div>
+
+      </template>
+
+      <!-- STANDARD LAYOUT (Desktop) -->
+      <template v-else>
+        <div v-if="!isSingleValue" class="kv-header">
+          <div class="kv-bucket">{{ resolvedConfig.bucket }}</div>
+          <div class="kv-key">{{ resolvedConfig.key }}</div>
         </div>
         
-        <!-- Complex Mode -->
-        <pre v-else class="kv-value-content">{{ displayContent }}</pre>
-      </div>
-      
-      <!-- Metadata Footer -->
-      <div class="kv-meta">
-        <template v-if="isSingleValue">
-          <span class="meta-simple">
-             Rev {{ revision }} • {{ lastUpdated }}
-          </span>
-        </template>
+        <div class="kv-value">
+          <div 
+            v-if="isSingleValue" 
+            class="value-display"
+            :style="{ color: valueColor }"
+          >
+            {{ displayContent }}
+          </div>
+          <pre v-else class="kv-value-content">{{ displayContent }}</pre>
+        </div>
         
-        <template v-else>
-          <span class="meta-item">
-            <span class="meta-label">Rev:</span>
-            <span class="meta-value">{{ revision }}</span>
-          </span>
-          <span v-if="lastUpdated" class="meta-item">
-            <span class="meta-label">Upd:</span>
-            <span class="meta-value">{{ lastUpdated }}</span>
-          </span>
-        </template>
-      </div>
+        <div class="kv-meta">
+          <template v-if="isSingleValue">
+            <span class="meta-simple">Rev {{ revision }} • {{ lastUpdated }}</span>
+          </template>
+          <template v-else>
+            <span class="meta-item">
+              <span class="meta-label">Rev:</span><span class="meta-value">{{ revision }}</span>
+            </span>
+            <span v-if="lastUpdated" class="meta-item">
+              <span class="meta-label">Upd:</span><span class="meta-value">{{ lastUpdated }}</span>
+            </span>
+          </template>
+        </div>
+      </template>
     </div>
     
     <div v-else class="kv-empty">
       <div class="empty-icon">🗄️</div>
-      <div>Key not found</div>
-      <div class="empty-hint">{{ resolvedConfig.key }}</div>
+      <div v-if="layoutMode !== 'card'">Key not found</div>
     </div>
   </div>
 </template>
@@ -71,15 +94,17 @@ import type { WidgetConfig } from '@/types/dashboard'
 import { decodeBytes } from '@/utils/encoding'
 import { resolveTemplate } from '@/utils/variables'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   config: WidgetConfig
-}>()
+  layoutMode?: 'standard' | 'card'
+}>(), {
+  layoutMode: 'standard'
+})
 
 const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
 const { evaluateThresholds } = useThresholds()
 
-// State
 const kvValue = ref<string | null>(null)
 const revision = ref<number>(0)
 const lastUpdated = ref<string | null>(null)
@@ -87,7 +112,6 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 let watcher: any = null
 
-// Resolved Configuration
 const resolvedConfig = computed(() => {
   const vars = dashboardStore.currentVariableValues
   return {
@@ -97,12 +121,10 @@ const resolvedConfig = computed(() => {
   }
 })
 
-// Computed
 const processedValue = computed(() => {
   if (kvValue.value === null) return null
   let val: any = kvValue.value
   let isJson = false
-
   try {
     val = JSON.parse(kvValue.value)
     isJson = true
@@ -147,27 +169,22 @@ const valueColor = computed(() => {
 
 async function loadKvValue() {
   const { bucket, key } = resolvedConfig.value
-  
   if (!bucket || !key || bucket === 'my-bucket') {
-    error.value = 'Click ⚙️ to configure'
+    error.value = 'Config required'
     loading.value = false
     return
   }
-  
   if (!natsStore.nc || !natsStore.isConnected) {
     error.value = 'Not connected'
     loading.value = false
     return
   }
-  
   try {
     loading.value = true
     error.value = null
-    
     const kvm = new Kvm(natsStore.nc)
     const kv = await kvm.open(bucket)
     const entry = await kv.get(key)
-    
     if (entry) {
       kvValue.value = decodeBytes(entry.value)
       revision.value = entry.revision
@@ -175,10 +192,8 @@ async function loadKvValue() {
     } else {
       kvValue.value = null
     }
-    
     const iter = await kv.watch({ key })
     watcher = iter
-    
     ;(async () => {
       try {
         for await (const e of iter) {
@@ -197,11 +212,10 @@ async function loadKvValue() {
         }
       } catch (err) {}
     })()
-    
     loading.value = false
   } catch (err: any) {
     if (err.message.includes('stream not found')) {
-      error.value = `Bucket "${bucket}" not found`
+      error.value = `Bucket not found`
     } else {
       error.value = err.message
     }
@@ -213,25 +227,12 @@ function cleanup() {
   if (watcher) { try { watcher.stop() } catch {} watcher = null }
 }
 
-onMounted(() => {
-  if (natsStore.isConnected) loadKvValue()
-})
-
+onMounted(() => { if (natsStore.isConnected) loadKvValue() })
 onUnmounted(cleanup)
-
-// Watch resolved config (handles both prop changes AND variable changes)
-watch(resolvedConfig, () => { 
-  cleanup()
-  if (natsStore.isConnected) loadKvValue()
-}, { deep: true })
-
+watch(resolvedConfig, () => { cleanup(); if (natsStore.isConnected) loadKvValue() }, { deep: true })
 watch(() => natsStore.isConnected, (isConnected) => {
   if (isConnected) loadKvValue()
-  else {
-    cleanup()
-    error.value = 'Not connected'
-    loading.value = false
-  }
+  else { cleanup(); error.value = 'Not connected'; loading.value = false }
 })
 </script>
 
@@ -240,13 +241,111 @@ watch(() => natsStore.isConnected, (isConnected) => {
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+/* --- CARD LAYOUT --- */
+.kv-widget.card-layout {
+  padding: 12px;
+}
+
+.card-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+/* Stacked Layout for JSON */
+.card-content-stacked {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+}
+
+.card-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.card-json-body {
+  flex: 1;
+  background: rgba(0,0,0,0.05);
+  border-radius: 4px;
   padding: 8px;
-  background: var(--widget-bg);
-  border-radius: 8px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.card-json-body pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.card-footer {
+  font-size: 10px;
+  color: var(--muted);
+  text-align: right;
+}
+
+.card-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.card-icon.small {
+  width: 24px;
+  height: 24px;
+  font-size: 14px;
+}
+
+.card-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   overflow: hidden;
 }
 
-.kv-widget.single-value-mode {
+.card-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
+.card-value {
+  font-size: 16px;
+  font-weight: 600;
+  font-family: var(--font);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- STANDARD LAYOUT --- */
+.kv-widget:not(.card-layout) {
+  padding: 8px;
+}
+
+.kv-widget.single-value-mode:not(.card-layout) {
   justify-content: center;
   align-items: center;
 }
@@ -265,7 +364,6 @@ watch(() => natsStore.isConnected, (isConnected) => {
 .kv-empty { color: var(--muted); }
 .error-icon, .empty-icon { font-size: 32px; }
 .error-text { font-size: 13px; line-height: 1.4; }
-.empty-hint { font-size: 11px; font-family: var(--mono); opacity: 0.7; }
 
 .kv-content {
   display: flex;
@@ -324,15 +422,6 @@ watch(() => natsStore.isConnected, (isConnected) => {
   white-space: pre-wrap;
   word-break: break-all;
   min-height: 100%;
-}
-
-.kv-value::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.kv-value::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 3px;
 }
 
 .kv-meta {

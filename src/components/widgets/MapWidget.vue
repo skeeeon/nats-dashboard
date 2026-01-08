@@ -87,6 +87,9 @@ const hasItems = computed(() => markers.value.some(m => m.items && m.items.lengt
 const mapCenter = computed(() => props.config.mapConfig?.center || { lat: 39.8283, lon: -98.5795 })
 const mapZoom = computed(() => props.config.mapConfig?.zoom || 4)
 
+// Initialization tracking
+let initTimeout: number | null = null
+
 /**
  * Handle publish item click
  */
@@ -372,8 +375,15 @@ const popupCallbacks: PopupCallbacks = {
 }
 
 async function initializeMap() {
+  if (initTimeout) {
+    clearTimeout(initTimeout)
+    initTimeout = null
+  }
+
   await nextTick()
-  setTimeout(() => {
+  initTimeout = window.setTimeout(() => {
+    if (!document.getElementById(mapContainerId.value)) return // DOM check
+
     initMap(
       mapContainerId.value,
       mapCenter.value,
@@ -382,6 +392,7 @@ async function initializeMap() {
     )
     renderMarkers(markers.value, popupCallbacks)
     mapReady.value = true
+    initTimeout = null
   }, 50)
 }
 
@@ -407,6 +418,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (initTimeout) clearTimeout(initTimeout)
   if (resizeObserverTimeout !== null) clearTimeout(resizeObserverTimeout)
   if (resizeObserver) resizeObserver.disconnect()
   stopAllSwitchStateWatchers()
@@ -417,25 +429,21 @@ onUnmounted(() => {
 watch(theme, (newTheme) => updateTheme(newTheme === 'dark'))
 watch(markers, updateMarkers, { deep: true })
 watch([mapCenter, mapZoom], () => {
-  if (!mapReady.value) return
-  cleanup()
+  if (initTimeout) clearTimeout(initTimeout)
+  cleanup() // Safe clean
   mapReady.value = false
-  initializeMap()
+  initializeMap() // Re-init
 }, { deep: true })
 
-// Watch variables: if variables change while a popup is open, we need to restart watchers
 watch(() => dashboardStore.currentVariableValues, () => {
   if (openMarkerId.value) {
-    // Restart watchers for the open marker to pick up new variable values
     const markerId = openMarkerId.value
-    // Stop existing
     const marker = markers.value.find(m => m.id === markerId)
     if (marker) {
       marker.items.forEach(a => {
         if (a.type === 'switch') stopSwitchStateWatcher(a.id)
         else if (a.type === 'text' || a.type === 'kv') stopSubscription(a.id)
       })
-      // Restart
       marker.items.forEach(a => {
         if (a.type === 'switch' && a.switchConfig) startSwitchStateWatcher(a)
         else if (a.type === 'text' && a.textConfig) startTextSubscription(a)

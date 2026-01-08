@@ -1,22 +1,43 @@
 <template>
-  <div class="button-widget">
-    <button 
-      class="widget-button"
-      :style="buttonStyle"
-      :class="{ 'success-state': showSuccess, 'error-state': showError }"
-      :disabled="!natsStore.isConnected || showSuccess"
-      @click="handleClick"
-    >
-      <div class="button-content">
-        <span class="button-icon" v-if="currentIcon">{{ currentIcon }}</span>
-        <span class="button-label">{{ currentLabel }}</span>
+  <div class="button-widget" :class="{ 'card-layout': layoutMode === 'card' }">
+    <!-- Card Layout (Mobile) -->
+    <template v-if="layoutMode === 'card'">
+      <!-- Apply background color here for visibility -->
+      <div class="card-content" :style="{ backgroundColor: buttonColor }">
+        <div class="card-info">
+          <div class="card-title">{{ config.title }}</div>
+          <div class="card-label">{{ currentLabel }}</div>
+        </div>
       </div>
-      <div v-if="showSuccess" class="success-ripple"></div>
-    </button>
+      
+      <!-- Full Overlay Click -->
+      <button 
+        class="card-overlay-btn"
+        :disabled="!natsStore.isConnected"
+        @click="handleClick"
+      >
+        <div v-if="showSuccess" class="ripple-effect"></div>
+      </button>
+    </template>
+
+    <!-- Standard Layout (Desktop) -->
+    <template v-else>
+      <button 
+        class="widget-button"
+        :style="buttonStyle"
+        :class="{ 'success-state': showSuccess, 'error-state': showError }"
+        :disabled="!natsStore.isConnected || showSuccess"
+        @click="handleClick"
+      >
+        <div class="button-content">
+          <span class="button-icon" v-if="currentIcon">{{ currentIcon }}</span>
+          <span class="button-label">{{ currentLabel }}</span>
+        </div>
+        <div v-if="showSuccess" class="success-ripple"></div>
+      </button>
+    </template>
     
-    <div v-if="!natsStore.isConnected" class="disconnected-overlay" title="Not connected to NATS">
-      <span class="disconnect-icon">⚠️</span>
-    </div>
+    <div v-if="!natsStore.isConnected" class="disconnected-overlay">⚠️</div>
   </div>
 </template>
 
@@ -29,9 +50,12 @@ import type { WidgetConfig } from '@/types/dashboard'
 import { encodeString } from '@/utils/encoding'
 import { resolveTemplate } from '@/utils/variables'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   config: WidgetConfig
-}>()
+  layoutMode?: 'standard' | 'card'
+}>(), {
+  layoutMode: 'standard'
+})
 
 const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
@@ -44,7 +68,7 @@ const defaultLabel = computed(() => props.config.buttonConfig?.label || 'Publish
 const buttonColor = computed(() => props.config.buttonConfig?.color || semanticColors.value.primary)
 
 const currentLabel = computed(() => {
-  if (!natsStore.isConnected) return 'Disconnected'
+  if (!natsStore.isConnected) return 'Offline'
   if (showSuccess.value) return 'Sent!'
   if (showError.value) return 'Error'
   return defaultLabel.value
@@ -101,10 +125,7 @@ function handleClick() {
     setTimeout(() => {
       showSuccess.value = false
     }, 1500)
-    
-    console.log(`[Button] Published to ${publishSubject.value}`)
   } catch (err) {
-    console.error('[Button] Publish error:', err)
     showError.value = true
     setTimeout(() => {
       showError.value = false
@@ -125,9 +146,90 @@ function adjustColorOpacity(hex: string, opacity: number) {
 .button-widget {
   height: 100%;
   width: 100%;
-  padding: 8px;
-  background: var(--widget-bg);
   position: relative;
+}
+
+/* --- CARD LAYOUT --- */
+.button-widget.card-layout {
+  /* Let content fill background */
+  padding: 0; 
+  display: flex;
+}
+
+.card-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 12px;
+  /* Text color matches typical button text (white/light) */
+  color: white; 
+}
+
+.card-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  overflow: hidden;
+  text-align: center;
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+  /* inherit color for contrast against background */
+  color: inherit; 
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  margin-bottom: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.card-label {
+  font-size: 13px;
+  color: rgba(255,255,255,0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+}
+
+.card-overlay-btn {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  z-index: 5;
+  overflow: hidden;
+}
+
+.ripple-effect {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100px;
+  height: 100px;
+  background: rgba(255,255,255,0.3);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  animation: ripple-card 0.5s ease-out forwards;
+}
+
+@keyframes ripple-card {
+  to { transform: translate(-50%, -50%) scale(4); opacity: 0; }
+}
+
+/* --- STANDARD LAYOUT --- */
+.button-widget:not(.card-layout) {
+  padding: 8px;
   display: flex;
 }
 
@@ -152,12 +254,10 @@ function adjustColorOpacity(hex: string, opacity: number) {
 .widget-button:hover:not(:disabled):not(.success-state) {
   background-color: var(--hover-bg) !important;
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
 }
 
 .widget-button:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .widget-button:disabled {
@@ -173,18 +273,7 @@ function adjustColorOpacity(hex: string, opacity: number) {
   z-index: 2;
 }
 
-.button-icon {
-  font-size: 1.2em;
-  line-height: 1;
-}
-
-.button-label {
-  letter-spacing: 0.5px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-}
+.button-icon { font-size: 1.2em; line-height: 1; }
 
 .disconnected-overlay {
   position: absolute;
@@ -192,16 +281,7 @@ function adjustColorOpacity(hex: string, opacity: number) {
   right: 4px;
   pointer-events: none;
   z-index: 10;
-}
-
-.disconnect-icon {
-  font-size: 16px;
-  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
-}
-
-@keyframes ripple {
-  0% { transform: scale(0); opacity: 0.5; }
-  100% { transform: scale(4); opacity: 0; }
+  font-size: 12px;
 }
 
 .success-ripple {
@@ -214,5 +294,10 @@ function adjustColorOpacity(hex: string, opacity: number) {
   border-radius: 50%;
   transform: translate(-50%, -50%);
   animation: ripple 0.6s ease-out;
+}
+
+@keyframes ripple {
+  0% { transform: scale(0); opacity: 0.5; }
+  100% { transform: scale(4); opacity: 0; }
 }
 </style>

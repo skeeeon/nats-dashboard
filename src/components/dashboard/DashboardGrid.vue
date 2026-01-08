@@ -1,6 +1,38 @@
 <template>
   <div class="dashboard-grid-container">
+    <!-- MOBILE LAYOUT (Native CSS Grid) -->
+    <div 
+      v-if="isMobile" 
+      class="mobile-layout"
+      :class="{ 'is-editing': !dashboardStore.isLocked }"
+    >
+      <div 
+        v-for="widget in sortedWidgets" 
+        :key="widget.id"
+        class="mobile-widget-wrapper"
+        :class="{ 'span-full': isFullWidthOnMobile(widget) }"
+      >
+        <WidgetContainer
+          :config="widget"
+          :is-mobile="true"
+          @delete="handleWidgetDelete(widget.id)"
+          @configure="handleWidgetConfigure(widget.id)"
+          @duplicate="handleWidgetDuplicate(widget.id)"
+          @fullscreen="handleWidgetFullscreen(widget.id)"
+        />
+      </div>
+      
+      <!-- Mobile Empty State -->
+      <div v-if="widgets.length === 0" class="empty-state mobile">
+        <div class="empty-icon">📊</div>
+        <div class="empty-message">No widgets</div>
+        <div class="empty-hint">Switch to desktop to add widgets</div>
+      </div>
+    </div>
+
+    <!-- DESKTOP LAYOUT (Library Grid) -->
     <GridLayout
+      v-else
       v-model:layout="layoutItems"
       :col-num="12"
       :row-height="80"
@@ -26,6 +58,7 @@
       >
         <WidgetContainer
           :config="getWidgetConfig(item.i)"
+          :is-mobile="false"
           @delete="handleWidgetDelete(item.i)"
           @configure="handleWidgetConfigure(item.i)"
           @duplicate="handleWidgetDuplicate(item.i)"
@@ -34,8 +67,7 @@
       </GridItem>
     </GridLayout>
     
-    <!-- Empty state when no widgets -->
-    <div v-if="widgets.length === 0" class="empty-state">
+    <div v-if="!isMobile && widgets.length === 0" class="empty-state">
       <div class="empty-icon">📊</div>
       <div class="empty-message">No widgets yet</div>
       <div class="empty-hint">
@@ -48,17 +80,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import { GridLayout, GridItem } from 'grid-layout-plus'
 import WidgetContainer from './WidgetContainer.vue'
 import { useDashboardStore } from '@/stores/dashboard'
 import type { WidgetConfig } from '@/types/dashboard'
-
-/**
- * Dashboard Grid Component
- * 
- * Grug say: Grid hold widgets. Drag and drop on desktop.
- */
 
 const props = defineProps<{
   widgets: WidgetConfig[]
@@ -72,160 +98,110 @@ const emit = defineEmits<{
 }>()
 
 const dashboardStore = useDashboardStore()
-
 const currentBreakpoint = ref('lg')
+const isMobile = ref(false)
 
-// Standard Bootstrap-like breakpoints
+// Standard breakpoints
 const breakpoints = { lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }
-// Column counts for each breakpoint
 const cols = { lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }
 
-/**
- * Detect if we're on mobile
- */
-const isMobile = computed(() => {
-  return ['sm', 'xs', 'xxs'].includes(currentBreakpoint.value)
+function checkMobile() {
+  isMobile.value = window.innerWidth < 768
+}
+
+const sortedWidgets = computed(() => {
+  return [...props.widgets].sort((a, b) => {
+    if (a.y !== b.y) return a.y - b.y
+    return a.x - b.x
+  })
 })
 
 /**
- * Conditionally enable drag/resize based on breakpoint AND lock state
+ * Heuristics for Mobile Layout (View Mode)
  */
-const isDraggable = computed(() => !isMobile.value && !dashboardStore.isLocked)
-const isResizable = computed(() => !isMobile.value && !dashboardStore.isLocked)
+function isFullWidthOnMobile(widget: WidgetConfig): boolean {
+  // If editing, everything is full width (handled by CSS)
+  if (!dashboardStore.isLocked) return true
 
-/**
- * Helper to map store widgets to grid layout items
- */
+  // Complex widgets need full width
+  if (['map', 'chart'].includes(widget.type)) return true
+  
+  // Large KV blocks
+  if (widget.type === 'kv' && (widget.w > 2 || widget.h > 2)) return true
+  
+  // Precision controls
+  if (['slider', 'gauge', 'stat'].includes(widget.type)) return true
+  
+  return false
+}
+
+const isDraggable = computed(() => !dashboardStore.isLocked)
+const isResizable = computed(() => !dashboardStore.isLocked)
+
 function mapWidgetsToLayout(widgets: WidgetConfig[]) {
-  // 1. Create a shallow copy to sort
-  const sortedWidgets = [...widgets].sort((a, b) => {
-    // Primary sort: Vertical Position (Y)
-    if (a.y !== b.y) {
-      return a.y - b.y
-    }
-    // Secondary sort: Horizontal Position (X)
+  const sorted = [...widgets].sort((a, b) => {
+    if (a.y !== b.y) return a.y - b.y
     return a.x - b.x
   })
-
-  // 2. Map to layout items
-  return sortedWidgets.map(w => ({
-    i: w.id,
-    x: w.x,
-    y: w.y,
-    w: w.w,
-    h: w.h,
+  return sorted.map(w => ({
+    i: w.id, x: w.x, y: w.y, w: w.w, h: w.h,
   }))
 }
 
-// Local state for the layout (mutable)
 const layoutItems = ref(mapWidgetsToLayout(props.widgets))
 
-/**
- * Extract widget IDs from current layout
- */
-function getLayoutWidgetIds(): string[] {
-  return layoutItems.value.map(item => item.i)
-}
+function getLayoutWidgetIds(): string[] { return layoutItems.value.map(item => item.i) }
+function getPropsWidgetIds(): string[] { return props.widgets.map(w => w.id) }
 
-/**
- * Extract widget IDs from props
- */
-function getPropsWidgetIds(): string[] {
-  return props.widgets.map(w => w.id)
-}
-
-/**
- * Check if widget sets are completely different
- */
 function isWidgetSetChanged(layoutIds: string[], propsIds: string[]): boolean {
-  if (layoutIds.length !== propsIds.length) {
-    return true
-  }
+  if (layoutIds.length !== propsIds.length) return true
   const propsSet = new Set(propsIds)
   return layoutIds.some(id => !propsSet.has(id))
 }
 
-/**
- * Sync from store to local state
- */
 watch(() => props.widgets, (newWidgets) => {
+  if (isMobile.value) return
   const currentLayoutIds = getLayoutWidgetIds()
   const newPropsIds = getPropsWidgetIds()
-  
-  const isDashboardSwitch = isWidgetSetChanged(currentLayoutIds, newPropsIds)
-  
-  if (isDashboardSwitch) {
-    console.log('[Grid] Dashboard switch detected, syncing layout')
-    layoutItems.value = mapWidgetsToLayout(newWidgets)
-  } else if (currentBreakpoint.value === 'lg') {
+  if (isWidgetSetChanged(currentLayoutIds, newPropsIds) || currentBreakpoint.value === 'lg') {
     layoutItems.value = mapWidgetsToLayout(newWidgets)
   }
 }, { deep: true })
 
-/**
- * Handle Breakpoint Changes
- */
 function handleBreakpointChange(breakpoint: string, newLayout: any[]) {
-  console.log(`[Grid] Breakpoint changed: ${currentBreakpoint.value} -> ${breakpoint}`)
   currentBreakpoint.value = breakpoint
-
-  if (breakpoint === 'lg') {
-    layoutItems.value = mapWidgetsToLayout(props.widgets)
-  } else {
-    layoutItems.value = newLayout
-  }
+  if (breakpoint === 'lg') layoutItems.value = mapWidgetsToLayout(props.widgets)
+  else layoutItems.value = newLayout
 }
 
-/**
- * Handle layout changes (drag/resize)
- */
 function handleLayoutUpdate(newLayout: Array<{ i: string; x: number; y: number; w: number; h: number }>) {
-  // Ignore updates if locked (double safety)
-  if (dashboardStore.isLocked) return
-
+  if (dashboardStore.isLocked || isMobile.value) return
   layoutItems.value = newLayout
-
-  // Only save to store when on desktop
   if (currentBreakpoint.value === 'lg') {
-    // Prepare batch update
     const updates = newLayout.map(item => ({
-      id: item.i,
-      x: item.x,
-      y: item.y,
-      w: item.w,
-      h: item.h
+      id: item.i, x: item.x, y: item.y, w: item.w, h: item.h
     }))
-
-    // Save once
     dashboardStore.batchUpdateLayout(updates)
   }
 }
 
-/**
- * Get widget config by ID
- */
 function getWidgetConfig(id: string): WidgetConfig | undefined {
   return props.widgets.find(w => w.id === id)
 }
 
-/**
- * Widget action handlers
- */
-function handleWidgetDelete(widgetId: string) {
-  emit('deleteWidget', widgetId)
-}
+function handleWidgetDelete(id: string) { emit('deleteWidget', id) }
+function handleWidgetConfigure(id: string) { emit('configureWidget', id) }
+function handleWidgetDuplicate(id: string) { emit('duplicateWidget', id) }
+function handleWidgetFullscreen(id: string) { emit('fullscreenWidget', id) }
 
-function handleWidgetConfigure(widgetId: string) {
-  emit('configureWidget', widgetId)
-}
+onMounted(() => {
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
+})
 
-function handleWidgetDuplicate(widgetId: string) {
-  emit('duplicateWidget', widgetId)
-}
-
-function handleWidgetFullscreen(widgetId: string) {
-  emit('fullscreenWidget', widgetId)
-}
+onUnmounted(() => {
+  window.removeEventListener('resize', checkMobile)
+})
 </script>
 
 <style scoped>
@@ -239,7 +215,76 @@ function handleWidgetFullscreen(widgetId: string) {
   background: var(--bg);
 }
 
-/* Empty state styling */
+/* --- MOBILE CSS GRID --- */
+.mobile-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr; /* Default: 2 Columns (Card Mode) */
+  gap: 12px;
+  padding-bottom: 40px;
+  transition: all 0.3s ease;
+}
+
+/* EDIT MODE: Switch to 1 Column */
+.mobile-layout.is-editing {
+  grid-template-columns: 1fr; /* Force single column when unlocked */
+}
+
+.mobile-widget-wrapper {
+  height: auto;
+  min-height: 80px; 
+  display: flex;
+  flex-direction: column;
+}
+
+/* Increase height in edit mode to fit the header + body */
+.mobile-layout.is-editing .mobile-widget-wrapper {
+  min-height: 140px; /* Ensure room for Header + Card */
+}
+
+/* Full width items in View Mode */
+.mobile-widget-wrapper.span-full {
+  grid-column: span 2;
+  min-height: 250px;
+}
+
+/* Full width items in Edit Mode (redundant but safe) */
+.mobile-layout.is-editing .mobile-widget-wrapper.span-full {
+  grid-column: span 1;
+}
+
+/* --- DESKTOP GRID --- */
+:deep(.vue-grid-item) {
+  transition: all 0.2s ease;
+  background: transparent;
+  touch-action: none;
+}
+
+:deep(.vue-grid-item .widget-body) {
+  touch-action: auto;
+}
+
+:deep(.vue-grid-item.vue-grid-placeholder) {
+  background: var(--color-info-bg) !important;
+  border: 2px dashed var(--color-accent);
+  border-radius: 8px;
+  opacity: 0.3;
+}
+
+:deep(.vue-resizable-handle) {
+  opacity: 0;
+  transition: opacity 0.2s;
+  background: var(--color-accent);
+  border-radius: 0 0 8px 0;
+}
+
+:deep(.vue-grid-item:hover .vue-resizable-handle) {
+  opacity: 0.6;
+}
+
+:deep(.vue-resizable-handle:hover) {
+  opacity: 1 !important;
+}
+
 .empty-state {
   position: absolute;
   top: 50%;
@@ -249,6 +294,15 @@ function handleWidgetFullscreen(widgetId: string) {
   color: var(--muted);
   pointer-events: none;
   z-index: 0;
+}
+
+.empty-state.mobile {
+  position: relative;
+  top: auto;
+  left: auto;
+  transform: none;
+  grid-column: span 2;
+  padding: 40px 0;
 }
 
 .empty-icon {
@@ -268,91 +322,12 @@ function handleWidgetFullscreen(widgetId: string) {
   font-size: 14px;
 }
 
-/* Mobile hint */
-.mobile-hint {
-  position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--color-info-bg);
-  border: 1px solid var(--color-info-border);
-  color: var(--color-info);
-  padding: 8px 16px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 500;
-  z-index: 10;
-  pointer-events: none;
-  opacity: 0.9;
-  animation: fadeInUp 0.3s ease-out;
-}
-
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(10px);
-  }
-  to {
-    opacity: 0.9;
-    transform: translateX(-50%) translateY(0);
-  }
-}
-
-/* Grid item styling */
-:deep(.vue-grid-item) {
-  transition: all 0.2s ease;
-  background: transparent;
-  touch-action: none;
-}
-
-/* Allow scrolling inside widget content */
-:deep(.vue-grid-item .widget-body) {
-  touch-action: auto;
-}
-
-/* Dragging placeholder */
-:deep(.vue-grid-item.vue-grid-placeholder) {
-  background: var(--color-info-bg);
-  border: 2px dashed var(--color-accent);
-  border-radius: 8px;
-  transition: all 0.2s;
-}
-
-/* Resize handle styling */
-:deep(.vue-resizable-handle) {
-  opacity: 0;
-  transition: opacity 0.2s;
-  background: var(--color-accent);
-  border-radius: 0 0 8px 0;
-}
-
-:deep(.vue-grid-item:hover .vue-resizable-handle) {
-  opacity: 0.6;
-}
-
-:deep(.vue-resizable-handle:hover) {
-  opacity: 1 !important;
-}
-
-:deep(.vue-grid-item.vue-dragging) {
-  opacity: 0.8;
-  z-index: 1000;
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
+@media (max-width: 480px) {
   .dashboard-grid-container {
     padding: 8px;
   }
-  
-  /* Hide resize handles on mobile since drag/resize disabled */
-  :deep(.vue-resizable-handle) {
-    display: none;
-  }
-  
-  /* Remove hover effects on mobile */
-  :deep(.vue-grid-item:hover .vue-resizable-handle) {
-    opacity: 0;
+  .mobile-layout {
+    gap: 8px;
   }
 }
 </style>
