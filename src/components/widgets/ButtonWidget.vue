@@ -2,8 +2,15 @@
   <div class="button-widget" :class="{ 'card-layout': layoutMode === 'card' }">
     <!-- Card Layout (Mobile) -->
     <template v-if="layoutMode === 'card'">
-      <!-- Apply background color here for visibility -->
-      <div class="card-content" :style="{ backgroundColor: buttonColor }">
+      <!-- 
+        Apply buttonStyle here to get background color changes on success/error.
+        Apply is-disabled class to mimic desktop disabled opacity.
+      -->
+      <div 
+        class="card-content" 
+        :style="buttonStyle"
+        :class="{ 'is-disabled': !natsStore.isConnected || showSuccess }"
+      >
         <div class="card-info">
           <div class="card-title">{{ config.title }}</div>
           <div class="card-label">{{ currentLabel }}</div>
@@ -11,9 +18,10 @@
       </div>
       
       <!-- Full Overlay Click -->
+      <!-- Disabled during success state to prevent spamming -->
       <button 
         class="card-overlay-btn"
-        :disabled="!natsStore.isConnected"
+        :disabled="!natsStore.isConnected || showSuccess"
         @click="handleClick"
       >
         <div v-if="showSuccess" class="ripple-effect"></div>
@@ -166,6 +174,12 @@ function adjustColorOpacity(hex: string, opacity: number) {
   padding: 12px;
   /* Text color matches typical button text (white/light) */
   color: white; 
+  transition: background-color 0.2s ease, opacity 0.2s ease;
+}
+
+.card-content.is-disabled {
+  opacity: 0.7;
+  filter: grayscale(0.2);
 }
 
 .card-info {
@@ -209,6 +223,10 @@ function adjustColorOpacity(hex: string, opacity: number) {
   cursor: pointer;
   z-index: 5;
   overflow: hidden;
+}
+
+.card-overlay-btn:disabled {
+  cursor: not-allowed;
 }
 
 .ripple-effect {
