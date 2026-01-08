@@ -51,7 +51,7 @@
 <script setup lang="ts">
 import { computed, ref, onErrorCaptured } from 'vue'
 import { useDashboardStore } from '@/stores/dashboard'
-import type { WidgetConfig, WidgetType } from '@/types/dashboard'
+import type { WidgetConfig } from '@/types/dashboard'
 import TextWidget from '@/components/widgets/TextWidget.vue'
 import ChartWidget from '@/components/widgets/ChartWidget.vue'
 import ButtonWidget from '@/components/widgets/ButtonWidget.vue'

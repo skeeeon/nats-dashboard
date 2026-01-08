@@ -85,6 +85,7 @@ const resolvedConfig = computed(() => {
   }
 })
 
+// Now useSwitchState properly handles onMounted/onUnmounted internally
 const { state, error, isPending, toggle: executeToggle } = useSwitchState(resolvedConfig)
 
 const labels = computed(() => cfg.value.labels || { on: 'ON', off: 'OFF' })
