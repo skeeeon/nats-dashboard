@@ -1,22 +1,16 @@
 <template>
   <div class="button-widget" :class="{ 'card-layout': layoutMode === 'card' }">
-    <!-- Card Layout -->
+    <!-- Card Layout (Mobile) -->
     <template v-if="layoutMode === 'card'">
-      <div class="card-content">
-        <div class="card-icon" :style="{ color: buttonColor }">
-          {{ showSuccess ? '✓' : '⚡' }}
-        </div>
-        
+      <!-- Apply background color here for visibility -->
+      <div class="card-content" :style="{ backgroundColor: buttonColor }">
         <div class="card-info">
           <div class="card-title">{{ config.title }}</div>
           <div class="card-label">{{ currentLabel }}</div>
         </div>
-        
-        <div class="card-action">
-          <span class="action-text">PRESS</span>
-        </div>
       </div>
       
+      <!-- Full Overlay Click -->
       <button 
         class="card-overlay-btn"
         :disabled="!natsStore.isConnected"
@@ -26,7 +20,7 @@
       </button>
     </template>
 
-    <!-- Standard Layout -->
+    <!-- Standard Layout (Desktop) -->
     <template v-else>
       <button 
         class="widget-button"
@@ -157,59 +151,54 @@ function adjustColorOpacity(hex: string, opacity: number) {
 
 /* --- CARD LAYOUT --- */
 .button-widget.card-layout {
-  padding: 12px;
+  /* Let content fill background */
+  padding: 0; 
   display: flex;
-  align-items: center;
 }
 
 .card-content {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-}
-
-.card-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: rgba(0,0,0,0.05);
-  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
-  flex-shrink: 0;
+  width: 100%;
+  height: 100%;
+  padding: 12px;
+  /* Text color matches typical button text (white/light) */
+  color: white; 
 }
 
 .card-info {
-  flex: 1;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  min-width: 0;
+  align-items: center;
+  width: 100%;
+  overflow: hidden;
+  text-align: center;
 }
 
 .card-title {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text);
+  /* inherit color for contrast against background */
+  color: inherit; 
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  width: 100%;
+  margin-bottom: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .card-label {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.card-action {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--color-primary);
-  background: rgba(0,0,0,0.05);
-  padding: 4px 8px;
-  border-radius: 4px;
+  font-size: 13px;
+  color: rgba(255,255,255,0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
 }
 
 .card-overlay-btn {
@@ -228,7 +217,7 @@ function adjustColorOpacity(hex: string, opacity: number) {
   left: 50%;
   width: 100px;
   height: 100px;
-  background: var(--color-success-bg);
+  background: rgba(255,255,255,0.3);
   border-radius: 50%;
   transform: translate(-50%, -50%) scale(0);
   animation: ripple-card 0.5s ease-out forwards;

@@ -7,17 +7,13 @@
     
     <template v-else>
       <!-- HEADER LOGIC -->
-      <!-- Desktop Unlocked: Show Full Header -->
-      <!-- Desktop Locked: Hide Header (Clean look) OR Show if complex widget -->
-      <!-- Mobile Unlocked: Show Header (For buttons), Hide Title (Avoid duplication) -->
-      <!-- Mobile Locked: Hide Header (Card mode handles title) -->
       <div 
         v-if="shouldShowHeader" 
         class="widget-header vue-draggable-handle"
       >
-        <!-- Title: Hide on Mobile Unlocked (Card shows it) -->
+        <!-- On Mobile: Hide title text in header to save space & avoid dupes (card has title) -->
         <div v-if="!isMobile" class="widget-title" :title="config.title">{{ config.title }}</div>
-        <div v-else class="widget-title"><!-- Spacer --></div>
+        <div v-else class="widget-title mobile-spacer"></div>
 
         <div class="widget-actions">
           <button class="icon-btn" title="Full Screen" @click="$emit('fullscreen')">⛶</button>
@@ -36,7 +32,6 @@
           <div class="error-message">{{ error }}</div>
         </div>
         
-        <!-- Pass layout-mode explicitly based on device -->
         <component 
           v-else
           :is="widgetComponent" 
@@ -93,29 +88,10 @@ const widgetComponent = computed(() => {
   }
 })
 
-/**
- * Determine if header should be visible
- */
 const shouldShowHeader = computed(() => {
-  // If unlocked, we generally need the header for controls
   if (!dashboardStore.isLocked) return true
-  
-  // If locked...
-  
-  // On Mobile: Hide header (Card mode self-contained)
   if (props.isMobile) return false
-  
-  // On Desktop: 
-  // Complex widgets (Chart, Map) usually keep header for Title
-  // Simple widgets (Button, Switch) might look cleaner without, but standard behavior implies header
-  // Let's hide header for simple controls on desktop locked for cleaner look
-  // unless user specifically wants titles.
-  // For now, let's behave like the "Previous Styling": Header visible if config.title is relevant? 
-  // Actually, previous styling usually HID the gray bar in locked mode for cleaner UI.
-  // We will hide header on locked desktop unless it's a complex widget.
-  
-  const complexWidgets = ['chart', 'map', 'slider', 'stat', 'gauge']
-  return complexWidgets.includes(props.config?.type || '')
+  return true
 })
 
 function handleDelete() {
@@ -154,6 +130,10 @@ onErrorCaptured((err) => {
   background: var(--widget-bg);
 }
 
+.widget-container.is-locked:not(.is-mobile):hover {
+  transform: translateY(-2px);
+}
+
 .widget-header {
   display: flex;
   justify-content: space-between;
@@ -176,7 +156,10 @@ onErrorCaptured((err) => {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
-  min-width: 20px; /* Ensure spacer has size */
+}
+
+.widget-title.mobile-spacer {
+  flex: 1; /* Consume remaining space */
 }
 
 .widget-actions {
@@ -215,6 +198,13 @@ onErrorCaptured((err) => {
   min-height: 0;
   position: relative;
   container-type: size;
+  display: flex; /* Ensure content stretches */
+  flex-direction: column;
+}
+
+/* Ensure component fills body */
+.widget-body > * {
+  flex: 1;
 }
 
 .widget-error {

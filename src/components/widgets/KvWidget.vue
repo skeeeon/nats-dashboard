@@ -11,9 +11,11 @@
     
     <div v-else-if="kvValue !== null" class="kv-content">
       
-      <!-- CARD LAYOUT -->
+      <!-- CARD LAYOUT (Mobile/Compact) -->
       <template v-if="layoutMode === 'card'">
-        <div class="card-content">
+        
+        <!-- Case A: Simple Value (Row Layout) -->
+        <div v-if="isSingleValue" class="card-content">
           <div class="card-icon">🗄️</div>
           <div class="card-info">
             <div class="card-title">{{ config.title }}</div>
@@ -22,18 +24,31 @@
             </div>
           </div>
         </div>
+
+        <!-- Case B: Complex/JSON Value (Stacked Layout) -->
+        <div v-else class="card-content-stacked">
+          <div class="card-header-row">
+            <div class="card-icon small">🗄️</div>
+            <div class="card-title">{{ config.title }}</div>
+          </div>
+          <div class="card-json-body">
+            <pre>{{ displayContent }}</pre>
+          </div>
+          <div class="card-footer">
+             <span class="meta-label">Rev:</span> {{ revision }}
+          </div>
+        </div>
+
       </template>
 
-      <!-- STANDARD LAYOUT -->
+      <!-- STANDARD LAYOUT (Desktop) -->
       <template v-else>
-        <!-- Header for complex objects -->
         <div v-if="!isSingleValue" class="kv-header">
           <div class="kv-bucket">{{ resolvedConfig.bucket }}</div>
           <div class="kv-key">{{ resolvedConfig.key }}</div>
         </div>
         
         <div class="kv-value">
-          <!-- Single Value -->
           <div 
             v-if="isSingleValue" 
             class="value-display"
@@ -41,11 +56,9 @@
           >
             {{ displayContent }}
           </div>
-          <!-- Complex Object -->
           <pre v-else class="kv-value-content">{{ displayContent }}</pre>
         </div>
         
-        <!-- Metadata -->
         <div class="kv-meta">
           <template v-if="isSingleValue">
             <span class="meta-simple">Rev {{ revision }} • {{ lastUpdated }}</span>
@@ -88,7 +101,6 @@ const props = withDefaults(defineProps<{
   layoutMode: 'standard'
 })
 
-// ... (Rest of logic is identical to existing KvWidget.vue) ...
 const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
 const { evaluateThresholds } = useThresholds()
@@ -113,7 +125,10 @@ const processedValue = computed(() => {
   if (kvValue.value === null) return null
   let val: any = kvValue.value
   let isJson = false
-  try { val = JSON.parse(kvValue.value); isJson = true } catch { }
+  try {
+    val = JSON.parse(kvValue.value)
+    isJson = true
+  } catch { }
 
   if (resolvedConfig.value.jsonPath && isJson) {
     try {
@@ -231,7 +246,6 @@ watch(() => natsStore.isConnected, (isConnected) => {
 /* --- CARD LAYOUT --- */
 .kv-widget.card-layout {
   padding: 12px;
-  justify-content: center;
 }
 
 .card-content {
@@ -239,6 +253,45 @@ watch(() => natsStore.isConnected, (isConnected) => {
   align-items: center;
   gap: 12px;
   width: 100%;
+}
+
+/* Stacked Layout for JSON */
+.card-content-stacked {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+}
+
+.card-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.card-json-body {
+  flex: 1;
+  background: rgba(0,0,0,0.05);
+  border-radius: 4px;
+  padding: 8px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.card-json-body pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.card-footer {
+  font-size: 10px;
+  color: var(--muted);
+  text-align: right;
 }
 
 .card-icon {
@@ -252,6 +305,12 @@ watch(() => natsStore.isConnected, (isConnected) => {
   font-size: 20px;
   color: var(--muted);
   flex-shrink: 0;
+}
+
+.card-icon.small {
+  width: 24px;
+  height: 24px;
+  font-size: 14px;
 }
 
 .card-info {

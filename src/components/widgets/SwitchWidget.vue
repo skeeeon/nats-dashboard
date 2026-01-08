@@ -1,19 +1,20 @@
 <template>
   <div class="switch-widget" :class="{ 'card-layout': layoutMode === 'card' }">
-    <!-- Card Layout: Icon | Title+State | Toggle -->
+    <!-- Card Layout (Mobile) -->
     <template v-if="layoutMode === 'card'">
-      <div class="card-content">
-        <div class="card-icon" :class="{ 'is-active': state === 'on' }">
-          {{ state === 'on' ? '💡' : '🌑' }}
-        </div>
-        
+      <!-- Container lights up when ON -->
+      <div 
+        class="card-content" 
+        :class="{ 'is-active': state === 'on' }"
+      >
         <div class="card-info">
           <div class="card-title">{{ config.title }}</div>
-          <div class="card-state">{{ currentStateLabel }}</div>
-        </div>
-        
-        <div class="card-toggle" :class="{ 'is-active': state === 'on' }">
-          <div class="card-toggle-thumb"></div>
+          
+          <!-- Subtle distinction: A tiny 'power' icon next to state -->
+          <div class="card-state-row">
+            <span class="card-state-icon">⏻</span>
+            <span class="card-state">{{ currentStateLabel }}</span>
+          </div>
         </div>
       </div>
       
@@ -24,7 +25,7 @@
       ></button>
     </template>
 
-    <!-- Standard Layout (Old Desktop Style) -->
+    <!-- Standard Layout (Desktop) -->
     <template v-else>
       <div class="centered-content">
         <button 
@@ -85,7 +86,6 @@ const resolvedConfig = computed(() => {
   }
 })
 
-// Now useSwitchState properly handles onMounted/onUnmounted internally
 const { state, error, isPending, toggle: executeToggle } = useSwitchState(resolvedConfig)
 
 const labels = computed(() => cfg.value.labels || { on: 'ON', off: 'OFF' })
@@ -116,42 +116,42 @@ function toggle() {
 
 /* --- CARD LAYOUT STYLES --- */
 .switch-widget.card-layout {
-  padding: 12px;
+  padding: 0; 
   display: flex;
-  align-items: center;
 }
 
 .card-content {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-}
-
-.card-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: rgba(0,0,0,0.05);
-  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
-  transition: background 0.3s, color 0.3s;
-  color: var(--muted);
+  width: 100%;
+  height: 100%;
+  padding: 12px;
+  transition: background-color 0.3s ease;
+  border-radius: inherit; 
 }
 
-.card-icon.is-active {
-  background: var(--color-warning-bg);
-  color: var(--color-warning);
+/* State: ON (Light up the background) */
+.card-content.is-active {
+  background-color: var(--color-warning-bg);
+  box-shadow: inset 0 0 0 1px var(--color-warning-border);
+}
+
+/* State: OFF (Subtle border to show interactivity) */
+.card-content:not(.is-active) {
+  /* Subtle bottom border to imply 'toggle' vs flat button */
+  border-bottom: 2px solid rgba(0,0,0,0.1);
 }
 
 .card-info {
-  flex: 1;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  align-items: center;
+  width: 100%;
   overflow: hidden;
+  text-align: center;
 }
 
 .card-title {
@@ -161,45 +161,32 @@ function toggle() {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 1.2;
+  width: 100%;
+  margin-bottom: 2px;
+}
+
+.card-state-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.8;
+}
+
+.card-state-icon {
+  font-size: 10px;
+  margin-top: 1px;
 }
 
 .card-state {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
-  margin-top: 2px;
+  font-weight: 500;
 }
 
-.card-toggle {
-  width: 40px;
-  height: 24px;
-  background: var(--muted);
-  border-radius: 12px;
-  position: relative;
-  transition: background 0.3s;
-  flex-shrink: 0;
-  opacity: 0.5;
-}
-
-.card-toggle.is-active {
-  background: var(--color-primary);
-  opacity: 1;
-}
-
-.card-toggle-thumb {
-  width: 20px;
-  height: 20px;
-  background: white;
-  border-radius: 50%;
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-}
-
-.card-toggle.is-active .card-toggle-thumb {
-  transform: translateX(16px);
+/* Active State Text Color */
+.card-content.is-active .card-state,
+.card-content.is-active .card-state-icon {
+  color: var(--color-warning);
 }
 
 .card-overlay-btn {
@@ -215,7 +202,7 @@ function toggle() {
   cursor: not-allowed;
 }
 
-/* --- STANDARD LAYOUT STYLES (Restored Old CSS) --- */
+/* --- STANDARD LAYOUT STYLES (Desktop) --- */
 .centered-content {
   height: 100%;
   display: flex;

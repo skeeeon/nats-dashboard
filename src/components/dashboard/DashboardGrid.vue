@@ -1,13 +1,16 @@
 <template>
   <div class="dashboard-grid-container">
-    
     <!-- MOBILE LAYOUT (Native CSS Grid) -->
-    <div v-if="isMobile" class="mobile-layout">
+    <div 
+      v-if="isMobile" 
+      class="mobile-layout"
+      :class="{ 'is-editing': !dashboardStore.isLocked }"
+    >
       <div 
         v-for="widget in sortedWidgets" 
         :key="widget.id"
         class="mobile-widget-wrapper"
-        :class="{ 'span-full': isFullWidthOnMobile(widget.type) }"
+        :class="{ 'span-full': isFullWidthOnMobile(widget) }"
       >
         <WidgetContainer
           :config="widget"
@@ -19,6 +22,7 @@
         />
       </div>
       
+      <!-- Mobile Empty State -->
       <div v-if="widgets.length === 0" class="empty-state mobile">
         <div class="empty-icon">📊</div>
         <div class="empty-message">No widgets</div>
@@ -80,7 +84,7 @@ import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import { GridLayout, GridItem } from 'grid-layout-plus'
 import WidgetContainer from './WidgetContainer.vue'
 import { useDashboardStore } from '@/stores/dashboard'
-import type { WidgetConfig, WidgetType } from '@/types/dashboard'
+import type { WidgetConfig } from '@/types/dashboard'
 
 const props = defineProps<{
   widgets: WidgetConfig[]
@@ -97,11 +101,11 @@ const dashboardStore = useDashboardStore()
 const currentBreakpoint = ref('lg')
 const isMobile = ref(false)
 
+// Standard breakpoints
 const breakpoints = { lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }
 const cols = { lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }
 
 function checkMobile() {
-  // Simple check matching CSS media query
   isMobile.value = window.innerWidth < 768
 }
 
@@ -112,8 +116,23 @@ const sortedWidgets = computed(() => {
   })
 })
 
-function isFullWidthOnMobile(type: WidgetType): boolean {
-  return ['map', 'chart', 'slider', 'stat', 'gauge'].includes(type)
+/**
+ * Heuristics for Mobile Layout (View Mode)
+ */
+function isFullWidthOnMobile(widget: WidgetConfig): boolean {
+  // If editing, everything is full width (handled by CSS)
+  if (!dashboardStore.isLocked) return true
+
+  // Complex widgets need full width
+  if (['map', 'chart'].includes(widget.type)) return true
+  
+  // Large KV blocks
+  if (widget.type === 'kv' && (widget.w > 2 || widget.h > 2)) return true
+  
+  // Precision controls
+  if (['slider', 'gauge', 'stat'].includes(widget.type)) return true
+  
+  return false
 }
 
 const isDraggable = computed(() => !dashboardStore.isLocked)
@@ -196,22 +215,44 @@ onUnmounted(() => {
   background: var(--bg);
 }
 
+/* --- MOBILE CSS GRID --- */
 .mobile-layout {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr; /* Default: 2 Columns (Card Mode) */
   gap: 12px;
   padding-bottom: 40px;
+  transition: all 0.3s ease;
+}
+
+/* EDIT MODE: Switch to 1 Column */
+.mobile-layout.is-editing {
+  grid-template-columns: 1fr; /* Force single column when unlocked */
 }
 
 .mobile-widget-wrapper {
+  height: auto;
   min-height: 80px; 
+  display: flex;
+  flex-direction: column;
 }
 
+/* Increase height in edit mode to fit the header + body */
+.mobile-layout.is-editing .mobile-widget-wrapper {
+  min-height: 140px; /* Ensure room for Header + Card */
+}
+
+/* Full width items in View Mode */
 .mobile-widget-wrapper.span-full {
   grid-column: span 2;
   min-height: 250px;
 }
 
+/* Full width items in Edit Mode (redundant but safe) */
+.mobile-layout.is-editing .mobile-widget-wrapper.span-full {
+  grid-column: span 1;
+}
+
+/* --- DESKTOP GRID --- */
 :deep(.vue-grid-item) {
   transition: all 0.2s ease;
   background: transparent;
