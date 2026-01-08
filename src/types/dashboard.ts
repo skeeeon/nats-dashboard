@@ -178,7 +178,7 @@ export interface MapMarker {
   lat: number
   lon: number
   color?: string
-  items: MapMarkerItem[] // Renamed from actions
+  items: MapMarkerItem[]
 }
 
 export interface MapWidgetConfig {
@@ -225,6 +225,7 @@ export interface Dashboard {
   modified: number
   widgets: WidgetConfig[]
   variables?: DashboardVariable[]
+  isLocked?: boolean  // Per-dashboard lock state
   
   // Storage Metadata
   storage?: StorageType
@@ -346,6 +347,7 @@ export function createDefaultDashboard(name: string): Dashboard {
     modified: now,
     widgets: [],
     variables: [],
+    isLocked: false,  // New dashboards start unlocked
     storage: 'local'
   }
 }
@@ -356,7 +358,7 @@ export function createDefaultMarker(): MapMarker {
     label: 'New Marker',
     lat: 0,
     lon: 0,
-    items: [] // Renamed from actions
+    items: []
   }
 }
 
