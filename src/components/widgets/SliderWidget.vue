@@ -1,40 +1,89 @@
 <template>
-  <div class="slider-widget">
-    <div class="slider-container" :class="{ 'is-disabled': isDisabled }">
-      <div class="value-display">
-        <span class="value-number">{{ displayValue }}</span>
-        <span v-if="cfg.unit" class="value-unit">{{ cfg.unit }}</span>
-      </div>
-      
-      <div 
-        class="slider-wrapper vue-grid-item-no-drag"
-        @mousedown.stop
-        @touchstart.stop
-        @pointermove.stop
-      >
-        <input
-          type="range"
-          v-model.number="localValue"
-          :min="cfg.min"
-          :max="cfg.max"
-          :step="cfg.step"
-          :disabled="isDisabled"
-          @mousedown="isDragging = true"
-          @touchstart="isDragging = true"
-          @mouseup="handleRelease"
-          @touchend="handleRelease"
-          @input="handleInput"
-          class="slider-input"
-          :style="sliderStyle"
-        />
-        
-        <div class="slider-labels">
-          <span class="label-min">{{ cfg.min }}{{ cfg.unit }}</span>
-          <span class="label-max">{{ cfg.max }}{{ cfg.unit }}</span>
+  <div class="slider-widget" :class="{ 'card-layout': layoutMode === 'card' }">
+    
+    <!-- MOBILE / CARD LAYOUT -->
+    <template v-if="layoutMode === 'card'">
+      <div class="card-content" :class="{ 'is-disabled': isDisabled }">
+        <!-- Header Row: Title and Value -->
+        <div class="card-header">
+          <div class="card-title">{{ config.title }}</div>
+          <div class="card-value-display">
+            <span class="card-value">{{ displayValue }}</span>
+            <span v-if="cfg.unit" class="card-unit">{{ cfg.unit }}</span>
+          </div>
+        </div>
+
+        <!-- Slider Row -->
+        <div 
+          class="card-slider-wrapper"
+          @mousedown.stop
+          @touchstart.stop
+          @pointermove.stop
+        >
+          <input
+            type="range"
+            v-model.number="localValue"
+            :min="cfg.min"
+            :max="cfg.max"
+            :step="cfg.step"
+            :disabled="isDisabled"
+            @mousedown="isDragging = true"
+            @touchstart="isDragging = true"
+            @mouseup="handleRelease"
+            @touchend="handleRelease"
+            @input="handleInput"
+            class="slider-input mobile-input"
+            :style="sliderStyle"
+          />
+        </div>
+
+        <!-- Labels Row (New) -->
+        <div class="card-slider-labels">
+          <span>{{ cfg.min }}{{ cfg.unit }}</span>
+          <span>{{ cfg.max }}{{ cfg.unit }}</span>
         </div>
       </div>
-    </div>
+    </template>
+
+    <!-- DESKTOP / STANDARD LAYOUT -->
+    <template v-else>
+      <div class="slider-container" :class="{ 'is-disabled': isDisabled }">
+        <div class="value-display">
+          <span class="value-number">{{ displayValue }}</span>
+          <span v-if="cfg.unit" class="value-unit">{{ cfg.unit }}</span>
+        </div>
+        
+        <div 
+          class="slider-wrapper vue-grid-item-no-drag"
+          @mousedown.stop
+          @touchstart.stop
+          @pointermove.stop
+        >
+          <input
+            type="range"
+            v-model.number="localValue"
+            :min="cfg.min"
+            :max="cfg.max"
+            :step="cfg.step"
+            :disabled="isDisabled"
+            @mousedown="isDragging = true"
+            @touchstart="isDragging = true"
+            @mouseup="handleRelease"
+            @touchend="handleRelease"
+            @input="handleInput"
+            class="slider-input"
+            :style="sliderStyle"
+          />
+          
+          <div class="slider-labels">
+            <span class="label-min">{{ cfg.min }}{{ cfg.unit }}</span>
+            <span class="label-max">{{ cfg.max }}{{ cfg.unit }}</span>
+          </div>
+        </div>
+      </div>
+    </template>
     
+    <!-- Shared Status/Error Overlays -->
     <div v-if="publishStatus" class="publish-status" :class="statusClass">
       {{ publishStatus }}
     </div>
@@ -60,9 +109,12 @@ import type { WidgetConfig } from '@/types/dashboard'
 import { encodeString, decodeBytes } from '@/utils/encoding'
 import { resolveTemplate } from '@/utils/variables'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   config: WidgetConfig
-}>()
+  layoutMode?: 'standard' | 'card'
+}>(), {
+  layoutMode: 'standard'
+})
 
 const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
@@ -313,6 +365,82 @@ watch([() => props.config.sliderConfig, () => dashboardStore.currentVariableValu
   position: relative;
 }
 
+/* --- CARD LAYOUT STYLES --- */
+.slider-widget.card-layout {
+  padding: 12px;
+  justify-content: flex-start;
+}
+
+.card-content {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px; /* Reduced gap to fit labels */
+}
+
+.card-content.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+.card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-right: 8px;
+}
+
+.card-value-display {
+  font-family: var(--mono);
+  color: var(--color-accent);
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.card-value {
+  font-size: 16px;
+}
+
+.card-unit {
+  font-size: 12px;
+  color: var(--muted);
+  margin-left: 2px;
+}
+
+.card-slider-wrapper {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.card-slider-labels {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 10px;
+  color: var(--muted);
+  font-family: var(--mono);
+  margin-top: -2px;
+}
+
+/* --- STANDARD DESKTOP STYLES --- */
 .slider-container {
   display: flex;
   flex-direction: column;
@@ -355,6 +483,7 @@ watch([() => props.config.sliderConfig, () => dashboardStore.currentVariableValu
   cursor: default;
 }
 
+/* --- SHARED SLIDER INPUT STYLES --- */
 .slider-input {
   -webkit-appearance: none;
   width: 100%;
@@ -370,6 +499,11 @@ watch([() => props.config.sliderConfig, () => dashboardStore.currentVariableValu
   outline: none;
   cursor: pointer;
   transition: all 0.2s;
+}
+
+/* Mobile specific input tweaks */
+.slider-input.mobile-input {
+  height: 16px; /* Slightly taller track for touch */
 }
 
 .slider-input:hover {
@@ -394,6 +528,13 @@ watch([() => props.config.sliderConfig, () => dashboardStore.currentVariableValu
   transition: all 0.2s;
 }
 
+/* Larger thumb for mobile touch */
+.slider-input.mobile-input::-webkit-slider-thumb {
+  width: 28px;
+  height: 28px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+
 .slider-input::-webkit-slider-thumb:hover {
   transform: scale(1.2);
   box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
@@ -411,6 +552,7 @@ watch([() => props.config.sliderConfig, () => dashboardStore.currentVariableValu
   .slider-labels { display: none; }
 }
 
+/* --- STATUS POPUP --- */
 .publish-status {
   position: absolute;
   bottom: 16px;
@@ -427,9 +569,39 @@ watch([() => props.config.sliderConfig, () => dashboardStore.currentVariableValu
   z-index: 5;
 }
 
+/* 
+   CARD LAYOUT OVERRIDE 
+   Grug say: On mobile card, make status cover whole widget.
+   No overlap. Just big clear message.
+*/
+.slider-widget.card-layout .publish-status {
+  bottom: auto;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100%;
+  transform: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.85); /* High contrast background */
+  backdrop-filter: blur(2px);
+  border-radius: inherit; /* Matches card corners */
+  z-index: 20;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: none;
+  animation: fadeIn 0.2s ease-out;
+}
+
 @keyframes slideInUp {
   from { opacity: 0; transform: translateX(-50%) translateY(10px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .publish-status.status-success {
@@ -437,9 +609,22 @@ watch([() => props.config.sliderConfig, () => dashboardStore.currentVariableValu
   background: var(--color-success-bg);
 }
 
+/* In card layout, override background to be dark/neutral for readability */
+.slider-widget.card-layout .publish-status.status-success {
+  background: rgba(0, 0, 0, 0.85);
+  color: var(--color-success);
+  border: 1px solid var(--color-success-border);
+}
+
 .publish-status.status-error {
   color: var(--color-error);
   background: var(--color-error-bg);
+}
+
+.slider-widget.card-layout .publish-status.status-error {
+  background: rgba(0, 0, 0, 0.85);
+  color: var(--color-error);
+  border: 1px solid var(--color-error-border);
 }
 
 .error-message {

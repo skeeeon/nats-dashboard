@@ -10,7 +10,10 @@
         v-for="widget in sortedWidgets" 
         :key="widget.id"
         class="mobile-widget-wrapper"
-        :class="{ 'span-full': isFullWidthOnMobile(widget) }"
+        :class="{ 
+          'span-full': shouldSpanFullMobile(widget.id),
+          'is-tall': isTallWidget(widget)
+        }"
       >
         <WidgetContainer
           :config="widget"
@@ -117,22 +120,93 @@ const sortedWidgets = computed(() => {
 })
 
 /**
- * Heuristics for Mobile Layout (View Mode)
+ * Helper: Does this widget *need* to be full width based on its type/content?
+ * Used for layout calculation.
  */
-function isFullWidthOnMobile(widget: WidgetConfig): boolean {
-  // If editing, everything is full width (handled by CSS)
-  if (!dashboardStore.isLocked) return true
-
+function isIntrinsicallyFullWidth(widget: WidgetConfig): boolean {
   // Complex widgets need full width
   if (['map', 'chart'].includes(widget.type)) return true
   
-  // Large KV blocks
+  // Large KV blocks (if configured large in desktop)
   if (widget.type === 'kv' && (widget.w > 2 || widget.h > 2)) return true
   
-  // Precision controls
+  // Precision controls often need width, but not always height
   if (['slider', 'gauge', 'stat'].includes(widget.type)) return true
   
   return false
+}
+
+/**
+ * Helper: Does this widget need to be TALL?
+ * Used for CSS styling.
+ */
+function isTallWidget(widget: WidgetConfig): boolean {
+  // Maps and Charts are always tall
+  if (['map', 'chart'].includes(widget.type)) return true
+  
+  // Gauges and Stats usually need height to look good (circles/graphs)
+  if (['gauge', 'stat'].includes(widget.type)) return true
+  
+  // KV: If it was configured as a large block in desktop, keep it tall.
+  // Otherwise (single value text), keep it short.
+  if (widget.type === 'kv' && widget.h > 2) return true
+  
+  // Everything else (Button, Switch, Text, Slider, small KV) is short
+  return false
+}
+
+/**
+ * Smart Mobile Layout Calculation
+ * Grug say: If small widget sits alone on row, make it big widget. No holes.
+ */
+const mobileWidgetLayout = computed(() => {
+  const layoutMap = new Map<string, boolean>() // ID -> isFullWidth
+  let currentColumn = 0 // 0 = Left, 1 = Right
+
+  sortedWidgets.value.forEach((widget, index) => {
+    // 1. Check if widget naturally wants to be full width
+    if (isIntrinsicallyFullWidth(widget)) {
+      layoutMap.set(widget.id, true)
+      currentColumn = 0 // Reset to start of new row
+    } else {
+      // It is a small widget (candidate for half-width)
+      
+      if (currentColumn === 0) {
+        // We are at the start of a row. We need to check the NEXT widget.
+        const nextWidget = sortedWidgets.value[index + 1]
+        
+        // If there is no next widget, or the next widget is big, we are an orphan.
+        const nextIsFull = !nextWidget || isIntrinsicallyFullWidth(nextWidget)
+
+        if (nextIsFull) {
+          // If next guy is big (or missing), I cannot share row. I must become big.
+          layoutMap.set(widget.id, true)
+          currentColumn = 0
+        } else {
+          // Next guy is small too! We can share row.
+          layoutMap.set(widget.id, false)
+          currentColumn = 1
+        }
+      } else {
+        // We are the second item in the row. We fit perfectly.
+        layoutMap.set(widget.id, false)
+        currentColumn = 0 // Row finished
+      }
+    }
+  })
+
+  return layoutMap
+})
+
+/**
+ * Template Helper
+ */
+function shouldSpanFullMobile(widgetId: string): boolean {
+  // If editing, everything is full width (handled by CSS, but good for consistency)
+  if (!dashboardStore.isLocked) return true
+  
+  // Return calculated layout decision
+  return mobileWidgetLayout.value.get(widgetId) ?? true
 }
 
 const isDraggable = computed(() => !dashboardStore.isLocked)
@@ -231,7 +305,7 @@ onUnmounted(() => {
 
 .mobile-widget-wrapper {
   height: auto;
-  min-height: 80px; 
+  min-height: 80px; /* Default short height for Buttons, Text, etc */
   display: flex;
   flex-direction: column;
 }
@@ -244,6 +318,11 @@ onUnmounted(() => {
 /* Full width items in View Mode */
 .mobile-widget-wrapper.span-full {
   grid-column: span 2;
+  /* Removed min-height: 250px from here! */
+}
+
+/* Only apply tall height to specific widgets (Maps, Charts) */
+.mobile-widget-wrapper.is-tall {
   min-height: 250px;
 }
 
