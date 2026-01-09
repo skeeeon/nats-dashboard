@@ -19,7 +19,7 @@
           </div>
           
           <div class="response-content">
-            <pre>{{ formattedData }}</pre>
+            <JsonViewer :data="formattedData" />
           </div>
         </div>
         
@@ -38,6 +38,7 @@
 
 <script setup lang="ts">
 import { computed, ref, nextTick, watch } from 'vue'
+import JsonViewer from './JsonViewer.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -58,8 +59,7 @@ const statusIcon = computed(() => props.status === 'success' ? '✓' : '⚠️')
 
 const formattedData = computed(() => {
   try {
-    const obj = JSON.parse(props.data)
-    return JSON.stringify(obj, null, 2)
+    return JSON.parse(props.data)
   } catch {
     return props.data
   }
@@ -71,7 +71,9 @@ function close() {
 
 async function copyToClipboard() {
   try {
-    const text = formattedData.value
+    const text = typeof formattedData.value === 'object'
+      ? JSON.stringify(formattedData.value, null, 2)
+      : String(formattedData.value)
 
     // 1. Try Modern API (HTTPS / Localhost)
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -238,16 +240,6 @@ watch(() => props.modelValue, (isOpen) => {
   padding: 16px;
   overflow: auto;
   max-height: 400px;
-}
-
-.response-content pre {
-  margin: 0;
-  font-family: var(--mono);
-  font-size: 13px;
-  color: var(--text);
-  white-space: pre-wrap;
-  word-break: break-all;
-  line-height: 1.5;
 }
 
 .modal-footer {

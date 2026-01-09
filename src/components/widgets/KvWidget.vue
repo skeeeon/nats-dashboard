@@ -32,7 +32,7 @@
             <div class="card-title">{{ config.title }}</div>
           </div>
           <div class="card-json-body">
-            <pre>{{ displayContent }}</pre>
+            <JsonViewer :data="processedValue" />
           </div>
           <div class="card-footer">
              <span class="meta-label">Rev:</span> {{ revision }}
@@ -56,7 +56,9 @@
           >
             {{ displayContent }}
           </div>
-          <pre v-else class="kv-value-content">{{ displayContent }}</pre>
+          <div v-else class="kv-value-content">
+            <JsonViewer :data="processedValue" />
+          </div>
         </div>
         
         <div class="kv-meta">
@@ -89,6 +91,7 @@ import { useDashboardStore } from '@/stores/dashboard'
 import { Kvm } from '@nats-io/kv'
 import { JSONPath } from 'jsonpath-plus'
 import LoadingState from '@/components/common/LoadingState.vue'
+import JsonViewer from '@/components/common/JsonViewer.vue'
 import { useThresholds } from '@/composables/useThresholds'
 import type { WidgetConfig } from '@/types/dashboard'
 import { decodeBytes } from '@/utils/encoding'
@@ -282,12 +285,6 @@ watch(() => natsStore.isConnected, (isConnected) => {
   margin-bottom: 4px;
 }
 
-.card-json-body pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
 .card-footer {
   font-size: 10px;
   color: var(--muted);
@@ -415,12 +412,6 @@ watch(() => natsStore.isConnected, (isConnected) => {
   background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: 4px;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--text);
-  font-family: var(--mono);
-  white-space: pre-wrap;
-  word-break: break-all;
   min-height: 100%;
 }
 
