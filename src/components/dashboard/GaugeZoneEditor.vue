@@ -36,12 +36,15 @@
           class="input-select color" 
           :style="{ color: zone.color }"
         >
-          <option value="var(--color-success)" style="color: var(--color-success)">Success (Green)</option>
-          <option value="var(--color-warning)" style="color: var(--color-warning)">Warning (Orange)</option>
-          <option value="var(--color-error)" style="color: var(--color-error)">Error (Red)</option>
-          <option value="var(--color-info)" style="color: var(--color-info)">Info (Blue)</option>
+          <option value="var(--color-primary)" style="color: var(--color-primary)">Primary</option>
+          <option value="var(--color-secondary)" style="color: var(--color-secondary)">Secondary</option>
+          <option value="var(--color-accent)" style="color: var(--color-accent)">Accent</option>
+          <option value="var(--color-success)" style="color: var(--color-success)">Success</option>
+          <option value="var(--color-warning)" style="color: var(--color-warning)">Warning</option>
+          <option value="var(--color-error)" style="color: var(--color-error)">Error</option>
+          <option value="var(--color-info)" style="color: var(--color-info)">Info</option>
           <option value="var(--text)" style="color: var(--text)">Default Text</option>
-          <option value="var(--muted)" style="color: var(--muted)">Muted (Gray)</option>
+          <option value="var(--muted)" style="color: var(--muted)">Muted</option>
         </select>
         
         <!-- Delete -->
@@ -58,14 +61,6 @@
 </template>
 
 <script setup lang="ts">
-/**
- * Gauge Zone Editor Component
- * 
- * Grug say: Edit color zones for gauge widget.
- * Each zone has min, max, and color.
- * Similar to ThresholdEditor but for ranges.
- */
-
 interface GaugeZone {
   min: number
   max: number

@@ -42,11 +42,12 @@
             />
           </div>
           
-          <!-- NEW: Processing Queue Stats -->
+          <!-- Processing Queue Stats -->
           <div class="queue-stats">
             <div class="stat-row">
               <span class="stat-label">Processing Queue:</span>
-              <span class="stat-value" :class="queueHealthClass">
+              <!-- Removed :class="queueHealthClass" from text to ensure readability -->
+              <span class="stat-value">
                 {{ subStats.queueSize }} / {{ subStats.maxQueueSize }}
               </span>
             </div>
@@ -77,7 +78,7 @@
               class="subscription-item"
             >
               <div class="sub-subject">{{ sub.subject }}</div>
-              <div class="sub-listeners">{{ sub.listenerCount }} widgets</div>
+              <div class="sub-listeners">{{ sub.listenerCount }} widget{{ sub.listenerCount !== 1 ? 's' : '' }}</div>
             </div>
           </div>
         </div>
@@ -303,7 +304,7 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--border);
 }
 
-.modal-header h3 { margin: 0; font-size: 18px; }
+.modal-header h3 { margin: 0; font-size: 18px; color: var(--text); }
 
 .close-btn {
   background: none;
@@ -312,6 +313,8 @@ onUnmounted(() => {
   font-size: 24px;
   cursor: pointer;
 }
+
+.close-btn:hover { color: var(--text); }
 
 .modal-body {
   padding: 20px;
@@ -332,10 +335,11 @@ onUnmounted(() => {
 
 .section-title {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--muted);
+  color: var(--text); /* Changed from muted to text for better visibility */
+  opacity: 0.7;
   margin-bottom: 12px;
 }
 
@@ -347,8 +351,17 @@ onUnmounted(() => {
   font-size: 13px;
 }
 
-.stat-label { color: var(--muted); }
-.stat-value { color: var(--text); font-weight: 500; font-family: var(--mono); }
+/* Updated Colors for Contrast */
+.stat-label { 
+  color: var(--text-secondary); /* Darker than muted */
+  font-weight: 500;
+}
+
+.stat-value { 
+  color: var(--text); 
+  font-weight: 600; 
+  font-family: var(--mono); 
+}
 
 /* Status colors */
 .stat-value.status-connected { color: var(--connection-connected); }
@@ -362,22 +375,28 @@ onUnmounted(() => {
   margin-top: 8px;
   max-height: 150px;
   overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
 }
 
 .subscription-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 8px;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 4px;
-  margin-bottom: 4px;
-  font-size: 11px;
+  padding: 8px 10px;
+  background: var(--input-bg); /* Theme-aware background */
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.subscription-item:last-child {
+  border-bottom: none;
 }
 
 .sub-subject {
-  color: var(--color-accent);
+  color: var(--color-primary); /* Better contrast than accent in light mode */
   font-family: var(--mono);
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -385,7 +404,11 @@ onUnmounted(() => {
   margin-right: 8px;
 }
 
-.sub-listeners { color: var(--muted); flex-shrink: 0; }
+.sub-listeners { 
+  color: var(--text-secondary); 
+  flex-shrink: 0; 
+  font-size: 11px;
+}
 
 /* Widget Breakdown */
 .widget-type-breakdown {
@@ -397,9 +420,11 @@ onUnmounted(() => {
 .type-count {
   font-size: 11px;
   padding: 4px 8px;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--text);
+  font-weight: 500;
 }
 
 /* Throughput Chart */
@@ -410,6 +435,9 @@ onUnmounted(() => {
   height: 40px;
   margin-top: 8px;
   gap: 2px;
+  background: var(--input-bg); /* Subtle background for chart area */
+  border-radius: 4px;
+  padding: 2px;
 }
 
 .throughput-bar {
@@ -418,22 +446,24 @@ onUnmounted(() => {
   border-radius: 2px 2px 0 0;
   min-height: 2px;
   transition: height 0.3s ease;
+  opacity: 0.8;
 }
 
 /* Queue Stats */
 .queue-stats {
   margin-top: 12px;
-  background: rgba(0, 0, 0, 0.1);
-  padding: 8px;
+  background: var(--input-bg);
+  padding: 10px;
   border-radius: 4px;
+  border: 1px solid var(--border);
 }
 
 .queue-bar-bg {
-  height: 6px;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
+  height: 8px;
+  background: rgba(128, 128, 128, 0.2);
+  border-radius: 4px;
   overflow: hidden;
-  margin-top: 4px;
+  margin-top: 6px;
 }
 
 .queue-bar-fill {
@@ -472,6 +502,7 @@ onUnmounted(() => {
 .btn-secondary {
   background: rgba(255, 255, 255, 0.1);
   color: var(--text);
+  border: 1px solid var(--border);
 }
 
 .btn-secondary:hover {

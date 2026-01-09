@@ -29,18 +29,20 @@
         <span class="row-label">then</span>
         
         <!-- Color Picker -->
-        <!-- We bind the style color to the selected value so the select box text changes color -->
         <select 
           v-model="rule.color" 
           class="input-select color" 
           :style="{ color: rule.color }"
         >
-          <option value="var(--color-success)" style="color: var(--color-success)">Success (Green)</option>
-          <option value="var(--color-warning)" style="color: var(--color-warning)">Warning (Orange)</option>
-          <option value="var(--color-error)" style="color: var(--color-error)">Error (Red)</option>
-          <option value="var(--color-info)" style="color: var(--color-info)">Info (Blue)</option>
+          <option value="var(--color-primary)" style="color: var(--color-primary)">Primary</option>
+          <option value="var(--color-secondary)" style="color: var(--color-secondary)">Secondary</option>
+          <option value="var(--color-accent)" style="color: var(--color-accent)">Accent</option>
+          <option value="var(--color-success)" style="color: var(--color-success)">Success</option>
+          <option value="var(--color-warning)" style="color: var(--color-warning)">Warning</option>
+          <option value="var(--color-error)" style="color: var(--color-error)">Error</option>
+          <option value="var(--color-info)" style="color: var(--color-info)">Info</option>
           <option value="var(--text)" style="color: var(--text)">Default Text</option>
-          <option value="var(--muted)" style="color: var(--muted)">Muted (Gray)</option>
+          <option value="var(--muted)" style="color: var(--muted)">Muted</option>
         </select>
         
         <!-- Delete -->
@@ -72,7 +74,6 @@ function addRule() {
     id: Date.now().toString(),
     operator: '>',
     value: '',
-    // Use CSS variable so it adapts to theme changes automatically
     color: 'var(--color-error)' 
   }
   emit('update:modelValue', [...props.modelValue, newRule])
@@ -136,7 +137,6 @@ function removeRule(index: number) {
 .value { flex: 1; min-width: 60px; }
 .color { flex: 1; min-width: 100px; font-weight: 600; }
 
-/* Ensure the dropdown arrow matches text color or stays neutral */
 .input-select option {
   background: var(--input-bg);
 }

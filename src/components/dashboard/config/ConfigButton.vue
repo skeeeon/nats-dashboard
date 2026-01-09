@@ -1,4 +1,3 @@
-<!-- src/components/dashboard/config/ConfigButton.vue -->
 <template>
   <div class="config-button">
     <div class="form-group">
@@ -23,11 +22,13 @@
         :style="{ color: form.buttonColor || 'inherit' }"
       >
         <option value="">Default (Primary)</option>
-        <option value="var(--color-secondary)" style="color: var(--color-secondary)">Secondary (Blue)</option>
-        <option value="var(--color-success)" style="color: var(--color-success)">Success (Green)</option>
-        <option value="var(--color-warning)" style="color: var(--color-warning)">Warning (Orange)</option>
-        <option value="var(--color-error)" style="color: var(--color-error)">Danger (Red)</option>
-        <option value="var(--panel)" style="color: var(--text); background: var(--panel)">Neutral (Gray)</option>
+        <option value="var(--color-secondary)" style="color: var(--color-secondary)">Secondary</option>
+        <option value="var(--color-accent)" style="color: var(--color-accent)">Accent</option>
+        <option value="var(--color-success)" style="color: var(--color-success)">Success</option>
+        <option value="var(--color-warning)" style="color: var(--color-warning)">Warning</option>
+        <option value="var(--color-error)" style="color: var(--color-error)">Danger</option>
+        <option value="var(--color-info)" style="color: var(--color-info)">Info</option>
+        <option value="var(--panel)" style="color: var(--text); background: var(--panel)">Neutral</option>
       </select>
     </div>
     

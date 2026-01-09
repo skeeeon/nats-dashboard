@@ -31,12 +31,6 @@ const highlightedHtml = computed(() => {
   }
 
   // 2. Syntax Highlighting
-  // Note: We DO NOT escapeHtml here yet. We do it inside the replacer.
-  // This Regex matches:
-  // Group 1: "Key": (String followed by colon)
-  // Group 2: "String" (String NOT followed by colon)
-  // Group 3: true|false|null
-  // Group 4: Numbers
   return json.replace(
     /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?)|(\b(true|false|null)\b)|(-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
     (match) => {
@@ -47,8 +41,7 @@ const highlightedHtml = computed(() => {
         if (/:$/.test(match)) {
           cls = 'json-key'
           // Separate the colon for cleaner coloring
-          // match is like "key":
-          const content = match.substring(0, match.length - 1) // "key"
+          const content = match.substring(0, match.length - 1)
           return `<span class="${cls}">${escapeHtml(content)}</span>:`
         } else {
           cls = 'json-string'
@@ -63,7 +56,6 @@ const highlightedHtml = computed(() => {
         cls = 'json-null'
       }
       
-      // Numbers & Booleans fall through here
       return `<span class="${cls}">${escapeHtml(match)}</span>`
     }
   )
@@ -83,28 +75,28 @@ function escapeHtml(unsafe: string) {
 .json-viewer {
   margin: 0;
   font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: 13px; /* Increased from 12px */
+  line-height: 1.5;
   white-space: pre-wrap;
-  word-break: break-all;
+  word-break: break-word; /* Changed from break-all for better readability */
   color: var(--text);
 }
 
 .json-key {
-  color: var(--color-accent);
+  color: var(--color-primary); /* High contrast (Indigo/Purple) */
   font-weight: 600;
 }
 
 .json-string {
-  color: var(--color-success);
+  color: var(--text); /* Standard text color for maximum readability */
 }
 
 .json-number {
-  color: var(--color-warning);
+  color: var(--color-secondary); /* Distinctive (Pink/Magenta) */
 }
 
 .json-boolean {
-  color: var(--color-error);
+  color: var(--color-error); /* Red for boolean states */
   font-weight: 600;
 }
 
