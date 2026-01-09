@@ -1,3 +1,4 @@
+// src/types/config.ts
 import type { ThresholdRule, MapMarker } from './dashboard'
 
 /**
@@ -21,6 +22,8 @@ export interface WidgetFormState {
   buttonLabel: string
   buttonPayload: string
   buttonColor: string
+  buttonActionType: 'publish' | 'request' // New
+  buttonTimeout: number // New
   
   // Thresholds (Text, KV, Stat)
   thresholds: ThresholdRule[]
@@ -80,6 +83,8 @@ export function createEmptyFormState(): WidgetFormState {
     buttonLabel: '',
     buttonPayload: '',
     buttonColor: '',
+    buttonActionType: 'publish',
+    buttonTimeout: 1000,
     thresholds: [],
     switchMode: 'kv',
     switchDefaultState: 'off',

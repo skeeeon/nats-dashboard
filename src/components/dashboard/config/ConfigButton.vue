@@ -1,3 +1,4 @@
+<!-- src/components/dashboard/config/ConfigButton.vue -->
 <template>
   <div class="config-button">
     <div class="form-group">
@@ -31,13 +32,41 @@
     </div>
     
     <div class="form-group">
-      <label>Publish Subject</label>
+      <label>Action Type</label>
+      <select v-model="form.buttonActionType" class="form-input">
+        <option value="publish">Publish (Fire & Forget)</option>
+        <option value="request">Request (Wait for Reply)</option>
+      </select>
+      <div class="help-text">
+        {{ form.buttonActionType === 'publish' 
+           ? 'Sends a message without waiting for a response.' 
+           : 'Sends a message and waits for a reply. Displays response in a modal.' }}
+      </div>
+    </div>
+
+    <div v-if="form.buttonActionType === 'request'" class="form-group">
+      <label>Timeout (ms)</label>
+      <input 
+        v-model.number="form.buttonTimeout" 
+        type="number" 
+        class="form-input"
+        min="100"
+        step="100"
+        placeholder="1000"
+      />
+      <div class="help-text">
+        Max time to wait for a response before failing.
+      </div>
+    </div>
+    
+    <div class="form-group">
+      <label>Subject</label>
       <input 
         v-model="form.subject" 
         type="text" 
         class="form-input"
         :class="{ 'has-error': errors.subject }"
-        placeholder="button.clicked"
+        placeholder="service.action"
       />
       <div v-if="errors.subject" class="error-text">
         {{ errors.subject }}

@@ -62,6 +62,8 @@ export interface ButtonWidgetConfig {
   publishSubject: string
   payload: string
   color?: string
+  actionType?: 'publish' | 'request' // New: Request-Reply support
+  timeout?: number                   // New: Timeout in ms
 }
 
 export interface KvWidgetConfig {
@@ -275,7 +277,13 @@ export function createDefaultWidget(type: WidgetType, position: { x: number; y: 
       base.textConfig = { fontSize: 24, thresholds: [] }
       break
     case 'button':
-      base.buttonConfig = { label: 'Send', publishSubject: 'button.clicked', payload: '{}' }
+      base.buttonConfig = { 
+        label: 'Send', 
+        publishSubject: 'button.clicked', 
+        payload: '{}',
+        actionType: 'publish',
+        timeout: 1000
+      }
       break
     case 'kv':
       base.kvConfig = { displayFormat: 'json', thresholds: [] }

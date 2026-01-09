@@ -715,30 +715,33 @@ export const useDashboardStore = defineStore('dashboard', () => {
   // ============================================================================
   
   function exportDashboard(id: string): string | null {
-    const dashboard = activeDashboard.value?.id === id 
-      ? activeDashboard.value 
-      : localDashboards.value.find(d => d.id === id)
-      
-    if (!dashboard) return null
-    
-    const exportObj = { ...dashboard }
-    delete exportObj.storage
-    delete exportObj.kvKey
-    delete exportObj.kvRevision
-    
-    return JSON.stringify(exportObj, null, 2)
+    // Grug say: Reuse plural export to ensure consistent envelope format
+    return exportDashboards([id])
   }
   
   function exportDashboards(ids: string[]): string {
     const selectedDashboards = ids
-      .map(id => localDashboards.value.find(d => d.id === id))
+      .map(id => {
+        // Check active first, then local list
+        if (activeDashboard.value?.id === id) return activeDashboard.value
+        return localDashboards.value.find(d => d.id === id)
+      })
       .filter(Boolean) as Dashboard[]
+    
+    // Sanitize dashboards (remove storage-specific fields)
+    const sanitizedDashboards = selectedDashboards.map(d => {
+      const copy = { ...d }
+      delete copy.storage
+      delete copy.kvKey
+      delete copy.kvRevision
+      return copy
+    })
     
     const exportData: DashboardExportFile = {
       version: '1.0',
       exportDate: Date.now(),
       appVersion: '0.1.0',
-      dashboards: selectedDashboards
+      dashboards: sanitizedDashboards
     }
     return JSON.stringify(exportData, null, 2)
   }

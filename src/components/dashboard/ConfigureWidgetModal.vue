@@ -1,3 +1,4 @@
+<!-- src/components/dashboard/ConfigureWidgetModal.vue -->
 <template>
   <div v-if="modelValue && widgetId" class="modal-overlay" @click.self="close">
     <div class="modal" :class="{ 'modal-large': widgetType === 'map' }">
@@ -131,6 +132,8 @@ const form = ref<WidgetFormState>({
   buttonLabel: '',
   buttonPayload: '',
   buttonColor: '',
+  buttonActionType: 'publish',
+  buttonTimeout: 1000,
   thresholds: [],
   switchMode: 'kv',
   switchDefaultState: 'off',
@@ -243,6 +246,8 @@ watch(() => props.widgetId, (widgetId) => {
     buttonLabel: widget.buttonConfig?.label || '',
     buttonPayload: widget.buttonConfig?.payload || '',
     buttonColor: widget.buttonConfig?.color || '',
+    buttonActionType: widget.buttonConfig?.actionType || 'publish',
+    buttonTimeout: widget.buttonConfig?.timeout || 1000,
     thresholds: currentThresholds,
     
     // Switch
@@ -501,6 +506,8 @@ function save() {
       publishSubject: form.value.subject.trim(),
       payload: form.value.buttonPayload.trim() || '{}',
       color: form.value.buttonColor || undefined,
+      actionType: form.value.buttonActionType,
+      timeout: form.value.buttonTimeout
     }
   } else if (widget.type === 'kv') {
     updates.dataSource = {

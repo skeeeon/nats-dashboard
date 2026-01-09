@@ -1,27 +1,25 @@
+<!-- src/components/widgets/ButtonWidget.vue -->
 <template>
   <div class="button-widget" :class="{ 'card-layout': layoutMode === 'card' }">
     <!-- Card Layout (Mobile) -->
     <template v-if="layoutMode === 'card'">
-      <!-- 
-        Apply buttonStyle here to get background color changes on success/error.
-        Apply is-disabled class to mimic desktop disabled opacity.
-      -->
       <div 
         class="card-content" 
         :style="buttonStyle"
-        :class="{ 'is-disabled': !natsStore.isConnected || showSuccess }"
+        :class="{ 'is-disabled': isDisabled }"
       >
         <div class="card-info">
           <div class="card-title">{{ config.title }}</div>
-          <div class="card-label">{{ currentLabel }}</div>
+          <div class="card-label">
+            <span v-if="isLoading" class="spinner-small"></span>
+            <span v-else>{{ currentLabel }}</span>
+          </div>
         </div>
       </div>
       
-      <!-- Full Overlay Click -->
-      <!-- Disabled during success state to prevent spamming -->
       <button 
         class="card-overlay-btn"
-        :disabled="!natsStore.isConnected || showSuccess"
+        :disabled="isDisabled"
         @click="handleClick"
       >
         <div v-if="showSuccess" class="ripple-effect"></div>
@@ -33,12 +31,13 @@
       <button 
         class="widget-button"
         :style="buttonStyle"
-        :class="{ 'success-state': showSuccess, 'error-state': showError }"
-        :disabled="!natsStore.isConnected || showSuccess"
+        :class="{ 'success-state': showSuccess, 'error-state': showError, 'loading-state': isLoading }"
+        :disabled="isDisabled"
         @click="handleClick"
       >
         <div class="button-content">
-          <span class="button-icon" v-if="currentIcon">{{ currentIcon }}</span>
+          <span v-if="isLoading" class="spinner"></span>
+          <span v-else-if="currentIcon" class="button-icon">{{ currentIcon }}</span>
           <span class="button-label">{{ currentLabel }}</span>
         </div>
         <div v-if="showSuccess" class="success-ripple"></div>
@@ -46,6 +45,15 @@
     </template>
     
     <div v-if="!natsStore.isConnected" class="disconnected-overlay">⚠️</div>
+
+    <!-- Response Modal -->
+    <ResponseModal
+      v-model="showResponseModal"
+      :title="config.title"
+      :status="responseStatus"
+      :data="responseData"
+      :latency="responseLatency"
+    />
   </div>
 </template>
 
@@ -55,8 +63,9 @@ import { useNatsStore } from '@/stores/nats'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useDesignTokens } from '@/composables/useDesignTokens'
 import type { WidgetConfig } from '@/types/dashboard'
-import { encodeString } from '@/utils/encoding'
+import { encodeString, decodeBytes } from '@/utils/encoding'
 import { resolveTemplate } from '@/utils/variables'
+import ResponseModal from '@/components/common/ResponseModal.vue'
 
 const props = withDefaults(defineProps<{
   config: WidgetConfig
@@ -69,15 +78,29 @@ const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
 const { semanticColors } = useDesignTokens()
 
+// State
 const showSuccess = ref(false)
 const showError = ref(false)
+const isLoading = ref(false)
 
+// Response Modal State
+const showResponseModal = ref(false)
+const responseData = ref('')
+const responseStatus = ref<'success' | 'error'>('success')
+const responseLatency = ref(0)
+
+// Config
 const defaultLabel = computed(() => props.config.buttonConfig?.label || 'Publish')
 const buttonColor = computed(() => props.config.buttonConfig?.color || semanticColors.value.primary)
+const actionType = computed(() => props.config.buttonConfig?.actionType || 'publish')
+const timeout = computed(() => props.config.buttonConfig?.timeout || 1000)
+
+const isDisabled = computed(() => !natsStore.isConnected || showSuccess.value || isLoading.value)
 
 const currentLabel = computed(() => {
   if (!natsStore.isConnected) return 'Offline'
-  if (showSuccess.value) return 'Sent!'
+  if (isLoading.value) return 'Waiting...'
+  if (showSuccess.value) return actionType.value === 'request' ? 'Done' : 'Sent!'
   if (showError.value) return 'Error'
   return defaultLabel.value
 })
@@ -86,7 +109,7 @@ const currentIcon = computed(() => {
   if (!natsStore.isConnected) return ''
   if (showSuccess.value) return '✓'
   if (showError.value) return '✕'
-  return null
+  return actionType.value === 'request' ? '⇄' : null
 })
 
 const buttonStyle = computed(() => {
@@ -122,23 +145,58 @@ const publishPayload = computed(() => {
   return resolveTemplate(raw, dashboardStore.currentVariableValues)
 })
 
-function handleClick() {
+async function handleClick() {
   if (!natsStore.nc) return
   
-  try {
-    const payload = encodeString(publishPayload.value)
-    natsStore.nc.publish(publishSubject.value, payload)
-    
-    showSuccess.value = true
-    setTimeout(() => {
-      showSuccess.value = false
-    }, 1500)
-  } catch (err) {
-    showError.value = true
-    setTimeout(() => {
-      showError.value = false
-    }, 1500)
+  const subject = publishSubject.value
+  const payload = encodeString(publishPayload.value)
+
+  if (actionType.value === 'request') {
+    await handleRequest(subject, payload)
+  } else {
+    handlePublish(subject, payload)
   }
+}
+
+function handlePublish(subject: string, payload: Uint8Array) {
+  try {
+    natsStore.nc!.publish(subject, payload)
+    triggerSuccess()
+  } catch (err) {
+    triggerError()
+  }
+}
+
+async function handleRequest(subject: string, payload: Uint8Array) {
+  isLoading.value = true
+  const start = Date.now()
+  
+  try {
+    const msg = await natsStore.nc!.request(subject, payload, { timeout: timeout.value })
+    responseLatency.value = Date.now() - start
+    responseData.value = decodeBytes(msg.data)
+    responseStatus.value = 'success'
+    triggerSuccess()
+    showResponseModal.value = true
+  } catch (err: any) {
+    responseLatency.value = Date.now() - start
+    responseData.value = err.message || 'Request failed'
+    responseStatus.value = 'error'
+    triggerError()
+    showResponseModal.value = true
+  } finally {
+    isLoading.value = false
+  }
+}
+
+function triggerSuccess() {
+  showSuccess.value = true
+  setTimeout(() => { showSuccess.value = false }, 1500)
+}
+
+function triggerError() {
+  showError.value = true
+  setTimeout(() => { showError.value = false }, 1500)
 }
 
 function adjustColorOpacity(hex: string, opacity: number) {
@@ -159,7 +217,6 @@ function adjustColorOpacity(hex: string, opacity: number) {
 
 /* --- CARD LAYOUT --- */
 .button-widget.card-layout {
-  /* Let content fill background */
   padding: 0; 
   display: flex;
 }
@@ -172,7 +229,6 @@ function adjustColorOpacity(hex: string, opacity: number) {
   width: 100%;
   height: 100%;
   padding: 12px;
-  /* Text color matches typical button text (white/light) */
   color: white; 
   transition: background-color 0.2s ease, opacity 0.2s ease;
 }
@@ -195,7 +251,6 @@ function adjustColorOpacity(hex: string, opacity: number) {
 .card-title {
   font-size: 14px;
   font-weight: 600;
-  /* inherit color for contrast against background */
   color: inherit; 
   white-space: nowrap;
   overflow: hidden;
@@ -213,6 +268,10 @@ function adjustColorOpacity(hex: string, opacity: number) {
   overflow: hidden;
   text-overflow: ellipsis;
   width: 100%;
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .card-overlay-btn {
@@ -269,7 +328,7 @@ function adjustColorOpacity(hex: string, opacity: number) {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.widget-button:hover:not(:disabled):not(.success-state) {
+.widget-button:hover:not(:disabled):not(.success-state):not(.loading-state) {
   background-color: var(--hover-bg) !important;
   transform: translateY(-1px);
 }
@@ -279,9 +338,8 @@ function adjustColorOpacity(hex: string, opacity: number) {
 }
 
 .widget-button:disabled {
-  opacity: 0.6;
+  opacity: 0.8;
   cursor: not-allowed;
-  filter: grayscale(0.5);
 }
 
 .button-content {
@@ -317,5 +375,28 @@ function adjustColorOpacity(hex: string, opacity: number) {
 @keyframes ripple {
   0% { transform: scale(0); opacity: 0.5; }
   100% { transform: scale(4); opacity: 0; }
+}
+
+/* Spinners */
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.spinner-small {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>
