@@ -8,7 +8,8 @@
         :class="{ 'is-open': openFolders[folderName] }"
         :title="folderName"
       >
-        <span class="folder-icon">{{ openFolders[folderName] ? '📂' : '📁' }}</span>
+        <span class="folder-chevron">{{ openFolders[folderName] ? '▼' : '▶' }}</span>
+        <span class="folder-icon">📁</span>
         <span class="folder-name">{{ folderName }}</span>
       </div>
       
@@ -178,26 +179,28 @@ onUnmounted(() => {
 .dashboard-tree {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .tree-folder {
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 
 .folder-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: 6px;
+  padding: 8px 4px; /* Increased vertical padding slightly */
   cursor: pointer;
-  border-radius: 4px;
-  color: var(--muted);
-  font-size: 13px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 15px; /* Bumped to 15px */
+  font-weight: 500;
   user-select: none;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: all 0.2s;
 }
 
 .folder-header:hover {
@@ -205,16 +208,19 @@ onUnmounted(() => {
   color: var(--text);
 }
 
-/* Tighter indentation */
-.folder-content {
-  padding-left: 12px;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
-  margin-left: 6px;
+.folder-chevron {
+  font-size: 10px;
+  width: 16px;
+  text-align: center;
+  color: var(--muted);
+  transition: transform 0.2s;
+  flex-shrink: 0;
 }
 
 .folder-icon {
-  font-size: 14px;
+  font-size: 18px; /* Bumped to 18px */
   flex-shrink: 0;
+  opacity: 0.8;
 }
 
 .folder-name {
@@ -222,20 +228,37 @@ onUnmounted(() => {
   text-overflow: ellipsis;
 }
 
+/* 
+   Indentation Logic (Preserved)
+   - Margin Left: 12px (Aligns with chevron center)
+   - Padding Left: 10px (Space between line and child)
+*/
+.folder-content {
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+  margin-left: 12px;
+  margin-top: 1px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
 .tree-item {
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 
 .dashboard-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
-  border-radius: 4px;
+  padding: 8px 8px; /* Increased vertical padding */
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
   color: var(--text);
-  font-size: 13px;
+  font-size: 15px; /* Bumped to 15px */
+  font-weight: 500; /* Added weight to match local list */
+  border: 1px solid transparent;
 }
 
 .dashboard-item:hover {
@@ -245,13 +268,14 @@ onUnmounted(() => {
 .dashboard-item.is-active {
   background: var(--color-info-bg);
   color: var(--color-info);
-  font-weight: 500;
+  font-weight: 600;
+  border-color: var(--color-info-border);
 }
 
 .item-icon {
-  font-size: 14px;
+  font-size: 18px; /* Bumped to 18px */
   opacity: 0.7;
-  width: 16px;
+  width: 18px;
   text-align: center;
   flex-shrink: 0;
 }
@@ -266,6 +290,8 @@ onUnmounted(() => {
 .item-actions {
   position: relative;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 
 .action-btn {
@@ -274,8 +300,12 @@ onUnmounted(() => {
   border: none;
   color: var(--muted);
   cursor: pointer;
-  font-size: 14px;
-  padding: 2px 6px;
+  font-size: 16px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: all 0.2s;
   border-radius: 4px;
 }
@@ -301,7 +331,7 @@ onUnmounted(() => {
   border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-  min-width: 150px;
+  min-width: 160px;
   z-index: 100;
   animation: slideDown 0.15s ease-out;
 }
@@ -316,7 +346,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
+  padding: 10px 14px;
   background: transparent;
   border: none;
   cursor: pointer;
