@@ -1,3 +1,4 @@
+// src/composables/useThresholds.ts
 import type { ThresholdRule } from '@/types/dashboard'
 
 /**
@@ -27,28 +28,39 @@ export function useThresholds() {
    * Check single rule
    */
   function checkRule(value: any, rule: ThresholdRule): boolean {
-    const valStr = String(value)
-    const ruleValStr = rule.value
-
-    // Try numeric comparison first
+    // 1. Handle Numeric Comparison
     const valNum = Number(value)
     const ruleValNum = Number(rule.value)
-    const isNumeric = !isNaN(valNum) && !isNaN(ruleValNum) && rule.value.trim() !== ''
+    
+    // Check if both are valid numbers AND the rule isn't just whitespace
+    const isNumeric = !isNaN(valNum) && !isNaN(ruleValNum) && String(rule.value).trim() !== ''
+
+    if (isNumeric) {
+      switch (rule.operator) {
+        case '>': return valNum > ruleValNum
+        case '>=': return valNum >= ruleValNum
+        case '<': return valNum < ruleValNum
+        case '<=': return valNum <= ruleValNum
+        case '==': return valNum === ruleValNum
+        case '!=': return valNum !== ruleValNum
+      }
+    }
+
+    // 2. Handle String/Boolean Comparison
+    // Normalize both sides to trimmed strings for robust matching
+    const valStr = String(value).trim()
+    const ruleValStr = String(rule.value).trim()
 
     switch (rule.operator) {
-      case '>':
-        return isNumeric ? valNum > ruleValNum : valStr > ruleValStr
-      case '>=':
-        return isNumeric ? valNum >= ruleValNum : valStr >= ruleValStr
-      case '<':
-        return isNumeric ? valNum < ruleValNum : valStr < ruleValStr
-      case '<=':
-        return isNumeric ? valNum <= ruleValNum : valStr <= ruleValStr
-      case '==':
-        // Loose equality to handle 1 == "1"
-        return value == rule.value
-      case '!=':
-        return value != rule.value
+      case '>': return valStr > ruleValStr
+      case '>=': return valStr >= ruleValStr
+      case '<': return valStr < ruleValStr
+      case '<=': return valStr <= ruleValStr
+      case '==': 
+        // Case-insensitive check for booleans/text is usually what users want in dashboards
+        return valStr === ruleValStr || valStr.toLowerCase() === ruleValStr.toLowerCase()
+      case '!=': 
+        return valStr !== ruleValStr && valStr.toLowerCase() !== ruleValStr.toLowerCase()
       default:
         return false
     }
