@@ -17,13 +17,13 @@ interface WidgetListener {
 }
 
 interface SubscriptionRef {
-  subject: string
+  key: string // Changed from 'subject' to 'key' to reflect internal storage
+  subject: string // Keep track of actual NATS subject
   natsSubscription?: Subscription 
   iterator?: ConsumerMessages
   listeners: Map<string, WidgetListener>
   isActive: boolean
   isJetStream: boolean
-  // Grug add: Promise to track initialization
   initPromise?: Promise<void>
 }
 
@@ -40,6 +40,7 @@ export function useSubscriptionManager() {
   const natsStore = useNatsStore()
   const dataStore = useWidgetDataStore()
   
+  // Maps internal unique Key -> SubscriptionRef
   const subscriptions = new Map<string, SubscriptionRef>()
   
   // --- Throttling Logic ---
@@ -99,6 +100,21 @@ export function useSubscriptionManager() {
 
   // --- Subscription Logic ---
 
+  /**
+   * Generates a unique key for the subscription map.
+   * 
+   * Core NATS: Shared by subject (all listeners get same live data).
+   * JetStream: Unique by Widget ID (each widget needs its own Consumer to replay history).
+   */
+  function getSubscriptionKey(widgetId: string, config: DataSourceConfig): string {
+    if (config.useJetStream) {
+      // Must be unique per widget to ensure each gets its own historical replay
+      return `js:${widgetId}`
+    }
+    // Core subscriptions can be shared efficiently
+    return `core:${config.subject}`
+  }
+
   async function subscribe(widgetId: string, config: DataSourceConfig, jsonPath?: string) {
     if (!natsStore.nc) {
       console.error('Cannot subscribe: Not connected to NATS')
@@ -108,28 +124,26 @@ export function useSubscriptionManager() {
     const subject = config.subject
     if (!subject) return
     
-    let subRef = subscriptions.get(subject)
+    const key = getSubscriptionKey(widgetId, config)
+    let subRef = subscriptions.get(key)
     
     // 1. If subscription exists (or is initializing), join it
     if (subRef) {
-      // If it's initializing, wait for it
       if (subRef.initPromise) {
         try {
           await subRef.initPromise
         } catch (e) {
-          // Init failed, we will try again below as if it didn't exist
-          subscriptions.delete(subject)
+          subscriptions.delete(key)
           subRef = undefined
         }
       }
       
-      // Re-check after await
-      subRef = subscriptions.get(subject)
+      subRef = subscriptions.get(key)
       if (subRef) {
         const isCoreDead = !subRef.isJetStream && subRef.natsSubscription?.isClosed()
         
         if (isCoreDead) {
-          subscriptions.delete(subject)
+          subscriptions.delete(key)
         } else {
           subRef.listeners.set(widgetId, { widgetId, jsonPath })
           return
@@ -137,15 +151,15 @@ export function useSubscriptionManager() {
       }
     }
     
-    // 2. Create placeholder immediately to block other calls
+    // 2. Create placeholder
     const newSubRef: SubscriptionRef = {
+      key,
       subject,
       listeners: new Map([[widgetId, { widgetId, jsonPath }]]),
       isActive: true,
       isJetStream: !!config.useJetStream
     }
     
-    // Create the promise that defines the initialization work
     const initWork = async () => {
       try {
         if (config.useJetStream) {
@@ -156,7 +170,7 @@ export function useSubscriptionManager() {
             streamName = await jsm.streams.find(subject)
           } catch (e) {
             console.error(`[SubMgr] No stream found for subject: ${subject}`)
-            subscriptions.delete(subject) // Clean up placeholder
+            subscriptions.delete(key)
             return
           }
 
@@ -171,48 +185,52 @@ export function useSubscriptionManager() {
             consumerOpts.opt_start_time = calculateStartTime(config.timeWindow).toISOString()
           }
 
+          // Generate an Ordered Consumer
           const consumer = await js.consumers.get(streamName, consumerOpts)
           const messages = await consumer.consume()
           
-          console.log(`[SubMgr] Consuming ${subject} from stream ${streamName} (${config.deliverPolicy})`)
+          // console.log(`[SubMgr] Consuming ${subject} for ${widgetId} (${config.deliverPolicy})`)
 
           newSubRef.iterator = messages
           processJetStreamMessages(newSubRef)
 
         } else {
           const natsSub = natsStore.nc!.subscribe(subject)
-          console.log(`[SubMgr] Subscribed to ${subject} (Core)`)
+          // console.log(`[SubMgr] Subscribed to ${subject} (Core)`)
           
           newSubRef.natsSubscription = natsSub
           processCoreMessages(newSubRef)
         }
       } catch (err) {
         console.error(`[SubMgr] Failed to subscribe to ${subject}:`, err)
-        subscriptions.delete(subject) // Clean up placeholder on error
+        subscriptions.delete(key)
         throw err
       } finally {
-        // Clear the promise so future checks know it's done
         newSubRef.initPromise = undefined
       }
     }
 
-    // Attach promise to ref and put in map
     newSubRef.initPromise = initWork()
-    subscriptions.set(subject, newSubRef)
+    subscriptions.set(key, newSubRef)
     
-    // Await it (optional, but good for caller)
     await newSubRef.initPromise
   }
   
-  function unsubscribe(widgetId: string, subject: string) {
-    const subRef = subscriptions.get(subject)
+  /**
+   * Unsubscribe using WidgetID and Config (to reconstruct key)
+   */
+  function unsubscribe(widgetId: string, config: DataSourceConfig) {
+    if (!config.subject) return
+
+    const key = getSubscriptionKey(widgetId, config)
+    const subRef = subscriptions.get(key)
     if (!subRef) return
     
     subRef.listeners.delete(widgetId)
     
     if (subRef.listeners.size === 0) {
       cleanup(subRef)
-      subscriptions.delete(subject)
+      subscriptions.delete(key)
     }
   }
   
@@ -237,7 +255,7 @@ export function useSubscriptionManager() {
         dispatchMessage(subRef, msg.data)
       }
     } catch (err) {
-      console.log(`[SubMgr] JetStream iterator ended for ${subRef.subject}`)
+      // Iterator ended
     }
   }
 
@@ -298,9 +316,10 @@ export function useSubscriptionManager() {
       subscriptions: [] as any[],
     }
     
-    for (const [subject, subRef] of subscriptions.entries()) {
+    for (const [key, subRef] of subscriptions.entries()) {
       stats.subscriptions.push({
-        subject,
+        subject: subRef.subject,
+        key: key,
         listenerCount: subRef.listeners.size,
         isActive: subRef.isActive,
         type: subRef.isJetStream ? 'JetStream' : 'Core'
@@ -309,13 +328,9 @@ export function useSubscriptionManager() {
     return stats
   }
   
-  function isSubscribed(subject: string): boolean {
-    return subscriptions.has(subject)
-  }
-  
-  function getListenerCount(subject: string): number {
-    const subRef = subscriptions.get(subject)
-    return subRef ? subRef.listeners.size : 0
+  function isSubscribed(widgetId: string, config: DataSourceConfig): boolean {
+    const key = getSubscriptionKey(widgetId, config)
+    return subscriptions.has(key)
   }
   
   return {
@@ -325,7 +340,6 @@ export function useSubscriptionManager() {
     extractJsonPath,
     getStats,
     isSubscribed,
-    getListenerCount,
   }
 }
 

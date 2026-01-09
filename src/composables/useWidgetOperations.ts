@@ -25,8 +25,7 @@ export function useWidgetOperations() {
       
       const subject = resolveTemplate(rawSubject, dashboardStore.currentVariableValues)
       
-      // Grug say: Pass full config now, not just subject
-      // Clone config to avoid mutating store state if subManager modifies it (it shouldn't, but safe)
+      // Clone config to ensure we pass the resolved subject
       const config = { 
         ...widget.dataSource, 
         subject 
@@ -42,7 +41,11 @@ export function useWidgetOperations() {
     
     if (widget.dataSource.type === 'subscription' && widget.dataSource.subject) {
       const subject = resolveTemplate(widget.dataSource.subject, dashboardStore.currentVariableValues)
-      subManager.unsubscribe(widgetId, subject)
+      
+      // We must pass the config so the manager knows if it's JS or Core
+      // to calculate the correct map key
+      const config = { ...widget.dataSource, subject }
+      subManager.unsubscribe(widgetId, config)
     }
     
     if (!keepData) {
@@ -151,6 +154,8 @@ export function useWidgetOperations() {
     const widget = dashboardStore.getWidget(widgetId)
     if (!widget) return
 
+    // Unsubscribe using CURRENT config (before updates applied)
+    // This ensures we clean up the correct subscription key
     if (needsSubscription(widget.type)) {
       unsubscribeWidget(widgetId, false) 
     }
