@@ -160,11 +160,15 @@ const form = ref<WidgetFormState>({
   gaugeMax: 100,
   gaugeUnit: '',
   gaugeZones: [],
-  // Map V2 structure
   mapCenterLat: 39.8283,
   mapCenterLon: -98.5795,
   mapZoom: 4,
   mapMarkers: [],
+  
+  // JetStream Defaults
+  useJetStream: false,
+  deliverPolicy: 'last',
+  jetstreamTimeWindow: '10m'
 })
 
 const errors = ref<Record<string, string>>({})
@@ -175,16 +179,12 @@ const widgetType = computed<WidgetType | null>(() => {
   return widget?.type || null
 })
 
-/**
- * Load widget data into form when widgetId changes
- */
 watch(() => props.widgetId, (widgetId) => {
   if (!widgetId) return
   
   const widget = dashboardStore.getWidget(widgetId)
   if (!widget) return
   
-  // Common fields
   let currentSubject = ''
   if (widget.type === 'button') {
     currentSubject = widget.buttonConfig?.publishSubject || ''
@@ -196,7 +196,6 @@ watch(() => props.widgetId, (widgetId) => {
     currentSubject = widget.dataSource.subject || ''
   }
 
-  // Load thresholds
   let currentThresholds: ThresholdRule[] = []
   if (widget.type === 'text') {
     currentThresholds = widget.textConfig?.thresholds ? [...widget.textConfig.thresholds] : []
@@ -206,10 +205,8 @@ watch(() => props.widgetId, (widgetId) => {
     currentThresholds = widget.statConfig?.thresholds ? [...widget.statConfig.thresholds] : []
   }
 
-  // Load KV bucket/key
   let currentKvBucket = ''
   let currentKvKey = ''
-  
   if (widget.type === 'switch' && widget.switchConfig?.mode === 'kv') {
     currentKvBucket = widget.switchConfig.kvBucket || ''
     currentKvKey = widget.switchConfig.kvKey || ''
@@ -221,7 +218,6 @@ watch(() => props.widgetId, (widgetId) => {
     currentKvKey = widget.dataSource.kvKey || ''
   }
 
-  // Load map config - V2 structure
   let mapCenterLat = 39.8283
   let mapCenterLon = -98.5795
   let mapZoom = 4
@@ -231,11 +227,9 @@ watch(() => props.widgetId, (widgetId) => {
     mapCenterLat = widget.mapConfig.center?.lat ?? 39.8283
     mapCenterLon = widget.mapConfig.center?.lon ?? -98.5795
     mapZoom = widget.mapConfig.zoom ?? 4
-    // Deep clone markers to avoid mutating store directly
     mapMarkers = JSON.parse(JSON.stringify(widget.mapConfig.markers || []))
   }
 
-  // Populate form
   form.value = {
     title: widget.title,
     subject: currentSubject,
@@ -249,8 +243,6 @@ watch(() => props.widgetId, (widgetId) => {
     buttonActionType: widget.buttonConfig?.actionType || 'publish',
     buttonTimeout: widget.buttonConfig?.timeout || 1000,
     thresholds: currentThresholds,
-    
-    // Switch
     switchMode: widget.switchConfig?.mode || 'kv',
     switchDefaultState: widget.switchConfig?.defaultState || 'off',
     switchStateSubject: widget.switchConfig?.stateSubject || '',
@@ -259,8 +251,6 @@ watch(() => props.widgetId, (widgetId) => {
     switchLabelOn: widget.switchConfig?.labels?.on || 'ON',
     switchLabelOff: widget.switchConfig?.labels?.off || 'OFF',
     switchConfirm: widget.switchConfig?.confirmOnChange || false,
-    
-    // Slider
     sliderMode: widget.sliderConfig?.mode || 'core',
     sliderStateSubject: widget.sliderConfig?.stateSubject || '',
     sliderValueTemplate: widget.sliderConfig?.valueTemplate || '{{value}}',
@@ -270,43 +260,36 @@ watch(() => props.widgetId, (widgetId) => {
     sliderDefault: widget.sliderConfig?.defaultValue || 50,
     sliderUnit: widget.sliderConfig?.unit || '',
     sliderConfirm: widget.sliderConfig?.confirmOnChange || false,
-    
-    // Stat
     statFormat: widget.statConfig?.format || '',
     statUnit: widget.statConfig?.unit || '',
     statShowTrend: widget.statConfig?.showTrend ?? true,
     statTrendWindow: widget.statConfig?.trendWindow || 10,
-    
-    // Gauge
     gaugeMin: widget.gaugeConfig?.min || 0,
     gaugeMax: widget.gaugeConfig?.max || 100,
     gaugeUnit: widget.gaugeConfig?.unit || '',
     gaugeZones: widget.gaugeConfig?.zones ? [...widget.gaugeConfig.zones] : [],
-
-    // Map V2
     mapCenterLat,
     mapCenterLon,
     mapZoom,
     mapMarkers,
+    
+    // JetStream Props
+    useJetStream: widget.dataSource.useJetStream || false,
+    deliverPolicy: widget.dataSource.deliverPolicy || 'last',
+    jetstreamTimeWindow: widget.dataSource.timeWindow || '10m'
   }
   
   errors.value = {}
 }, { immediate: true })
 
-/**
- * Validate form based on widget type
- */
 function validate(): boolean {
   errors.value = {}
-  
   const widget = dashboardStore.getWidget(props.widgetId!)
   if (!widget) return false
   
-  // Common validation
   const titleResult = validator.validateWidgetTitle(form.value.title)
   if (!titleResult.valid) errors.value.title = titleResult.error!
   
-  // Type-specific validation
   if (['text', 'chart', 'stat', 'gauge'].includes(widget.type)) {
     const subjectResult = validator.validateSubject(form.value.subject)
     if (!subjectResult.valid) errors.value.subject = subjectResult.error!
@@ -322,184 +305,72 @@ function validate(): boolean {
   } else if (widget.type === 'button') {
     const subjectResult = validator.validateSubject(form.value.subject)
     if (!subjectResult.valid) errors.value.subject = subjectResult.error!
-    
-    if (!form.value.buttonLabel.trim()) {
-      errors.value.buttonLabel = 'Label required'
-    }
-    
+    if (!form.value.buttonLabel.trim()) errors.value.buttonLabel = 'Label required'
     if (form.value.buttonPayload) {
       const jsonResult = validator.validateJson(form.value.buttonPayload)
       if (!jsonResult.valid) errors.value.buttonPayload = jsonResult.error!
     }
-
   } else if (widget.type === 'kv') {
     const bucketResult = validator.validateKvBucket(form.value.kvBucket)
     if (!bucketResult.valid) errors.value.kvBucket = bucketResult.error!
-    
     const keyResult = validator.validateKvKey(form.value.kvKey)
     if (!keyResult.valid) errors.value.kvKey = keyResult.error!
-    
     if (form.value.jsonPath) {
       const jsonResult = validator.validateJsonPath(form.value.jsonPath)
       if (!jsonResult.valid) errors.value.jsonPath = jsonResult.error!
     }
-    
   } else if (widget.type === 'switch') {
     if (form.value.switchMode === 'kv') {
       const bucketResult = validator.validateKvBucket(form.value.kvBucket)
       if (!bucketResult.valid) errors.value.kvBucket = bucketResult.error!
-      
       const keyResult = validator.validateKvKey(form.value.kvKey)
       if (!keyResult.valid) errors.value.kvKey = keyResult.error!
     } else {
       const subjectResult = validator.validateSubject(form.value.subject)
       if (!subjectResult.valid) errors.value.subject = subjectResult.error!
     }
-    
   } else if (widget.type === 'slider') {
     if (form.value.sliderMode === 'kv') {
       const bucketResult = validator.validateKvBucket(form.value.kvBucket)
       if (!bucketResult.valid) errors.value.kvBucket = bucketResult.error!
-      
       const keyResult = validator.validateKvKey(form.value.kvKey)
       if (!keyResult.valid) errors.value.kvKey = keyResult.error!
     } else {
       const subjectResult = validator.validateSubject(form.value.subject)
       if (!subjectResult.valid) errors.value.subject = subjectResult.error!
     }
-    
     if (form.value.jsonPath) {
       const jsonResult = validator.validateJsonPath(form.value.jsonPath)
       if (!jsonResult.valid) errors.value.jsonPath = jsonResult.error!
     }
-  } else if (widget.type === 'map') {
-    // Validate map markers and items
-    validateMapConfig()
   }
   
   return Object.keys(errors.value).length === 0
 }
 
-/**
- * Validate map configuration
- */
-function validateMapConfig() {
-  form.value.mapMarkers.forEach((marker, mIdx) => {
-    marker.items.forEach((item, iIdx) => {
-      const prefix = `marker_${mIdx}_item_${iIdx}_`
-      
-      if (item.type === 'publish') {
-        // Validate publish item
-        if (item.subject) {
-          const subjectResult = validator.validateSubject(item.subject)
-          if (!subjectResult.valid) {
-            errors.value[`${prefix}subject`] = subjectResult.error!
-          }
-        }
-        if (item.payload) {
-          const jsonResult = validator.validateJson(item.payload)
-          if (!jsonResult.valid) {
-            errors.value[`${prefix}payload`] = jsonResult.error!
-          }
-        }
-      } else if (item.type === 'switch' && item.switchConfig) {
-        // Validate switch item
-        const cfg = item.switchConfig
-        if (cfg.mode === 'kv') {
-          if (cfg.kvBucket) {
-            const bucketResult = validator.validateKvBucket(cfg.kvBucket)
-            if (!bucketResult.valid) {
-              errors.value[`${prefix}kvBucket`] = bucketResult.error!
-            }
-          }
-          if (cfg.kvKey) {
-            const keyResult = validator.validateKvKey(cfg.kvKey)
-            if (!keyResult.valid) {
-              errors.value[`${prefix}kvKey`] = keyResult.error!
-            }
-          }
-        } else {
-          if (cfg.publishSubject) {
-            const subjectResult = validator.validateSubject(cfg.publishSubject)
-            if (!subjectResult.valid) {
-              errors.value[`${prefix}publishSubject`] = subjectResult.error!
-            }
-          }
-        }
-      } else if (item.type === 'text' && item.textConfig) {
-        // Validate text item
-        if (item.textConfig.subject) {
-          const subjectResult = validator.validateSubject(item.textConfig.subject)
-          if (!subjectResult.valid) {
-            errors.value[`${prefix}subject`] = subjectResult.error!
-          }
-        } else {
-          errors.value[`${prefix}subject`] = 'Subject required'
-        }
-        
-        if (item.textConfig.jsonPath) {
-          const jsonResult = validator.validateJsonPath(item.textConfig.jsonPath)
-          if (!jsonResult.valid) {
-            errors.value[`${prefix}jsonPath`] = jsonResult.error!
-          }
-        }
-      } else if (item.type === 'kv' && item.kvConfig) {
-        // Validate kv item
-        if (item.kvConfig.kvBucket) {
-          const bucketResult = validator.validateKvBucket(item.kvConfig.kvBucket)
-          if (!bucketResult.valid) {
-            errors.value[`${prefix}kvBucket`] = bucketResult.error!
-          }
-        } else {
-          errors.value[`${prefix}kvBucket`] = 'Bucket required'
-        }
-        
-        if (item.kvConfig.kvKey) {
-          const keyResult = validator.validateKvKey(item.kvConfig.kvKey)
-          if (!keyResult.valid) {
-            errors.value[`${prefix}kvKey`] = keyResult.error!
-          }
-        } else {
-          errors.value[`${prefix}kvKey`] = 'Key required'
-        }
-        
-        if (item.kvConfig.jsonPath) {
-          const jsonResult = validator.validateJsonPath(item.kvConfig.jsonPath)
-          if (!jsonResult.valid) {
-            errors.value[`${prefix}jsonPath`] = jsonResult.error!
-          }
-        }
-      }
-    })
-  })
-}
-
-/**
- * Save widget configuration
- */
 function save() {
   if (!props.widgetId) return
-  
   if (!validate()) return
   
   const widget = dashboardStore.getWidget(props.widgetId)
   if (!widget) return
   
-  // Build updates object
   const updates: any = { title: form.value.title.trim() }
   
-  if (widget.type === 'text') {
-    updates.dataSource = { ...widget.dataSource, subject: form.value.subject.trim() }
-    updates.jsonPath = form.value.jsonPath.trim() || undefined
-    updates.buffer = { maxCount: form.value.bufferSize }
-    updates.textConfig = { 
-      ...widget.textConfig,
-      thresholds: [...form.value.thresholds]
+  if (['text', 'chart', 'stat', 'gauge'].includes(widget.type)) {
+    updates.dataSource = { 
+      ...widget.dataSource, 
+      subject: form.value.subject.trim(),
+      useJetStream: form.value.useJetStream,
+      deliverPolicy: form.value.deliverPolicy,
+      timeWindow: form.value.jetstreamTimeWindow
     }
-  } else if (widget.type === 'chart') {
-    updates.dataSource = { ...widget.dataSource, subject: form.value.subject.trim() }
     updates.jsonPath = form.value.jsonPath.trim() || undefined
     updates.buffer = { maxCount: form.value.bufferSize }
+  }
+  
+  if (widget.type === 'text') {
+    updates.textConfig = { ...widget.textConfig, thresholds: [...form.value.thresholds] }
   } else if (widget.type === 'button') {
     updates.buttonConfig = {
       label: form.value.buttonLabel.trim(),
@@ -516,10 +387,7 @@ function save() {
       kvKey: form.value.kvKey.trim(),
     }
     updates.jsonPath = form.value.jsonPath.trim() || undefined
-    updates.kvConfig = {
-      ...widget.kvConfig,
-      thresholds: [...form.value.thresholds]
-    }
+    updates.kvConfig = { ...widget.kvConfig, thresholds: [...form.value.thresholds] }
   } else if (widget.type === 'switch') {
     updates.switchConfig = {
       mode: form.value.switchMode,
@@ -559,9 +427,6 @@ function save() {
       confirmOnChange: form.value.sliderConfirm,
     }
   } else if (widget.type === 'stat') {
-    updates.dataSource = { ...widget.dataSource, subject: form.value.subject.trim() }
-    updates.jsonPath = form.value.jsonPath.trim() || undefined
-    updates.buffer = { maxCount: form.value.bufferSize }
     updates.statConfig = {
       format: form.value.statFormat.trim() || undefined,
       unit: form.value.statUnit.trim() || undefined,
@@ -570,9 +435,6 @@ function save() {
       thresholds: [...form.value.thresholds],
     }
   } else if (widget.type === 'gauge') {
-    updates.dataSource = { ...widget.dataSource, subject: form.value.subject.trim() }
-    updates.jsonPath = form.value.jsonPath.trim() || undefined
-    updates.buffer = { maxCount: form.value.bufferSize }
     updates.gaugeConfig = {
       min: form.value.gaugeMin,
       max: form.value.gaugeMax,
@@ -580,19 +442,14 @@ function save() {
       zones: [...form.value.gaugeZones],
     }
   } else if (widget.type === 'map') {
-    // Map V2 - use markers array directly
     updates.mapConfig = {
-      center: {
-        lat: form.value.mapCenterLat,
-        lon: form.value.mapCenterLon,
-      },
+      center: { lat: form.value.mapCenterLat, lon: form.value.mapCenterLon },
       zoom: form.value.mapZoom,
-      markers: JSON.parse(JSON.stringify(form.value.mapMarkers)), // Deep clone
+      markers: JSON.parse(JSON.stringify(form.value.mapMarkers)),
     }
   }
   
   updateWidgetConfiguration(props.widgetId, updates)
-  
   emit('saved')
   close()
 }
@@ -629,7 +486,6 @@ function close() {
   flex-direction: column;
 }
 
-/* Larger modal for complex widgets like map */
 .modal.modal-large {
   max-width: 800px;
   max-height: 90vh;

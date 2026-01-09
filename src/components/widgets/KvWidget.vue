@@ -233,9 +233,18 @@ function cleanup() {
 onMounted(() => { if (natsStore.isConnected) loadKvValue() })
 onUnmounted(cleanup)
 watch(resolvedConfig, () => { cleanup(); if (natsStore.isConnected) loadKvValue() }, { deep: true })
+
+// Grug say: Watch connection. If connected, load data.
+// If disconnected, just stop watcher (cleanup) but KEEP DATA visible.
+// Do not set error.value = 'Not connected' because that hides the data.
 watch(() => natsStore.isConnected, (isConnected) => {
-  if (isConnected) loadKvValue()
-  else { cleanup(); error.value = 'Not connected'; loading.value = false }
+  if (isConnected) {
+    loadKvValue()
+  } else { 
+    cleanup()
+    loading.value = false
+    // Grug say: Keep old value on screen.
+  }
 })
 </script>
 

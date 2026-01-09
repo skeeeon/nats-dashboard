@@ -469,11 +469,13 @@ onUnmounted(() => {
   window.removeEventListener('show-shortcuts-help', handleShowShortcuts)
 })
 
+// Grug say: Watch connection. If connected, ensure we are subscribed.
+// If disconnected, DO NOTHING. Let nats.js handle reconnect.
+// If manual reconnect (new connection object), subscribeAllWidgets will fix it
+// because useSubscriptionManager checks for closed subs.
 watch(() => natsStore.isConnected, (connected) => {
   if (connected) {
     subscribeAllWidgets()
-  } else {
-    unsubscribeAllWidgets(true) 
   }
 })
 

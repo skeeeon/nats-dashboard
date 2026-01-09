@@ -258,7 +258,7 @@ function startTextSubscription(item: MapMarkerItem) {
           updateItemValue(item.id, String(val))
         }
       } catch (err) {
-        console.error('[MapWidget] Text sub error:', err)
+        // console.error('[MapWidget] Text sub error:', err)
       }
     })()
 
@@ -434,6 +434,24 @@ watch([mapCenter, mapZoom], () => {
   mapReady.value = false
   initializeMap() // Re-init
 }, { deep: true })
+
+// Grug say: Watch connection. If connected AND popup open, restart Text/KV items.
+// Switch items handle themselves via useSwitchState.
+watch(() => natsStore.isConnected, (connected) => {
+  if (connected && openMarkerId.value) {
+    const marker = markers.value.find(m => m.id === openMarkerId.value)
+    if (marker) {
+      // Restart Text and KV items
+      marker.items.forEach(item => {
+        if (item.type === 'text' || item.type === 'kv') {
+          stopSubscription(item.id) // Clean old
+          if (item.type === 'text' && item.textConfig) startTextSubscription(item)
+          else if (item.type === 'kv' && item.kvConfig) startKvWatcher(item)
+        }
+      })
+    }
+  }
+})
 
 watch(() => dashboardStore.currentVariableValues, () => {
   if (openMarkerId.value) {

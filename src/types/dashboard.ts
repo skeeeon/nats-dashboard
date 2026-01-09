@@ -11,11 +11,11 @@ export type ChartType = 'line' | 'bar' | 'pie' | 'gauge'
 export type VariableType = 'text' | 'select'
 
 export interface DashboardVariable {
-  id: string          // Unique ID for the variable definition
-  name: string        // The token used in templates (e.g. "device_id")
-  label: string       // Display label (e.g. "Device")
+  id: string
+  name: string
+  label: string
   type: VariableType
-  options?: string[]  // For 'select' type
+  options?: string[]
   defaultValue: string
 }
 
@@ -30,6 +30,9 @@ export interface ThresholdRule {
 }
 
 // --- Data Source Configuration ---
+// Grug Update: Added 'by_start_time'
+export type DeliverPolicy = 'all' | 'last' | 'new' | 'last_per_subject' | 'by_start_time'
+
 export interface DataSourceConfig {
   type: DataSourceType
   subject?: string
@@ -37,6 +40,11 @@ export interface DataSourceConfig {
   consumer?: string
   kvBucket?: string
   kvKey?: string
+  
+  // JetStream Options
+  useJetStream?: boolean
+  deliverPolicy?: DeliverPolicy
+  timeWindow?: string // e.g. "10m", "1h" (Only for by_start_time)
 }
 
 export interface BufferConfig {
@@ -62,8 +70,8 @@ export interface ButtonWidgetConfig {
   publishSubject: string
   payload: string
   color?: string
-  actionType?: 'publish' | 'request' // New: Request-Reply support
-  timeout?: number                   // New: Timeout in ms
+  actionType?: 'publish' | 'request'
+  timeout?: number
 }
 
 export interface KvWidgetConfig {
@@ -165,10 +173,8 @@ export interface MapMarkerItem {
   id: string
   type: MapItemType
   label: string
-  // Legacy/Shared fields (Publish)
   subject?: string
   payload?: string
-  // Type specific configs
   switchConfig?: MapItemSwitchConfig
   textConfig?: MapItemTextConfig
   kvConfig?: MapItemKvConfig
@@ -216,7 +222,6 @@ export interface WidgetConfig {
   mapConfig?: MapWidgetConfig
 }
 
-// Storage Types
 export type StorageType = 'local' | 'kv'
 
 export interface Dashboard {
@@ -227,15 +232,12 @@ export interface Dashboard {
   modified: number
   widgets: WidgetConfig[]
   variables?: DashboardVariable[]
-  isLocked?: boolean  // Per-dashboard lock state
-  
-  // Storage Metadata
+  isLocked?: boolean
   storage?: StorageType
   kvKey?: string
   kvRevision?: number
 }
 
-// --- Default Widget Sizes ---
 export const DEFAULT_WIDGET_SIZES: Record<WidgetType, { w: number; h: number }> = {
   chart: { w: 6, h: 4 },
   text: { w: 2, h: 2 },
@@ -252,7 +254,6 @@ export const DEFAULT_BUFFER_CONFIG: BufferConfig = {
   maxCount: 10,
 }
 
-// --- Widget Factory Functions ---
 export function createDefaultWidget(type: WidgetType, position: { x: number; y: number }): WidgetConfig {
   const size = DEFAULT_WIDGET_SIZES[type]
   const id = `widget_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -355,7 +356,7 @@ export function createDefaultDashboard(name: string): Dashboard {
     modified: now,
     widgets: [],
     variables: [],
-    isLocked: false,  // New dashboards start unlocked
+    isLocked: false,
     storage: 'local'
   }
 }

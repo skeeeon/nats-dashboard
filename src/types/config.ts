@@ -1,12 +1,6 @@
 // src/types/config.ts
 import type { ThresholdRule, MapMarker } from './dashboard'
 
-/**
- * Widget Form State
- * 
- * Grug say: Flat structure for simple widgets, nested for complex ones (map).
- * ConfigureWidgetModal uses this to manage all widget config forms.
- */
 export interface WidgetFormState {
   // Common
   title: string
@@ -22,10 +16,10 @@ export interface WidgetFormState {
   buttonLabel: string
   buttonPayload: string
   buttonColor: string
-  buttonActionType: 'publish' | 'request' // New
-  buttonTimeout: number // New
+  buttonActionType: 'publish' | 'request'
+  buttonTimeout: number
   
-  // Thresholds (Text, KV, Stat)
+  // Thresholds
   thresholds: ThresholdRule[]
   
   // Switch Widget
@@ -61,17 +55,18 @@ export interface WidgetFormState {
   gaugeUnit: string
   gaugeZones: Array<{ min: number; max: number; color: string }>
   
-  // Map Widget - V2: Full structured data
+  // Map Widget
   mapCenterLat: number
   mapCenterLon: number
   mapZoom: number
-  mapMarkers: MapMarker[]  // Full array of markers with nested actions
+  mapMarkers: MapMarker[]
+  
+  // JetStream
+  useJetStream: boolean
+  deliverPolicy: 'all' | 'last' | 'new' | 'last_per_subject' | 'by_start_time'
+  jetstreamTimeWindow: string // e.g. "10m"
 }
 
-/**
- * Create empty form state with defaults
- * Grug say: Useful for resetting form or creating new widget config
- */
 export function createEmptyFormState(): WidgetFormState {
   return {
     title: '',
@@ -115,5 +110,8 @@ export function createEmptyFormState(): WidgetFormState {
     mapCenterLon: -98.5795,
     mapZoom: 4,
     mapMarkers: [],
+    useJetStream: false,
+    deliverPolicy: 'last',
+    jetstreamTimeWindow: '10m'
   }
 }
