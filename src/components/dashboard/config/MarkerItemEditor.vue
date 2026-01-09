@@ -1,3 +1,4 @@
+<!-- src/components/dashboard/config/MarkerItemEditor.vue -->
 <template>
   <div class="item-editor">
     <div class="item-header">
@@ -40,6 +41,30 @@
       
       <!-- Publish Item Fields -->
       <template v-if="item.type === 'publish'">
+        <div class="form-row">
+          <label>Action Type</label>
+          <select 
+            :value="item.actionType || 'publish'"
+            @change="updateField('actionType', ($event.target as HTMLSelectElement).value)"
+            class="form-input"
+          >
+            <option value="publish">Publish (Fire & Forget)</option>
+            <option value="request">Request (Wait for Reply)</option>
+          </select>
+        </div>
+
+        <div v-if="item.actionType === 'request'" class="form-row">
+          <label>Timeout (ms)</label>
+          <input 
+            :value="item.timeout || 1000"
+            @input="updateField('timeout', parseInt(($event.target as HTMLInputElement).value))"
+            type="number"
+            min="100"
+            step="100"
+            class="form-input"
+          />
+        </div>
+
         <div class="form-row">
           <label>Subject</label>
           <input 
@@ -214,6 +239,47 @@
           <div v-if="errors?.subject" class="error-text">{{ errors.subject }}</div>
         </div>
 
+        <!-- JetStream Toggle -->
+        <div class="form-row">
+          <label class="checkbox-label">
+            <input 
+              type="checkbox" 
+              :checked="textConfig.useJetStream"
+              @change="updateTextField('useJetStream', ($event.target as HTMLInputElement).checked)"
+            />
+            <span>Use JetStream (History)</span>
+          </label>
+        </div>
+
+        <!-- JetStream Options -->
+        <template v-if="textConfig.useJetStream">
+          <div class="form-row">
+            <label>Deliver Policy</label>
+            <select 
+              :value="textConfig.deliverPolicy || 'last'" 
+              @change="updateTextField('deliverPolicy', ($event.target as HTMLSelectElement).value)"
+              class="form-input"
+            >
+              <option value="all">All</option>
+              <option value="last">Last</option>
+              <option value="last_per_subject">Last Per Subject</option>
+              <option value="new">New</option>
+              <option value="by_start_time">By Time Window</option>
+            </select>
+          </div>
+
+          <div v-if="textConfig.deliverPolicy === 'by_start_time'" class="form-row">
+            <label>Time Window</label>
+            <input 
+              :value="textConfig.timeWindow"
+              @input="updateTextField('timeWindow', ($event.target as HTMLInputElement).value)"
+              type="text" 
+              class="form-input"
+              placeholder="10m"
+            />
+          </div>
+        </template>
+
         <div class="form-row">
           <label>JSONPath (optional)</label>
           <input 
@@ -305,9 +371,6 @@ function getItemIcon(type: MapItemType) {
   }
 }
 
-/**
- * Get configs with defaults (read-only)
- */
 const switchConfig = computed<MapItemSwitchConfig>(() => {
   return props.item.switchConfig || {
     mode: 'kv',
@@ -323,7 +386,10 @@ const textConfig = computed<MapItemTextConfig>(() => {
   return props.item.textConfig || {
     subject: '',
     jsonPath: '',
-    unit: ''
+    unit: '',
+    useJetStream: false,
+    deliverPolicy: 'last',
+    timeWindow: '10m'
   }
 })
 
@@ -335,77 +401,47 @@ const kvConfig = computed<MapItemKvConfig>(() => {
   }
 })
 
-/**
- * Labels helper with defaults (read-only)
- */
 const switchLabels = computed(() => {
   return switchConfig.value.labels || { on: 'ON', off: 'OFF' }
 })
 
-/**
- * ON payload as string for input binding
- */
 const onPayloadStr = computed(() => {
   return JSON.stringify(switchConfig.value.onPayload || { state: 'on' })
 })
 
-/**
- * OFF payload as string for input binding
- */
 const offPayloadStr = computed(() => {
   return JSON.stringify(switchConfig.value.offPayload || { state: 'off' })
 })
 
-/**
- * Emit updated item to parent
- */
 function emitUpdate(updates: Partial<MapMarkerItem>) {
   emit('update:item', { ...props.item, ...updates })
 }
 
-/**
- * Update a top-level field on the item
- */
 function updateField(field: keyof MapMarkerItem, value: any) {
   emitUpdate({ [field]: value })
 }
 
-/**
- * Update a field in switchConfig
- */
 function updateSwitchField(field: keyof MapItemSwitchConfig, value: any) {
   const newSwitchConfig = { ...switchConfig.value, [field]: value }
   emitUpdate({ switchConfig: newSwitchConfig })
 }
 
-/**
- * Update a field in textConfig
- */
 function updateTextField(field: keyof MapItemTextConfig, value: any) {
   const newTextConfig = { ...textConfig.value, [field]: value }
   emitUpdate({ textConfig: newTextConfig })
 }
 
-/**
- * Update a field in kvConfig
- */
 function updateKvField(field: keyof MapItemKvConfig, value: any) {
   const newKvConfig = { ...kvConfig.value, [field]: value }
   emitUpdate({ kvConfig: newKvConfig })
 }
 
-/**
- * Update switch label
- */
 function updateSwitchLabel(which: 'on' | 'off', value: string) {
   const newLabels = { ...switchLabels.value, [which]: value }
   const newSwitchConfig = { ...switchConfig.value, labels: newLabels }
   emitUpdate({ switchConfig: newSwitchConfig })
 }
 
-/**
- * Update payload (parse JSON if possible)
- */
 function updatePayload(which: 'on' | 'off', value: string) {
   let parsed: any
   try {
@@ -419,14 +455,10 @@ function updatePayload(which: 'on' | 'off', value: string) {
   emitUpdate({ switchConfig: newSwitchConfig })
 }
 
-/**
- * Handle type change - reset type-specific fields
- */
 function handleTypeChange(event: Event) {
   const newType = (event.target as HTMLSelectElement).value as MapItemType
   const newItem = createDefaultItem(newType)
   
-  // Preserve common fields
   newItem.id = props.item.id
   newItem.label = props.item.label
   

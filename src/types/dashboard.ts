@@ -30,7 +30,6 @@ export interface ThresholdRule {
 }
 
 // --- Data Source Configuration ---
-// Grug Update: Added 'by_start_time'
 export type DeliverPolicy = 'all' | 'last' | 'new' | 'last_per_subject' | 'by_start_time'
 
 export interface DataSourceConfig {
@@ -161,6 +160,10 @@ export interface MapItemTextConfig {
   subject: string
   jsonPath?: string
   unit?: string
+  // JetStream Fields
+  useJetStream?: boolean
+  deliverPolicy?: DeliverPolicy
+  timeWindow?: string
 }
 
 export interface MapItemKvConfig {
@@ -175,6 +178,10 @@ export interface MapMarkerItem {
   label: string
   subject?: string
   payload?: string
+  // New Request/Reply fields for 'publish' type
+  actionType?: 'publish' | 'request'
+  timeout?: number
+  
   switchConfig?: MapItemSwitchConfig
   textConfig?: MapItemTextConfig
   kvConfig?: MapItemKvConfig
@@ -395,7 +402,10 @@ export function createDefaultItem(type: MapItemType = 'publish'): MapMarkerItem 
       label: 'Value',
       textConfig: {
         subject: 'data.subject',
-        unit: ''
+        unit: '',
+        useJetStream: false,
+        deliverPolicy: 'last',
+        timeWindow: '10m'
       }
     }
   } else if (type === 'kv') {
@@ -415,6 +425,8 @@ export function createDefaultItem(type: MapItemType = 'publish'): MapMarkerItem 
     type: 'publish',
     label: 'Send',
     subject: 'marker.action',
-    payload: '{}'
+    payload: '{}',
+    actionType: 'publish',
+    timeout: 1000
   }
 }

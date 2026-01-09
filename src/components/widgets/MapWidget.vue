@@ -1,3 +1,4 @@
+// src/components/widgets/MapWidget.vue
 <template>
   <div class="map-widget">
     <!-- Map container -->
@@ -31,6 +32,15 @@
     >
       {{ actionFeedback.message }}
     </div>
+
+    <!-- Response Modal for Request/Reply Items -->
+    <ResponseModal
+      v-model="showResponseModal"
+      :title="responseTitle"
+      :status="responseStatus"
+      :data="responseData"
+      :latency="responseLatency"
+    />
   </div>
 </template>
 
@@ -46,6 +56,8 @@ import { resolveTemplate } from '@/utils/variables'
 import type { WidgetConfig, MapMarkerItem } from '@/types/dashboard'
 import { Kvm } from '@nats-io/kv'
 import { JSONPath } from 'jsonpath-plus'
+import { jetstream, jetstreamManager } from '@nats-io/jetstream'
+import ResponseModal from '@/components/common/ResponseModal.vue'
 
 const props = withDefaults(defineProps<{
   config: WidgetConfig
@@ -67,6 +79,13 @@ const mapContainerId = computed(() => {
 
 const mapReady = ref(false)
 const actionFeedback = ref<{ type: 'success' | 'error'; message: string } | null>(null)
+
+// Response Modal State
+const showResponseModal = ref(false)
+const responseData = ref('')
+const responseStatus = ref<'success' | 'error'>('success')
+const responseLatency = ref(0)
+const responseTitle = ref('Response')
 
 // Track active switch states
 interface SwitchStateEntry {
@@ -90,10 +109,30 @@ const mapZoom = computed(() => props.config.mapConfig?.zoom || 4)
 // Initialization tracking
 let initTimeout: number | null = null
 
+function calculateStartTime(windowStr: string | undefined): Date {
+  const now = Date.now()
+  if (!windowStr) return new Date(now - 10 * 60 * 1000)
+  
+  const match = windowStr.match(/^(\d+)([smhd])$/)
+  if (!match) return new Date(now - 10 * 60 * 1000)
+  
+  const val = parseInt(match[1])
+  const unit = match[2]
+  let ms = 0
+  
+  switch (unit) {
+    case 's': ms = val * 1000; break
+    case 'm': ms = val * 60 * 1000; break
+    case 'h': ms = val * 60 * 60 * 1000; break
+    case 'd': ms = val * 24 * 60 * 60 * 1000; break
+  }
+  return new Date(now - ms)
+}
+
 /**
  * Handle publish item click
  */
-function handlePublishItem(item: MapMarkerItem) {
+async function handlePublishItem(item: MapMarkerItem) {
   if (!natsStore.nc || !natsStore.isConnected) {
     showFeedback('error', 'Not connected to NATS')
     return
@@ -108,15 +147,46 @@ function handlePublishItem(item: MapMarkerItem) {
     return
   }
 
-  try {
-    const payload = encodeString(payloadStr)
-    natsStore.nc.publish(subject, payload)
-    
-    showFeedback('success', `Published to ${subject}`)
-    console.log(`[MapWidget] Published to ${subject}`)
-  } catch (err: any) {
-    console.error('[MapWidget] Publish error:', err)
-    showFeedback('error', 'Failed to publish')
+  const payload = encodeString(payloadStr)
+
+  // Request Mode
+  if (item.actionType === 'request') {
+    const timeout = item.timeout || 1000
+    // Show loading via toast
+    showFeedback('success', `Requesting ${subject}...`)
+    const start = Date.now()
+
+    try {
+      const msg = await natsStore.nc.request(subject, payload, { timeout })
+      
+      // Clear toast
+      actionFeedback.value = null
+      
+      // Show modal
+      responseLatency.value = Date.now() - start
+      responseData.value = decodeBytes(msg.data)
+      responseStatus.value = 'success'
+      responseTitle.value = item.label || 'Response'
+      showResponseModal.value = true
+      
+    } catch (err: any) {
+      responseLatency.value = Date.now() - start
+      responseData.value = err.message || 'Request failed'
+      responseStatus.value = 'error'
+      responseTitle.value = 'Request Failed'
+      showResponseModal.value = true
+    }
+  } 
+  // Publish Mode (Fire & Forget)
+  else {
+    try {
+      natsStore.nc.publish(subject, payload)
+      showFeedback('success', `Published to ${subject}`)
+      console.log(`[MapWidget] Published to ${subject}`)
+    } catch (err: any) {
+      console.error('[MapWidget] Publish error:', err)
+      showFeedback('error', 'Failed to publish')
+    }
   }
 }
 
@@ -231,45 +301,102 @@ function stopAllSwitchStateWatchers() {
 /**
  * Start NATS subscription for Text item
  */
-function startTextSubscription(item: MapMarkerItem) {
+async function startTextSubscription(item: MapMarkerItem) {
   if (!natsStore.nc || !natsStore.isConnected || !item.textConfig) return
   
   const subject = resolveTemplate(item.textConfig.subject, dashboardStore.currentVariableValues)
   if (!subject) return
 
   try {
-    const sub = natsStore.nc.subscribe(subject)
-    
-    // Async iterator loop
-    ;(async () => {
+    // 1. JETSTREAM PATH
+    if (item.textConfig.useJetStream) {
+      const jsm = await jetstreamManager(natsStore.nc)
+      
+      // Find stream for subject
+      let streamName: string
       try {
-        for await (const msg of sub) {
-          const text = decodeBytes(msg.data)
-          let val: any = text
-          try { val = JSON.parse(text) } catch {}
-          
-          if (item.textConfig?.jsonPath && typeof val === 'object') {
-            try {
-              const extracted = JSONPath({ path: item.textConfig.jsonPath, json: val, wrap: false })
-              if (extracted !== undefined) val = extracted
-            } catch {}
-          }
-          
-          updateItemValue(item.id, String(val))
-        }
-      } catch (err) {
-        // console.error('[MapWidget] Text sub error:', err)
+        streamName = await jsm.streams.find(subject)
+      } catch (e) {
+        console.warn(`[MapWidget] No stream found for ${subject}`)
+        updateItemValue(item.id, 'No Stream')
+        return
       }
-    })()
 
-    activeSubscriptions.set(item.id, {
-      stop: () => {
-        try { sub.unsubscribe() } catch {}
+      const js = jetstream(natsStore.nc)
+      const consumerOpts: any = {
+        filter_subjects: [subject],
+        deliver_policy: item.textConfig.deliverPolicy || 'last',
       }
-    })
-  } catch (err) {
+
+      if (item.textConfig.deliverPolicy === 'by_start_time') {
+        consumerOpts.opt_start_time = calculateStartTime(item.textConfig.timeWindow).toISOString()
+      }
+
+      // Get Ordered Consumer (lightweight, ephemeral)
+      const consumer = await js.consumers.get(streamName, consumerOpts)
+      const messages = await consumer.consume()
+
+      // Track iterator for cleanup
+      activeSubscriptions.set(item.id, {
+        stop: () => {
+          try { messages.stop() } catch {}
+        }
+      })
+
+      // Consume loop
+      ;(async () => {
+        try {
+          for await (const msg of messages) {
+            msg.ack() // Ack immediately for UI consumers
+            processMessageData(item, msg.data)
+          }
+        } catch (err) {
+          // Iterator ended or connection closed
+        }
+      })()
+
+    } 
+    // 2. CORE NATS PATH
+    else {
+      const sub = natsStore.nc.subscribe(subject)
+      
+      activeSubscriptions.set(item.id, {
+        stop: () => {
+          try { sub.unsubscribe() } catch {}
+        }
+      })
+
+      ;(async () => {
+        try {
+          for await (const msg of sub) {
+            processMessageData(item, msg.data)
+          }
+        } catch (err) {
+          // Sub closed
+        }
+      })()
+    }
+  } catch (err: any) {
     console.error('[MapWidget] Failed to subscribe:', err)
+    updateItemValue(item.id, 'Error')
   }
+}
+
+// Helper to process data (shared by both paths)
+function processMessageData(item: MapMarkerItem, rawData: Uint8Array) {
+  const text = decodeBytes(rawData)
+  let val: any = text
+  try { val = JSON.parse(text) } catch {}
+  
+  if (item.textConfig?.jsonPath && typeof val === 'object') {
+    try {
+      const extracted = JSONPath({ path: item.textConfig.jsonPath, json: val, wrap: false })
+      if (extracted !== undefined) val = extracted
+    } catch {}
+  }
+  
+  // Format if needed or just stringify
+  updateItemValue(item.id, String(val))
 }
 
 /**
@@ -363,7 +490,10 @@ function stopAllSubscriptions() {
 function showFeedback(type: 'success' | 'error', message: string) {
   actionFeedback.value = { type, message }
   setTimeout(() => {
-    actionFeedback.value = null
+    // Only clear if the user hasn't triggered another one in the meantime (simple check)
+    if (actionFeedback.value?.message === message) {
+      actionFeedback.value = null
+    }
   }, 2000)
 }
 
