@@ -96,6 +96,7 @@ function generateLineChart(data: any[]) {
   const styling = chartStyling.value
   
   return {
+    animation:false,
     grid: {
       left: 50,
       right: 20,
