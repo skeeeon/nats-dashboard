@@ -12,74 +12,15 @@
         
         <!-- Data Source (Shared by visualization widgets) -->
         <ConfigDataSource 
-          v-if="['text', 'chart', 'stat', 'gauge', 'console'].includes(widgetType || '')"
+          v-if="showDataSourceConfig"
           :form="form" 
           :errors="errors" 
         />
 
-        <!-- Widget Specific Configs -->
-        <ConfigText 
-          v-if="widgetType === 'text'" 
-          :form="form" 
-          :errors="errors" 
-        />
-        
-        <ConfigChart 
-          v-if="widgetType === 'chart'" 
-          :form="form" 
-          :errors="errors" 
-        />
-        
-        <ConfigStat 
-          v-if="widgetType === 'stat'" 
-          :form="form" 
-          :errors="errors" 
-        />
-        
-        <ConfigGauge 
-          v-if="widgetType === 'gauge'" 
-          :form="form" 
-          :errors="errors" 
-        />
-        
-        <ConfigButton 
-          v-if="widgetType === 'button'" 
-          :form="form" 
-          :errors="errors" 
-        />
-        
-        <ConfigKv 
-          v-if="widgetType === 'kv'" 
-          :form="form" 
-          :errors="errors" 
-        />
-        
-        <ConfigSwitch 
-          v-if="widgetType === 'switch'" 
-          :form="form" 
-          :errors="errors" 
-        />
-        
-        <ConfigSlider 
-          v-if="widgetType === 'slider'" 
-          :form="form" 
-          :errors="errors" 
-        />
-        
-        <ConfigMap 
-          v-if="widgetType === 'map'" 
-          :form="form" 
-          :errors="errors" 
-        />
-
-        <ConfigConsole
-          v-if="widgetType === 'console'"
-          :form="form"
-          :errors="errors"
-        />
-
-        <ConfigPublisher
-          v-if="widgetType === 'publisher'"
+        <!-- Widget Specific Config (Dynamic) -->
+        <component 
+          v-if="activeConfigComponent"
+          :is="activeConfigComponent"
           :form="form"
           :errors="errors"
         />
@@ -135,6 +76,21 @@ const emit = defineEmits<{
 const dashboardStore = useDashboardStore()
 const validator = useValidation()
 const { updateWidgetConfiguration } = useWidgetOperations()
+
+// Component Mapping
+const configComponents: Record<string, any> = {
+  text: ConfigText,
+  chart: ConfigChart,
+  stat: ConfigStat,
+  gauge: ConfigGauge,
+  button: ConfigButton,
+  kv: ConfigKv,
+  switch: ConfigSwitch,
+  slider: ConfigSlider,
+  map: ConfigMap,
+  console: ConfigConsole,
+  publisher: ConfigPublisher
+}
 
 const form = ref<WidgetFormState>({
   title: '',
@@ -196,6 +152,18 @@ const widgetType = computed<WidgetType | null>(() => {
   if (!props.widgetId) return null
   const widget = dashboardStore.getWidget(props.widgetId)
   return widget?.type || null
+})
+
+// Dynamic Component Logic
+const activeConfigComponent = computed(() => {
+  if (!widgetType.value) return null
+  return configComponents[widgetType.value] || null
+})
+
+// Logic for showing the generic Data Source config block
+const showDataSourceConfig = computed(() => {
+  const typesWithDataSource = ['text', 'chart', 'stat', 'gauge', 'console']
+  return typesWithDataSource.includes(widgetType.value || '')
 })
 
 watch(() => props.widgetId, (widgetId) => {
