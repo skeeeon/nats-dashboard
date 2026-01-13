@@ -1,4 +1,3 @@
-<!-- src/components/widgets/MapWidget.vue -->
 <template>
   <div class="map-widget">
     <!-- Map container -->
@@ -17,11 +16,6 @@
     <div v-if="mapReady && markers.length === 0" class="no-markers-hint">
       <span class="hint-icon">📍</span>
       <span class="hint-text">No markers configured</span>
-    </div>
-    
-    <!-- Disconnected indicator -->
-    <div v-if="!natsStore.isConnected && hasItems" class="disconnected-badge">
-      ⚠️ Offline
     </div>
     
     <!-- Action feedback toast -->
@@ -48,7 +42,6 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useLeafletMap } from '@/composables/useLeafletMap'
 import { useMapInteractions } from '@/composables/useMapInteractions'
-import { useNatsStore } from '@/stores/nats'
 import { useTheme } from '@/composables/useTheme'
 import type { WidgetConfig } from '@/types/dashboard'
 import ResponseModal from '@/components/common/ResponseModal.vue'
@@ -60,7 +53,6 @@ const props = withDefaults(defineProps<{
   isFullscreen: false
 })
 
-const natsStore = useNatsStore()
 const { theme } = useTheme()
 const { initMap, updateTheme, renderMarkers, invalidateSize, cleanup } = useLeafletMap()
 
@@ -72,7 +64,6 @@ const mapContainerId = computed(() => {
 
 const mapReady = ref(false)
 const markers = computed(() => props.config.mapConfig?.markers || [])
-const hasItems = computed(() => markers.value.some(m => m.items && m.items.length > 0))
 const mapCenter = computed(() => props.config.mapConfig?.center || { lat: 39.8283, lon: -98.5795 })
 const mapZoom = computed(() => props.config.mapConfig?.zoom || 4)
 
@@ -145,7 +136,6 @@ watch([mapCenter, mapZoom], () => {
 </script>
 
 <style scoped>
-/* Styles remain exactly the same as before */
 .map-widget {
   height: 100%;
   width: 100%;
@@ -221,20 +211,6 @@ watch([mapCenter, mapZoom], () => {
 }
 
 .hint-icon { font-size: 14px; }
-
-.disconnected-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 10;
-  padding: 4px 8px;
-  background: var(--color-warning-bg);
-  border: 1px solid var(--color-warning-border);
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-warning);
-}
 
 .action-feedback {
   position: absolute;

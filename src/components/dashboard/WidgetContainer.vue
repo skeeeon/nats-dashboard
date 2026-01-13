@@ -1,5 +1,12 @@
 <template>
-  <div class="widget-container" :class="{ 'is-locked': dashboardStore.isLocked, 'is-mobile': isMobile }">
+  <div 
+    class="widget-container" 
+    :class="{ 
+      'is-locked': dashboardStore.isLocked, 
+      'is-mobile': isMobile,
+      'is-offline': !natsStore.isConnected
+    }"
+  >
     <div v-if="!config" class="widget-error">
       <div class="error-icon">⚠️</div>
       <div class="error-message">Configuration missing</div>
@@ -14,6 +21,11 @@
         <!-- On Mobile: Hide title text in header to save space & avoid dupes (card has title) -->
         <div v-if="!isMobile" class="widget-title" :title="config.title">{{ config.title }}</div>
         <div v-else class="widget-title mobile-spacer"></div>
+
+        <!-- Offline Indicator -->
+        <div v-if="!natsStore.isConnected" class="offline-indicator" title="Disconnected from NATS">
+          ⚠️
+        </div>
 
         <div class="widget-actions">
           <button class="icon-btn" title="Full Screen" @click="$emit('fullscreen')">⛶</button>
@@ -46,6 +58,7 @@
 <script setup lang="ts">
 import { computed, ref, onErrorCaptured } from 'vue'
 import { useDashboardStore } from '@/stores/dashboard'
+import { useNatsStore } from '@/stores/nats'
 import type { WidgetConfig } from '@/types/dashboard'
 import TextWidget from '@/components/widgets/TextWidget.vue'
 import ChartWidget from '@/components/widgets/ChartWidget.vue'
@@ -72,6 +85,7 @@ const emit = defineEmits<{
 }>()
 
 const dashboardStore = useDashboardStore()
+const natsStore = useNatsStore()
 const error = ref<string | null>(null)
 
 const widgetComponent = computed(() => {
@@ -136,6 +150,31 @@ onErrorCaptured((err) => {
 
 .widget-container.is-locked:not(.is-mobile):hover {
   transform: translateY(-2px);
+}
+
+/* Offline State */
+.widget-container.is-offline {
+  border-color: var(--color-warning);
+}
+
+.widget-container.is-offline .widget-body {
+  opacity: 0.7;
+  filter: grayscale(0.8);
+  /* Note: We do NOT disable pointer-events here so users can still copy text from consoles/kv widgets */
+}
+
+.offline-indicator {
+  font-size: 14px;
+  margin-right: 4px;
+  animation: pulse 2s infinite;
+  cursor: help;
+  user-select: none;
+}
+
+@keyframes pulse {
+  0% { opacity: 0.5; }
+  50% { opacity: 1; }
+  100% { opacity: 0.5; }
 }
 
 .widget-header {

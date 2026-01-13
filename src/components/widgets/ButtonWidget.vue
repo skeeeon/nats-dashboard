@@ -1,4 +1,3 @@
-<!-- src/components/widgets/ButtonWidget.vue -->
 <template>
   <div class="button-widget" :class="{ 'card-layout': layoutMode === 'card' }">
     <!-- Card Layout (Mobile) -->
@@ -44,8 +43,6 @@
       </button>
     </template>
     
-    <div v-if="!natsStore.isConnected" class="disconnected-overlay">⚠️</div>
-
     <!-- Response Modal -->
     <ResponseModal
       v-model="showResponseModal"
@@ -350,15 +347,6 @@ function adjustColorOpacity(hex: string, opacity: number) {
 }
 
 .button-icon { font-size: 1.2em; line-height: 1; }
-
-.disconnected-overlay {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  pointer-events: none;
-  z-index: 10;
-  font-size: 12px;
-}
 
 .success-ripple {
   position: absolute;

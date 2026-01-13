@@ -47,7 +47,6 @@
     </template>
     
     <div v-if="error" class="error-toast">{{ error }}</div>
-    <div v-if="!natsStore.isConnected" class="offline-badge">⚠️</div>
   </div>
 </template>
 
@@ -290,14 +289,6 @@ function toggle() {
   padding: 4px;
   border-radius: 4px;
   text-align: center;
-  pointer-events: none;
-}
-
-.offline-badge {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  font-size: 12px;
   pointer-events: none;
 }
 </style>

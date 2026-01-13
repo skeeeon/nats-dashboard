@@ -92,10 +92,6 @@
       {{ error }}
       <button class="retry-btn" @click="retry">Retry</button>
     </div>
-    
-    <div v-if="!natsStore.isConnected" class="disconnected-overlay">
-      <span class="disconnect-icon">⚠️</span>
-    </div>
   </div>
 </template>
 
@@ -654,17 +650,5 @@ watch([() => props.config.sliderConfig, () => dashboardStore.currentVariableValu
   font-size: 10px;
   font-weight: 600;
   cursor: pointer;
-}
-
-.disconnected-overlay {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  pointer-events: none;
-}
-
-.disconnect-icon {
-  font-size: 14px;
-  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
 }
 </style>
