@@ -114,12 +114,38 @@ function checkMobile() {
 
 /**
  * Helper: Sanitize layout array to remove undefined/null items.
- * This prevents crashes during rapid responsive updates where the library
- * might emit a sparse array.
+ * This prevents crashes during rapid responsive updates.
  */
 function sanitizeLayout(layout: any[]): any[] {
   if (!Array.isArray(layout)) return []
   return layout.filter(item => item && item.i != null)
+}
+
+/**
+ * Helper: Compare two layouts to see if they are geometrically different.
+ * Ignores object references and extra properties.
+ * Returns true if x, y, w, or h differ for any item.
+ */
+function isLayoutDifferent(current: any[], next: any[]): boolean {
+  if (current.length !== next.length) return true
+  
+  // Create map for fast lookup by ID
+  const currentMap = new Map(current.map(i => [i.i, i]))
+  
+  for (const nextItem of next) {
+    const currItem = currentMap.get(nextItem.i)
+    // If item missing in current, it's a change
+    if (!currItem) return true
+    
+    // Check geometry
+    if (currItem.x !== nextItem.x || 
+        currItem.y !== nextItem.y || 
+        currItem.w !== nextItem.w || 
+        currItem.h !== nextItem.h) {
+      return true
+    }
+  }
+  return false
 }
 
 const sortedWidgets = computed(() => {
@@ -129,78 +155,43 @@ const sortedWidgets = computed(() => {
   })
 })
 
-/**
- * Helper: Does this widget *need* to be full width based on its type/content?
- * Used for layout calculation.
- */
 function isIntrinsicallyFullWidth(widget: WidgetConfig): boolean {
-  // Complex widgets need full width
   if (['map', 'chart', 'console', 'publisher'].includes(widget.type)) return true
-  
-  // Large KV blocks (if configured large in desktop)
   if (widget.type === 'kv' && (widget.w > 2 || widget.h > 2)) return true
-  
-  // Precision controls often need width, but not always height
   if (['slider', 'gauge', 'stat'].includes(widget.type)) return true
-  
   return false
 }
 
-/**
- * Helper: Does this widget need to be TALL?
- * Used for CSS styling.
- */
 function isTallWidget(widget: WidgetConfig): boolean {
-  // Maps and Charts are always tall
   if (['map', 'chart', 'console', 'publisher'].includes(widget.type)) return true
-  
-  // Gauges and Stats usually need height to look good (circles/graphs)
   if (['gauge', 'stat'].includes(widget.type)) return true
-  
-  // KV: If it was configured as a large block in desktop, keep it tall.
-  // Otherwise (single value text), keep it short.
   if (widget.type === 'kv' && widget.h > 2) return true
-  
-  // Everything else (Button, Switch, Text, Slider, small KV) is short
   return false
 }
 
-/**
- * Smart Mobile Layout Calculation
- * Grug say: If small widget sits alone on row, make it big widget. No holes.
- */
 const mobileWidgetLayout = computed(() => {
-  const layoutMap = new Map<string, boolean>() // ID -> isFullWidth
-  let currentColumn = 0 // 0 = Left, 1 = Right
+  const layoutMap = new Map<string, boolean>()
+  let currentColumn = 0
 
   sortedWidgets.value.forEach((widget, index) => {
-    // 1. Check if widget naturally wants to be full width
     if (isIntrinsicallyFullWidth(widget)) {
       layoutMap.set(widget.id, true)
-      currentColumn = 0 // Reset to start of new row
+      currentColumn = 0
     } else {
-      // It is a small widget (candidate for half-width)
-      
       if (currentColumn === 0) {
-        // We are at the start of a row. We need to check the NEXT widget.
         const nextWidget = sortedWidgets.value[index + 1]
-        
-        // If there is no next widget, or the next widget is big, we are an orphan.
         const nextIsFull = !nextWidget || isIntrinsicallyFullWidth(nextWidget)
 
         if (nextIsFull) {
-          // If next guy is big (or missing), I cannot share row. I must become big.
           layoutMap.set(widget.id, true)
           currentColumn = 0
         } else {
-          // Next guy is small too! We can share row.
           layoutMap.set(widget.id, false)
           currentColumn = 1
         }
       } else {
-        // We are the second item in the row. We fit perfectly.
         layoutMap.set(widget.id, false)
-        currentColumn = 0 // Row finished
+        currentColumn = 0
       }
     }
   })
@@ -208,14 +199,8 @@ const mobileWidgetLayout = computed(() => {
   return layoutMap
 })
 
-/**
- * Template Helper
- */
 function shouldSpanFullMobile(widgetId: string): boolean {
-  // If editing, everything is full width (handled by CSS, but good for consistency)
   if (!dashboardStore.isLocked) return true
-  
-  // Return calculated layout decision
   return mobileWidgetLayout.value.get(widgetId) ?? true
 }
 
@@ -234,21 +219,16 @@ function mapWidgetsToLayout(widgets: WidgetConfig[]) {
 
 const layoutItems = ref(mapWidgetsToLayout(props.widgets))
 
-function getLayoutWidgetIds(): string[] { return layoutItems.value.map(item => item.i) }
-function getPropsWidgetIds(): string[] { return props.widgets.map(w => w.id) }
-
-function isWidgetSetChanged(layoutIds: string[], propsIds: string[]): boolean {
-  if (layoutIds.length !== propsIds.length) return true
-  const propsSet = new Set(propsIds)
-  return layoutIds.some(id => !propsSet.has(id))
-}
-
+// Watch for external changes (e.g. undo/redo, or config updates)
 watch(() => props.widgets, (newWidgets) => {
   if (isMobile.value) return
-  const currentLayoutIds = getLayoutWidgetIds()
-  const newPropsIds = getPropsWidgetIds()
-  if (isWidgetSetChanged(currentLayoutIds, newPropsIds) || currentBreakpoint.value === 'lg') {
-    layoutItems.value = mapWidgetsToLayout(newWidgets)
+  
+  const newLayout = mapWidgetsToLayout(newWidgets)
+  
+  // CRITICAL FIX: Only update local layout state if the geometry actually changed.
+  // This prevents infinite loops when updating widget configuration (which changes props but not layout).
+  if (isLayoutDifferent(layoutItems.value, newLayout)) {
+    layoutItems.value = newLayout
   }
 }, { deep: true })
 
@@ -257,7 +237,6 @@ function handleBreakpointChange(breakpoint: string, newLayout: any[]) {
   if (breakpoint === 'lg') {
     layoutItems.value = mapWidgetsToLayout(props.widgets)
   } else {
-    // Sanitize incoming layout from library to prevent "reading 'i' of undefined" errors
     layoutItems.value = sanitizeLayout(newLayout)
   }
 }
@@ -265,7 +244,6 @@ function handleBreakpointChange(breakpoint: string, newLayout: any[]) {
 function handleLayoutUpdate(newLayout: Array<{ i: string; x: number; y: number; w: number; h: number }>) {
   if (dashboardStore.isLocked || isMobile.value) return
   
-  // Sanitize here as well just to be safe
   const cleanLayout = sanitizeLayout(newLayout)
   layoutItems.value = cleanLayout
   
@@ -336,7 +314,6 @@ onUnmounted(() => {
 /* Full width items in View Mode */
 .mobile-widget-wrapper.span-full {
   grid-column: span 2;
-  /* Removed min-height: 250px from here! */
 }
 
 /* Only apply tall height to specific widgets (Maps, Charts) */
