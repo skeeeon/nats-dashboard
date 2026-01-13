@@ -67,6 +67,13 @@
             <div class="widget-type-name">Console</div>
             <div class="widget-type-desc">Live log stream</div>
           </button>
+
+          <!-- Publisher Widget -->
+          <button class="widget-type-btn" @click="selectType('publisher')">
+            <div class="widget-type-icon">📨</div>
+            <div class="widget-type-name">Publisher</div>
+            <div class="widget-type-desc">Send ad-hoc messages</div>
+          </button>
         </div>
       </div>
     </div>

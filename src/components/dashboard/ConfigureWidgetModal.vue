@@ -77,6 +77,12 @@
           :form="form"
           :errors="errors"
         />
+
+        <ConfigPublisher
+          v-if="widgetType === 'publisher'"
+          :form="form"
+          :errors="errors"
+        />
         
         <div class="modal-actions">
           <button class="btn-secondary" @click="close">
@@ -112,6 +118,7 @@ import ConfigSwitch from './config/ConfigSwitch.vue'
 import ConfigSlider from './config/ConfigSlider.vue'
 import ConfigMap from './config/ConfigMap.vue'
 import ConfigConsole from './config/ConfigConsole.vue'
+import ConfigPublisher from './config/ConfigPublisher.vue'
 
 interface Props {
   modelValue: boolean
@@ -173,6 +180,9 @@ const form = ref<WidgetFormState>({
   mapMarkers: [],
   consoleFontSize: 12,
   consoleShowTimestamp: true,
+  publisherDefaultSubject: '',
+  publisherDefaultPayload: '',
+  publisherTimeout: 2000,
   
   // JetStream Defaults
   useJetStream: false,
@@ -247,6 +257,16 @@ watch(() => props.widgetId, (widgetId) => {
     consoleShowTimestamp = widget.consoleConfig.showTimestamp ?? true
   }
 
+  let publisherDefaultSubject = ''
+  let publisherDefaultPayload = ''
+  let publisherTimeout = 2000
+
+  if (widget.type === 'publisher' && widget.publisherConfig) {
+    publisherDefaultSubject = widget.publisherConfig.defaultSubject || ''
+    publisherDefaultPayload = widget.publisherConfig.defaultPayload || ''
+    publisherTimeout = widget.publisherConfig.timeout || 2000
+  }
+
   form.value = {
     title: widget.title,
     subject: currentSubject,
@@ -291,6 +311,9 @@ watch(() => props.widgetId, (widgetId) => {
     mapMarkers,
     consoleFontSize,
     consoleShowTimestamp,
+    publisherDefaultSubject,
+    publisherDefaultPayload,
+    publisherTimeout,
     
     // JetStream Props
     useJetStream: widget.dataSource.useJetStream || false,
@@ -470,6 +493,14 @@ function save() {
     updates.consoleConfig = {
       fontSize: form.value.consoleFontSize,
       showTimestamp: form.value.consoleShowTimestamp
+    }
+  } else if (widget.type === 'publisher') {
+    const currentHistory = widget.publisherConfig?.history || []
+    updates.publisherConfig = {
+      defaultSubject: form.value.publisherDefaultSubject.trim(),
+      defaultPayload: form.value.publisherDefaultPayload,
+      history: currentHistory,
+      timeout: form.value.publisherTimeout
     }
   }
   

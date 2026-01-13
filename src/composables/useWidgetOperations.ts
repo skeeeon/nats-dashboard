@@ -62,7 +62,7 @@ export function useWidgetOperations() {
   }
 
   function needsSubscription(widgetType: WidgetType): boolean {
-    const selfManagedTypes: WidgetType[] = ['button', 'kv', 'switch', 'slider', 'map']
+    const selfManagedTypes: WidgetType[] = ['button', 'kv', 'switch', 'slider', 'map', 'publisher']
     return !selfManagedTypes.includes(widgetType)
   }
 
@@ -120,6 +120,14 @@ export function useWidgetOperations() {
         widget.dataSource = { type: 'subscription', subject: '>' }
         widget.consoleConfig = { fontSize: 12, showTimestamp: true }
         widget.buffer.maxCount = 200 // Higher default for console
+        break
+      case 'publisher':
+        widget.title = 'Publisher'
+        widget.publisherConfig = {
+          defaultSubject: 'test.subject',
+          defaultPayload: '{\n  "msg": "hello"\n}',
+          history: []
+        }
         break
     }
     

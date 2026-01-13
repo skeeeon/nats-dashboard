@@ -125,7 +125,7 @@ const sortedWidgets = computed(() => {
  */
 function isIntrinsicallyFullWidth(widget: WidgetConfig): boolean {
   // Complex widgets need full width
-  if (['map', 'chart', 'console'].includes(widget.type)) return true
+  if (['map', 'chart', 'console', 'publisher'].includes(widget.type)) return true
   
   // Large KV blocks (if configured large in desktop)
   if (widget.type === 'kv' && (widget.w > 2 || widget.h > 2)) return true
@@ -142,7 +142,7 @@ function isIntrinsicallyFullWidth(widget: WidgetConfig): boolean {
  */
 function isTallWidget(widget: WidgetConfig): boolean {
   // Maps and Charts are always tall
-  if (['map', 'chart', 'console'].includes(widget.type)) return true
+  if (['map', 'chart', 'console', 'publisher'].includes(widget.type)) return true
   
   // Gauges and Stats usually need height to look good (circles/graphs)
   if (['gauge', 'stat'].includes(widget.type)) return true

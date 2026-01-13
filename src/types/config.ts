@@ -64,6 +64,11 @@ export interface WidgetFormState {
   // Console Widget
   consoleFontSize: number
   consoleShowTimestamp: boolean
+
+  // Publisher Widget
+  publisherDefaultSubject: string
+  publisherDefaultPayload: string
+  publisherTimeout: number
   
   // JetStream
   useJetStream: boolean
@@ -116,6 +121,9 @@ export function createEmptyFormState(): WidgetFormState {
     mapMarkers: [],
     consoleFontSize: 12,
     consoleShowTimestamp: true,
+    publisherDefaultSubject: '',
+    publisherDefaultPayload: '',
+    publisherTimeout: 2000,
     useJetStream: false,
     deliverPolicy: 'last',
     jetstreamTimeWindow: '10m'

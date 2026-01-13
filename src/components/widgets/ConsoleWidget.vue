@@ -72,7 +72,7 @@
         <div class="log-content">
           <div 
             class="content-wrapper" 
-            @click.self="copyText(formatValue(msg.value), 'Payload copied!')" 
+            @click="copyText(formatValue(msg.value), 'Payload copied!')" 
             title="Click to copy payload"
           >
             <JsonViewer 
@@ -172,7 +172,30 @@ function toggleExpand() {
 
 async function copyText(text: string, feedback: string) {
   try {
-    await navigator.clipboard.writeText(text)
+    // 1. Try Modern API (HTTPS / Localhost)
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text)
+    } 
+    // 2. Fallback for HTTP Dev Server (Old Magic)
+    else {
+      const textArea = document.createElement("textarea")
+      textArea.value = text
+      
+      // Ensure it's not visible but part of DOM
+      textArea.style.position = "fixed"
+      textArea.style.left = "-9999px"
+      textArea.style.top = "0"
+      document.body.appendChild(textArea)
+      
+      textArea.focus()
+      textArea.select()
+      
+      const successful = document.execCommand('copy')
+      document.body.removeChild(textArea)
+      
+      if (!successful) throw new Error('Copy command failed')
+    }
+    
     showFeedback(feedback)
   } catch (err) {
     console.error('Failed to copy:', err)
@@ -363,6 +386,8 @@ onMounted(() => {
   word-break: break-all;
   white-space: pre-wrap;
   cursor: pointer;
+  display: inline-block; /* Helps with click target sizing */
+  width: 100%;
 }
 
 .content-wrapper:hover {
