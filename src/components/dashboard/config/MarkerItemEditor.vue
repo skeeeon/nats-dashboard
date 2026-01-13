@@ -1,4 +1,3 @@
-<!-- src/components/dashboard/config/MarkerItemEditor.vue -->
 <template>
   <div class="item-editor">
     <div class="item-header">
@@ -82,7 +81,7 @@
           <label>Payload</label>
           <textarea 
             :value="item.payload"
-            @input="updateField('payload', ($event.target as HTMLTextAreaElement).value)"
+            @change="updateField('payload', ($event.target as HTMLTextAreaElement).value)"
             class="form-textarea"
             :class="{ 'has-error': errors?.payload }"
             rows="2"
@@ -169,7 +168,7 @@
             <label>ON Payload</label>
             <input 
               :value="onPayloadStr"
-              @input="updatePayload('on', ($event.target as HTMLInputElement).value)"
+              @change="updatePayload('on', ($event.target as HTMLInputElement).value)"
               type="text" 
               class="form-input"
               placeholder='{"state":"on"}'
@@ -179,7 +178,7 @@
             <label>OFF Payload</label>
             <input 
               :value="offPayloadStr"
-              @input="updatePayload('off', ($event.target as HTMLInputElement).value)"
+              @change="updatePayload('off', ($event.target as HTMLInputElement).value)"
               type="text" 
               class="form-input"
               placeholder='{"state":"off"}'
@@ -406,11 +405,22 @@ const switchLabels = computed(() => {
 })
 
 const onPayloadStr = computed(() => {
-  return JSON.stringify(switchConfig.value.onPayload || { state: 'on' })
+  const val = switchConfig.value.onPayload
+  // If it's an object, stringify it
+  if (typeof val === 'object' && val !== null) {
+    return JSON.stringify(val)
+  }
+  // If it's already a string (or number/boolean), return as string
+  // This prevents double-encoding strings like "{" -> "\"{""
+  return String(val ?? '')
 })
 
 const offPayloadStr = computed(() => {
-  return JSON.stringify(switchConfig.value.offPayload || { state: 'off' })
+  const val = switchConfig.value.offPayload
+  if (typeof val === 'object' && val !== null) {
+    return JSON.stringify(val)
+  }
+  return String(val ?? '')
 })
 
 function emitUpdate(updates: Partial<MapMarkerItem>) {
@@ -443,11 +453,26 @@ function updateSwitchLabel(which: 'on' | 'off', value: string) {
 }
 
 function updatePayload(which: 'on' | 'off', value: string) {
-  let parsed: any
-  try {
-    parsed = JSON.parse(value)
-  } catch {
-    parsed = value
+  let parsed: any = value
+  
+  // Try to parse. If it looks like JSON (starts with { or [), try to parse.
+  // If valid, save as object.
+  // If invalid, SAVE AS STRING.
+  const trimmed = value.trim()
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      parsed = JSON.parse(value)
+    } catch {
+      // Keep as string if parse fails
+      parsed = value
+    }
+  } else {
+    // Try parsing numbers/booleans
+    try {
+      parsed = JSON.parse(value)
+    } catch {
+      parsed = value
+    }
   }
   
   const field = which === 'on' ? 'onPayload' : 'offPayload'

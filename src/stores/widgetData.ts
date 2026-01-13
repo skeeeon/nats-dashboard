@@ -1,6 +1,6 @@
 // src/stores/widgetData.ts
 import { defineStore } from 'pinia'
-import { ref, computed, triggerRef } from 'vue' // Added triggerRef
+import { ref, computed, triggerRef } from 'vue'
 
 /**
  * Buffered Message Entry
@@ -26,10 +26,10 @@ interface WidgetDataBuffer {
  * Memory Limits
  */
 const MEMORY_LIMITS = {
-  MAX_TOTAL_MESSAGES: 10000,
+  MAX_TOTAL_MESSAGES: 20000, // Increased slightly as we are more efficient now
   MAX_BUFFER_SIZE_MB: 50,
-  MAX_SINGLE_BUFFER: 1000,
-  BYTES_PER_MESSAGE_ESTIMATE: 2048
+  MAX_SINGLE_BUFFER: 2000,   // Hard cap per widget
+  BYTES_PER_MESSAGE_ESTIMATE: 1024 // Conservative estimate
 }
 
 export const useWidgetDataStore = defineStore('widgetData', () => {
@@ -82,19 +82,23 @@ export const useWidgetDataStore = defineStore('widgetData', () => {
         maxCount: safeMaxCount,
         maxAge,
       })
-      // Map structure changed, reactivity triggers automatically here
+      triggerRef(buffers)
     }
   }
   
+  /**
+   * Emergency Memory Cleanup
+   * Grug say: Only panic if actually out of space.
+   */
   function checkMemoryPressure(): boolean {
     const totalMessages = totalBufferedCount.value
     
-    if (totalMessages >= MEMORY_LIMITS.MAX_TOTAL_MESSAGES * 0.9) {
-      memoryWarning.value = `High memory usage: ${totalMessages} messages`
+    if (totalMessages >= MEMORY_LIMITS.MAX_TOTAL_MESSAGES) {
+      memoryWarning.value = `Memory limit reached (${totalMessages} msgs). Trimming history.`
       return true
     }
     
-    if (totalMessages < MEMORY_LIMITS.MAX_TOTAL_MESSAGES * 0.7) {
+    if (totalMessages < MEMORY_LIMITS.MAX_TOTAL_MESSAGES * 0.8) {
       memoryWarning.value = null
     }
     
@@ -102,26 +106,33 @@ export const useWidgetDataStore = defineStore('widgetData', () => {
   }
   
   function pruneIfNeeded() {
-    const totalMessages = totalBufferedCount.value
-    if (totalMessages <= MEMORY_LIMITS.MAX_TOTAL_MESSAGES) return
-    
+    if (!checkMemoryPressure()) return
+
+    // Grug logic: Find biggest buffers and trim them down
+    // Don't touch small buffers (like single-value stats)
     for (const buffer of buffers.value.values()) {
-      if (buffer.messages.length > 10) {
-        const toRemove = Math.ceil(buffer.messages.length * 0.25)
+      if (buffer.messages.length > 100) {
+        // Cut 20% off the top of large buffers
+        const toRemove = Math.ceil(buffer.messages.length * 0.2)
         buffer.messages.splice(0, toRemove)
       }
     }
+    triggerRef(buffers)
   }
   
   function addMessage(widgetId: string, value: any, raw?: any, subject?: string) {
     batchAddMessages([{ widgetId, value, raw, subject, timestamp: Date.now() }])
   }
 
+  /**
+   * Optimized Batch Ingest
+   */
   function batchAddMessages(items: Array<{ widgetId: string, value: any, raw?: any, subject?: string, timestamp: number }>) {
     // Safely increment cumulative count
     const currentVal = Number(cumulativeCount.value) || 0
     cumulativeCount.value = currentVal + items.length
 
+    // Group by widget to minimize Map lookups
     const updates = new Map<string, BufferedMessage[]>()
     
     for (const item of items) {
@@ -138,6 +149,7 @@ export const useWidgetDataStore = defineStore('widgetData', () => {
       })
     }
 
+    // Apply updates
     for (const [widgetId, newMessages] of updates) {
       let buffer = buffers.value.get(widgetId)
       
@@ -146,20 +158,38 @@ export const useWidgetDataStore = defineStore('widgetData', () => {
         buffer = buffers.value.get(widgetId)!
       }
 
-      buffer.messages.push(...newMessages)
+      const max = buffer.maxCount
+      const incomingLen = newMessages.length
 
-      if (buffer.messages.length > buffer.maxCount) {
-        const overage = buffer.messages.length - buffer.maxCount
-        buffer.messages.splice(0, overage)
+      // OPTIMIZATION 1: The Flood
+      // If new data is larger than the entire buffer capacity, 
+      // discard old buffer entirely and just take the newest slice.
+      if (incomingLen >= max) {
+        buffer.messages = newMessages.slice(incomingLen - max)
+      } 
+      // OPTIMIZATION 2: The Top Up
+      // Calculate space and splice ONCE before pushing.
+      else {
+        const currentLen = buffer.messages.length
+        const availableSpace = max - currentLen
+        
+        // If we don't have enough space, make room first
+        if (incomingLen > availableSpace) {
+          const toRemove = incomingLen - availableSpace
+          buffer.messages.splice(0, toRemove)
+        }
+        
+        // Now push (we know it fits)
+        buffer.messages.push(...newMessages)
       }
     }
 
-    if (checkMemoryPressure()) {
+    // Only check memory occasionally or if batch was huge
+    if (items.length > 100) {
       pruneIfNeeded()
     }
 
-    // IMPORTANT: Force Vue to re-evaluate computed properties derived from buffers
-    // because we mutated the nested arrays without changing the Map keys.
+    // Force Vue update
     triggerRef(buffers)
   }
   
@@ -200,7 +230,7 @@ export const useWidgetDataStore = defineStore('widgetData', () => {
   function clearAllBuffers() {
     buffers.value.clear()
     memoryWarning.value = null
-    // cumulativeCount.value = 0 // Optional: keep lifetime count or reset? Grug say keep.
+    triggerRef(buffers)
   }
   
   function updateBufferConfig(widgetId: string, maxCount?: number, maxAge?: number) {
@@ -210,8 +240,11 @@ export const useWidgetDataStore = defineStore('widgetData', () => {
     if (maxCount !== undefined) {
       const safeMaxCount = Math.min(maxCount, MEMORY_LIMITS.MAX_SINGLE_BUFFER)
       buffer.maxCount = safeMaxCount
+      
+      // Immediate trim if config changed
       if (buffer.messages.length > safeMaxCount) {
-        buffer.messages.splice(0, buffer.messages.length - safeMaxCount)
+        const toRemove = buffer.messages.length - safeMaxCount
+        buffer.messages.splice(0, toRemove)
         triggerRef(buffers)
       }
     }

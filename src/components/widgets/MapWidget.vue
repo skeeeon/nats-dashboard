@@ -1,4 +1,4 @@
-// src/components/widgets/MapWidget.vue
+<!-- src/components/widgets/MapWidget.vue -->
 <template>
   <div class="map-widget">
     <!-- Map container -->
@@ -26,37 +26,31 @@
     
     <!-- Action feedback toast -->
     <div 
-      v-if="actionFeedback" 
+      v-if="interactions.actionFeedback.value" 
       class="action-feedback"
-      :class="actionFeedback.type"
+      :class="interactions.actionFeedback.value.type"
     >
-      {{ actionFeedback.message }}
+      {{ interactions.actionFeedback.value.message }}
     </div>
 
     <!-- Response Modal for Request/Reply Items -->
     <ResponseModal
-      v-model="showResponseModal"
-      :title="responseTitle"
-      :status="responseStatus"
-      :data="responseData"
-      :latency="responseLatency"
+      v-model="interactions.responseModal.value.show"
+      :title="interactions.responseModal.value.title"
+      :status="interactions.responseModal.value.status"
+      :data="interactions.responseModal.value.data"
+      :latency="interactions.responseModal.value.latency"
     />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useLeafletMap, type PopupCallbacks } from '@/composables/useLeafletMap'
-import { createSwitchState, type SwitchState } from '@/composables/useSwitchState'
+import { useLeafletMap } from '@/composables/useLeafletMap'
+import { useMapInteractions } from '@/composables/useMapInteractions'
 import { useNatsStore } from '@/stores/nats'
-import { useDashboardStore } from '@/stores/dashboard'
 import { useTheme } from '@/composables/useTheme'
-import { encodeString, decodeBytes } from '@/utils/encoding'
-import { resolveTemplate } from '@/utils/variables'
-import type { WidgetConfig, MapMarkerItem } from '@/types/dashboard'
-import { Kvm } from '@nats-io/kv'
-import { JSONPath } from 'jsonpath-plus'
-import { jetstream, jetstreamManager } from '@nats-io/jetstream'
+import type { WidgetConfig } from '@/types/dashboard'
 import ResponseModal from '@/components/common/ResponseModal.vue'
 
 const props = withDefaults(defineProps<{
@@ -67,9 +61,8 @@ const props = withDefaults(defineProps<{
 })
 
 const natsStore = useNatsStore()
-const dashboardStore = useDashboardStore()
 const { theme } = useTheme()
-const { initMap, updateTheme, renderMarkers, updateSwitchState, updateItemValue, invalidateSize, cleanup } = useLeafletMap()
+const { initMap, updateTheme, renderMarkers, invalidateSize, cleanup } = useLeafletMap()
 
 // Unique ID
 const mapContainerId = computed(() => {
@@ -78,431 +71,17 @@ const mapContainerId = computed(() => {
 })
 
 const mapReady = ref(false)
-const actionFeedback = ref<{ type: 'success' | 'error'; message: string } | null>(null)
-
-// Response Modal State
-const showResponseModal = ref(false)
-const responseData = ref('')
-const responseStatus = ref<'success' | 'error'>('success')
-const responseLatency = ref(0)
-const responseTitle = ref('Response')
-
-// Track active switch states
-interface SwitchStateEntry {
-  switchState: SwitchState
-  stopWatch: () => void
-}
-const activeSwitchStates = new Map<string, SwitchStateEntry>()
-
-// Track active subscriptions for Text/KV items
-interface SubscriptionEntry {
-  stop: () => void
-}
-const activeSubscriptions = new Map<string, SubscriptionEntry>()
-
-const openMarkerId = ref<string | null>(null)
 const markers = computed(() => props.config.mapConfig?.markers || [])
 const hasItems = computed(() => markers.value.some(m => m.items && m.items.length > 0))
 const mapCenter = computed(() => props.config.mapConfig?.center || { lat: 39.8283, lon: -98.5795 })
 const mapZoom = computed(() => props.config.mapConfig?.zoom || 4)
 
+// Initialize Interactions Logic (The "Brain")
+// We pass a getter for markers so the composable can find the active marker config
+const interactions = useMapInteractions(() => markers.value)
+
 // Initialization tracking
 let initTimeout: number | null = null
-
-function calculateStartTime(windowStr: string | undefined): Date {
-  const now = Date.now()
-  if (!windowStr) return new Date(now - 10 * 60 * 1000)
-  
-  const match = windowStr.match(/^(\d+)([smhd])$/)
-  if (!match) return new Date(now - 10 * 60 * 1000)
-  
-  const val = parseInt(match[1])
-  const unit = match[2]
-  let ms = 0
-  
-  switch (unit) {
-    case 's': ms = val * 1000; break
-    case 'm': ms = val * 60 * 1000; break
-    case 'h': ms = val * 60 * 60 * 1000; break
-    case 'd': ms = val * 24 * 60 * 60 * 1000; break
-  }
-  return new Date(now - ms)
-}
-
-/**
- * Handle publish item click
- */
-async function handlePublishItem(item: MapMarkerItem) {
-  if (!natsStore.nc || !natsStore.isConnected) {
-    showFeedback('error', 'Not connected to NATS')
-    return
-  }
-
-  // Resolve variables
-  const subject = resolveTemplate(item.subject, dashboardStore.currentVariableValues)
-  const payloadStr = resolveTemplate(item.payload || '{}', dashboardStore.currentVariableValues)
-
-  if (!subject) {
-    showFeedback('error', 'No subject configured')
-    return
-  }
-
-  const payload = encodeString(payloadStr)
-
-  // Request Mode
-  if (item.actionType === 'request') {
-    const timeout = item.timeout || 1000
-    // Show loading via toast
-    showFeedback('success', `Requesting ${subject}...`)
-    const start = Date.now()
-
-    try {
-      const msg = await natsStore.nc.request(subject, payload, { timeout })
-      
-      // Clear toast
-      actionFeedback.value = null
-      
-      // Show modal
-      responseLatency.value = Date.now() - start
-      responseData.value = decodeBytes(msg.data)
-      responseStatus.value = 'success'
-      responseTitle.value = item.label || 'Response'
-      showResponseModal.value = true
-      
-    } catch (err: any) {
-      responseLatency.value = Date.now() - start
-      responseData.value = err.message || 'Request failed'
-      responseStatus.value = 'error'
-      responseTitle.value = 'Request Failed'
-      showResponseModal.value = true
-    }
-  } 
-  // Publish Mode (Fire & Forget)
-  else {
-    try {
-      natsStore.nc.publish(subject, payload)
-      showFeedback('success', `Published to ${subject}`)
-      console.log(`[MapWidget] Published to ${subject}`)
-    } catch (err: any) {
-      console.error('[MapWidget] Publish error:', err)
-      showFeedback('error', 'Failed to publish')
-    }
-  }
-}
-
-/**
- * Handle switch toggle click
- */
-function handleSwitchToggle(item: MapMarkerItem) {
-  if (!natsStore.isConnected) {
-    showFeedback('error', 'Not connected to NATS')
-    return
-  }
-
-  const entry = activeSwitchStates.get(item.id)
-  if (!entry) {
-    console.warn('[MapWidget] No switch state found for item:', item.id)
-    return
-  }
-
-  entry.switchState.toggle()
-}
-
-/**
- * Handle popup open - start watchers
- */
-function handlePopupOpen(markerId: string, _popupElement: HTMLElement) {
-  openMarkerId.value = markerId
-  const marker = markers.value.find(m => m.id === markerId)
-  if (!marker) return
-
-  for (const item of marker.items) {
-    if (item.type === 'switch' && item.switchConfig) {
-      startSwitchStateWatcher(item)
-    } else if (item.type === 'text' && item.textConfig) {
-      startTextSubscription(item)
-    } else if (item.type === 'kv' && item.kvConfig) {
-      startKvWatcher(item)
-    }
-  }
-}
-
-/**
- * Handle popup close - stop watchers
- */
-function handlePopupClose(markerId: string) {
-  openMarkerId.value = null
-  const marker = markers.value.find(m => m.id === markerId)
-  if (!marker) return
-
-  for (const item of marker.items) {
-    if (item.type === 'switch') {
-      stopSwitchStateWatcher(item.id)
-    } else if (item.type === 'text' || item.type === 'kv') {
-      stopSubscription(item.id)
-    }
-  }
-}
-
-/**
- * Start a switch state watcher for an item
- */
-async function startSwitchStateWatcher(item: MapMarkerItem) {
-  if (!item.switchConfig) return
-
-  if (activeSwitchStates.has(item.id)) {
-    const existing = activeSwitchStates.get(item.id)!
-    if (existing.switchState.isActive()) return
-  }
-
-  // Resolve variables for switch config
-  const vars = dashboardStore.currentVariableValues
-  const resolvedConfig = {
-    mode: item.switchConfig.mode,
-    kvBucket: resolveTemplate(item.switchConfig.kvBucket, vars),
-    kvKey: resolveTemplate(item.switchConfig.kvKey, vars),
-    publishSubject: resolveTemplate(item.switchConfig.publishSubject, vars),
-    stateSubject: resolveTemplate(item.switchConfig.stateSubject, vars),
-    onPayload: item.switchConfig.onPayload,
-    offPayload: item.switchConfig.offPayload,
-    defaultState: 'off' as const
-  }
-
-  const switchState = createSwitchState(resolvedConfig)
-
-  await switchState.start()
-
-  updateSwitchState(item.id, switchState.state.value, item.switchConfig.labels)
-
-  const stopWatch = watch(switchState.state, (newState) => {
-    updateSwitchState(item.id, newState, item.switchConfig?.labels)
-  })
-
-  activeSwitchStates.set(item.id, { switchState, stopWatch })
-}
-
-function stopSwitchStateWatcher(itemId: string) {
-  const entry = activeSwitchStates.get(itemId)
-  if (entry) {
-    entry.stopWatch()
-    entry.switchState.stop()
-    activeSwitchStates.delete(itemId)
-  }
-}
-
-function stopAllSwitchStateWatchers() {
-  for (const entry of activeSwitchStates.values()) {
-    entry.stopWatch()
-    entry.switchState.stop()
-  }
-  activeSwitchStates.clear()
-}
-
-/**
- * Start NATS subscription for Text item
- */
-async function startTextSubscription(item: MapMarkerItem) {
-  if (!natsStore.nc || !natsStore.isConnected || !item.textConfig) return
-  
-  const subject = resolveTemplate(item.textConfig.subject, dashboardStore.currentVariableValues)
-  if (!subject) return
-
-  try {
-    // 1. JETSTREAM PATH
-    if (item.textConfig.useJetStream) {
-      const jsm = await jetstreamManager(natsStore.nc)
-      
-      // Find stream for subject
-      let streamName: string
-      try {
-        streamName = await jsm.streams.find(subject)
-      } catch (e) {
-        console.warn(`[MapWidget] No stream found for ${subject}`)
-        updateItemValue(item.id, 'No Stream')
-        return
-      }
-
-      const js = jetstream(natsStore.nc)
-      const consumerOpts: any = {
-        filter_subjects: [subject],
-        deliver_policy: item.textConfig.deliverPolicy || 'last',
-      }
-
-      if (item.textConfig.deliverPolicy === 'by_start_time') {
-        consumerOpts.opt_start_time = calculateStartTime(item.textConfig.timeWindow).toISOString()
-      }
-
-      // Get Ordered Consumer (lightweight, ephemeral)
-      const consumer = await js.consumers.get(streamName, consumerOpts)
-      const messages = await consumer.consume()
-
-      // Track iterator for cleanup
-      activeSubscriptions.set(item.id, {
-        stop: () => {
-          try { messages.stop() } catch {}
-        }
-      })
-
-      // Consume loop
-      ;(async () => {
-        try {
-          for await (const msg of messages) {
-            msg.ack() // Ack immediately for UI consumers
-            processMessageData(item, msg.data)
-          }
-        } catch (err) {
-          // Iterator ended or connection closed
-        }
-      })()
-
-    } 
-    // 2. CORE NATS PATH
-    else {
-      const sub = natsStore.nc.subscribe(subject)
-      
-      activeSubscriptions.set(item.id, {
-        stop: () => {
-          try { sub.unsubscribe() } catch {}
-        }
-      })
-
-      ;(async () => {
-        try {
-          for await (const msg of sub) {
-            processMessageData(item, msg.data)
-          }
-        } catch (err) {
-          // Sub closed
-        }
-      })()
-    }
-  } catch (err: any) {
-    console.error('[MapWidget] Failed to subscribe:', err)
-    updateItemValue(item.id, 'Error')
-  }
-}
-
-// Helper to process data (shared by both paths)
-function processMessageData(item: MapMarkerItem, rawData: Uint8Array) {
-  const text = decodeBytes(rawData)
-  let val: any = text
-  try { val = JSON.parse(text) } catch {}
-  
-  if (item.textConfig?.jsonPath && typeof val === 'object') {
-    try {
-      const extracted = JSONPath({ path: item.textConfig.jsonPath, json: val, wrap: false })
-      if (extracted !== undefined) val = extracted
-    } catch {}
-  }
-  
-  // Format if needed or just stringify
-  updateItemValue(item.id, String(val))
-}
-
-/**
- * Start KV watcher for KV item
- */
-async function startKvWatcher(item: MapMarkerItem) {
-  if (!natsStore.nc || !natsStore.isConnected || !item.kvConfig) return
-
-  const bucket = resolveTemplate(item.kvConfig.kvBucket, dashboardStore.currentVariableValues)
-  const key = resolveTemplate(item.kvConfig.kvKey, dashboardStore.currentVariableValues)
-  
-  if (!bucket || !key) return
-
-  try {
-    const kvm = new Kvm(natsStore.nc)
-    const kv = await kvm.open(bucket)
-    
-    // Get initial value
-    try {
-      const entry = await kv.get(key)
-      if (entry) {
-        processKvValue(item, entry.value)
-      } else {
-        updateItemValue(item.id, '<empty>')
-      }
-    } catch {
-      updateItemValue(item.id, '<empty>')
-    }
-
-    // Watch
-    const iter = await kv.watch({ key })
-    
-    ;(async () => {
-      try {
-        for await (const e of iter) {
-          if (e.key === key) {
-            if (e.operation === 'PUT') {
-              processKvValue(item, e.value!)
-            } else if (e.operation === 'DEL' || e.operation === 'PURGE') {
-              updateItemValue(item.id, '<deleted>')
-            }
-          }
-        }
-      } catch (err) {
-        // Ignore connection closed errors
-      }
-    })()
-
-    activeSubscriptions.set(item.id, {
-      stop: () => {
-        try { iter.stop() } catch {}
-      }
-    })
-
-  } catch (err) {
-    console.error('[MapWidget] KV watch error:', err)
-    updateItemValue(item.id, 'Error')
-  }
-}
-
-function processKvValue(item: MapMarkerItem, data: Uint8Array) {
-  const text = decodeBytes(data)
-  let val: any = text
-  try { val = JSON.parse(text) } catch {}
-  
-  if (item.kvConfig?.jsonPath && typeof val === 'object') {
-    try {
-      const extracted = JSONPath({ path: item.kvConfig.jsonPath, json: val, wrap: false })
-      if (extracted !== undefined) val = extracted
-    } catch {}
-  }
-  
-  updateItemValue(item.id, String(val))
-}
-
-function stopSubscription(itemId: string) {
-  const entry = activeSubscriptions.get(itemId)
-  if (entry) {
-    entry.stop()
-    activeSubscriptions.delete(itemId)
-  }
-}
-
-function stopAllSubscriptions() {
-  for (const entry of activeSubscriptions.values()) {
-    entry.stop()
-  }
-  activeSubscriptions.clear()
-}
-
-function showFeedback(type: 'success' | 'error', message: string) {
-  actionFeedback.value = { type, message }
-  setTimeout(() => {
-    // Only clear if the user hasn't triggered another one in the meantime (simple check)
-    if (actionFeedback.value?.message === message) {
-      actionFeedback.value = null
-    }
-  }, 2000)
-}
-
-const popupCallbacks: PopupCallbacks = {
-  onPublishItem: handlePublishItem,
-  onSwitchToggle: handleSwitchToggle,
-  onPopupOpen: handlePopupOpen,
-  onPopupClose: handlePopupClose
-}
 
 async function initializeMap() {
   if (initTimeout) {
@@ -520,7 +99,8 @@ async function initializeMap() {
       mapZoom.value,
       theme.value === 'dark'
     )
-    renderMarkers(markers.value, popupCallbacks)
+    // Pass the callbacks from our new composable to the map renderer
+    renderMarkers(markers.value, interactions.callbacks)
     mapReady.value = true
     initTimeout = null
   }, 50)
@@ -528,7 +108,7 @@ async function initializeMap() {
 
 function updateMarkers() {
   if (!mapReady.value) return
-  renderMarkers(markers.value, popupCallbacks)
+  renderMarkers(markers.value, interactions.callbacks)
 }
 
 let resizeObserver: ResizeObserver | null = null
@@ -551,8 +131,6 @@ onUnmounted(() => {
   if (initTimeout) clearTimeout(initTimeout)
   if (resizeObserverTimeout !== null) clearTimeout(resizeObserverTimeout)
   if (resizeObserver) resizeObserver.disconnect()
-  stopAllSwitchStateWatchers()
-  stopAllSubscriptions()
   cleanup()
 })
 
@@ -564,45 +142,10 @@ watch([mapCenter, mapZoom], () => {
   mapReady.value = false
   initializeMap() // Re-init
 }, { deep: true })
-
-// Grug say: Watch connection. If connected AND popup open, restart Text/KV items.
-// Switch items handle themselves via useSwitchState.
-watch(() => natsStore.isConnected, (connected) => {
-  if (connected && openMarkerId.value) {
-    const marker = markers.value.find(m => m.id === openMarkerId.value)
-    if (marker) {
-      // Restart Text and KV items
-      marker.items.forEach(item => {
-        if (item.type === 'text' || item.type === 'kv') {
-          stopSubscription(item.id) // Clean old
-          if (item.type === 'text' && item.textConfig) startTextSubscription(item)
-          else if (item.type === 'kv' && item.kvConfig) startKvWatcher(item)
-        }
-      })
-    }
-  }
-})
-
-watch(() => dashboardStore.currentVariableValues, () => {
-  if (openMarkerId.value) {
-    const markerId = openMarkerId.value
-    const marker = markers.value.find(m => m.id === markerId)
-    if (marker) {
-      marker.items.forEach(a => {
-        if (a.type === 'switch') stopSwitchStateWatcher(a.id)
-        else if (a.type === 'text' || a.type === 'kv') stopSubscription(a.id)
-      })
-      marker.items.forEach(a => {
-        if (a.type === 'switch' && a.switchConfig) startSwitchStateWatcher(a)
-        else if (a.type === 'text' && a.textConfig) startTextSubscription(a)
-        else if (a.type === 'kv' && a.kvConfig) startKvWatcher(a)
-      })
-    }
-  }
-}, { deep: true })
 </script>
 
 <style scoped>
+/* Styles remain exactly the same as before */
 .map-widget {
   height: 100%;
   width: 100%;
