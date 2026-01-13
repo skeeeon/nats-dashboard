@@ -17,7 +17,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch, shallowRef, onMounted, onUnmounted } from 'vue'
+import { computed, watch } from 'vue'
 import { use } from 'echarts/core'
 import { LineChart, BarChart, PieChart, GaugeChart } from 'echarts/charts'
 import {
@@ -71,53 +71,24 @@ const resolvedSubject = computed(() => {
   return resolveTemplate(props.config.dataSource.subject, dashboardStore.currentVariableValues)
 })
 
-// --- Grug Performance Optimization ---
-// Don't compute chart options on every single message.
-// Use shallowRef for options and update on an interval (throttling).
-const chartOption = shallowRef({})
-let updateInterval: number | null = null
-
-function updateChart() {
-  if (!hasData.value) return
-  
+/**
+ * Generate chart option based on chart type
+ */
+const chartOption = computed(() => {
   const data = buffer.value
-  // Limit data points for rendering if array is huge (e.g. > 1000)
-  // ECharts handles large datasets well, but mapping 10k items in JS is slow.
-  // We take the last 500 points for display to keep UI snappy.
-  const renderData = data.length > 500 ? data.slice(-500) : data
 
   switch (chartType.value) {
     case 'line':
-      chartOption.value = generateLineChart(renderData)
-      break
+      return generateLineChart(data)
     case 'bar':
-      chartOption.value = generateBarChart(renderData)
-      break
+      return generateBarChart(data)
     case 'gauge':
-      chartOption.value = generateGaugeChart(renderData)
-      break
+      return generateGaugeChart(data)
     case 'pie':
-      chartOption.value = generatePieChart(renderData)
-      break
+      return generatePieChart(data)
     default:
-      chartOption.value = generateLineChart(renderData)
+      return generateLineChart(data)
   }
-}
-
-onMounted(() => {
-  // Update at 10 FPS (100ms)
-  // This is plenty for human eyes and saves massive CPU on 1000hz streams
-  updateInterval = window.setInterval(updateChart, 100)
-  updateChart()
-})
-
-onUnmounted(() => {
-  if (updateInterval) clearInterval(updateInterval)
-})
-
-// Also update immediately if config changes (theme, type, etc)
-watch([chartType, theme], () => {
-  updateChart()
 })
 
 function generateLineChart(data: any[]) {
@@ -125,7 +96,6 @@ function generateLineChart(data: any[]) {
   const styling = chartStyling.value
   
   return {
-    animation: false, // Disable animation for high-freq updates
     grid: {
       left: 50,
       right: 20,
@@ -143,7 +113,6 @@ function generateLineChart(data: any[]) {
     },
     xAxis: {
       type: 'category',
-      // Optimization: Only format dates for visible points
       data: data.map((m) => new Date(m.timestamp).toLocaleTimeString()),
       axisLine: { 
         lineStyle: { color: styling.axis }
@@ -171,10 +140,14 @@ function generateLineChart(data: any[]) {
         data: data.map((m) => m.value),
         type: 'line',
         smooth: true,
-        symbol: 'none', // Hide dots for performance on lines
+        symbol: 'circle',
+        symbolSize: 6,
         lineStyle: {
           color: colors.color1,
           width: 2,
+        },
+        itemStyle: {
+          color: colors.color1,
         },
         areaStyle: {
           color: {
@@ -200,7 +173,6 @@ function generateBarChart(data: any[]) {
   const styling = chartStyling.value
   
   return {
-    animation: false,
     grid: {
       left: 50,
       right: 20,
@@ -259,7 +231,6 @@ function generateGaugeChart(data: any[]) {
   const latestValue = data.length > 0 ? data[data.length - 1].value : 0
 
   return {
-    animation: true, // Keep animation for gauge (it's just one value)
     series: [
       {
         type: 'gauge',
@@ -349,7 +320,6 @@ function generatePieChart(data: any[]) {
   const colorArray = getChartColorArray(Object.keys(pieData).length)
 
   return {
-    animation: false,
     tooltip: {
       trigger: 'item',
       backgroundColor: styling.tooltipBg,
