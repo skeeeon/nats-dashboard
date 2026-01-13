@@ -61,6 +61,10 @@ export interface WidgetFormState {
   mapZoom: number
   mapMarkers: MapMarker[]
   
+  // Console Widget
+  consoleFontSize: number
+  consoleShowTimestamp: boolean
+  
   // JetStream
   useJetStream: boolean
   deliverPolicy: 'all' | 'last' | 'new' | 'last_per_subject' | 'by_start_time'
@@ -110,6 +114,8 @@ export function createEmptyFormState(): WidgetFormState {
     mapCenterLon: -98.5795,
     mapZoom: 4,
     mapMarkers: [],
+    consoleFontSize: 12,
+    consoleShowTimestamp: true,
     useJetStream: false,
     deliverPolicy: 'last',
     jetstreamTimeWindow: '10m'

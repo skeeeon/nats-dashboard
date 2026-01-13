@@ -56,6 +56,7 @@ import SliderWidget from '@/components/widgets/SliderWidget.vue'
 import StatCardWidget from '@/components/widgets/StatCardWidget.vue'
 import GaugeWidget from '@/components/widgets/GaugeWidget.vue'
 import MapWidget from '@/components/widgets/MapWidget.vue'
+import ConsoleWidget from '@/components/widgets/ConsoleWidget.vue'
 
 const props = defineProps<{
   config?: WidgetConfig
@@ -84,6 +85,7 @@ const widgetComponent = computed(() => {
     case 'stat': return StatCardWidget
     case 'gauge': return GaugeWidget
     case 'map': return MapWidget
+    case 'console': return ConsoleWidget
     default: return null
   }
 })

@@ -115,6 +115,12 @@ export function useWidgetOperations() {
           markers: []
         }
         break
+      case 'console':
+        widget.title = 'Console Stream'
+        widget.dataSource = { type: 'subscription', subject: '>' }
+        widget.consoleConfig = { fontSize: 12, showTimestamp: true }
+        widget.buffer.maxCount = 200 // Higher default for console
+        break
     }
     
     dashboardStore.addWidget(widget)

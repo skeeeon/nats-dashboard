@@ -1,6 +1,6 @@
 // src/stores/widgetData.ts
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, triggerRef } from 'vue' // Added triggerRef
 
 /**
  * Buffered Message Entry
@@ -9,6 +9,7 @@ export interface BufferedMessage {
   timestamp: number
   value: any
   raw?: any
+  subject?: string
 }
 
 /**
@@ -39,6 +40,34 @@ export const useWidgetDataStore = defineStore('widgetData', () => {
   const buffers = ref<Map<string, WidgetDataBuffer>>(new Map())
   const memoryWarning = ref<string | null>(null)
   
+  // Track total lifetime messages for throughput calc
+  const cumulativeCount = ref(0) 
+  
+  // ============================================================================
+  // COMPUTED
+  // ============================================================================
+
+  const activeBufferCount = computed(() => buffers.value.size)
+  
+  const totalBufferedCount = computed(() => {
+    let total = 0
+    for (const buffer of buffers.value.values()) {
+      total += buffer.messages.length
+    }
+    return total
+  })
+  
+  const memoryEstimate = computed(() => {
+    return totalBufferedCount.value * MEMORY_LIMITS.BYTES_PER_MESSAGE_ESTIMATE
+  })
+  
+  const hasMemoryWarning = computed(() => memoryWarning.value !== null)
+  
+  const memoryUsagePercent = computed(() => {
+    const percent = (totalBufferedCount.value / MEMORY_LIMITS.MAX_TOTAL_MESSAGES) * 100
+    return Math.min(percent, 100)
+  })
+
   // ============================================================================
   // BUFFER MANAGEMENT
   // ============================================================================
@@ -53,11 +82,12 @@ export const useWidgetDataStore = defineStore('widgetData', () => {
         maxCount: safeMaxCount,
         maxAge,
       })
+      // Map structure changed, reactivity triggers automatically here
     }
   }
   
   function checkMemoryPressure(): boolean {
-    const totalMessages = totalMessageCount.value
+    const totalMessages = totalBufferedCount.value
     
     if (totalMessages >= MEMORY_LIMITS.MAX_TOTAL_MESSAGES * 0.9) {
       memoryWarning.value = `High memory usage: ${totalMessages} messages`
@@ -72,10 +102,9 @@ export const useWidgetDataStore = defineStore('widgetData', () => {
   }
   
   function pruneIfNeeded() {
-    const totalMessages = totalMessageCount.value
+    const totalMessages = totalBufferedCount.value
     if (totalMessages <= MEMORY_LIMITS.MAX_TOTAL_MESSAGES) return
     
-    // Simple prune: remove 25% from every buffer if we are over limit
     for (const buffer of buffers.value.values()) {
       if (buffer.messages.length > 10) {
         const toRemove = Math.ceil(buffer.messages.length * 0.25)
@@ -84,19 +113,15 @@ export const useWidgetDataStore = defineStore('widgetData', () => {
     }
   }
   
-  /**
-   * Add single message (Legacy wrapper)
-   */
-  function addMessage(widgetId: string, value: any, raw?: any) {
-    batchAddMessages([{ widgetId, value, raw, timestamp: Date.now() }])
+  function addMessage(widgetId: string, value: any, raw?: any, subject?: string) {
+    batchAddMessages([{ widgetId, value, raw, subject, timestamp: Date.now() }])
   }
 
-  /**
-   * Batch Add Messages (High Performance)
-   * This is the function that was missing
-   */
-  function batchAddMessages(items: Array<{ widgetId: string, value: any, raw?: any, timestamp: number }>) {
-    // 1. Group by widget to avoid Map lookups
+  function batchAddMessages(items: Array<{ widgetId: string, value: any, raw?: any, subject?: string, timestamp: number }>) {
+    // Safely increment cumulative count
+    const currentVal = Number(cumulativeCount.value) || 0
+    cumulativeCount.value = currentVal + items.length
+
     const updates = new Map<string, BufferedMessage[]>()
     
     for (const item of items) {
@@ -108,34 +133,34 @@ export const useWidgetDataStore = defineStore('widgetData', () => {
       list.push({
         timestamp: item.timestamp,
         value: item.value,
-        raw: item.raw
+        raw: item.raw,
+        subject: item.subject
       })
     }
 
-    // 2. Apply updates
     for (const [widgetId, newMessages] of updates) {
       let buffer = buffers.value.get(widgetId)
       
-      // Auto-initialize if missing
       if (!buffer) {
         initializeBuffer(widgetId)
         buffer = buffers.value.get(widgetId)!
       }
 
-      // Push all new messages
       buffer.messages.push(...newMessages)
 
-      // Prune individual buffer if too big
       if (buffer.messages.length > buffer.maxCount) {
         const overage = buffer.messages.length - buffer.maxCount
         buffer.messages.splice(0, overage)
       }
     }
 
-    // 3. Check global limits once per batch
     if (checkMemoryPressure()) {
       pruneIfNeeded()
     }
+
+    // IMPORTANT: Force Vue to re-evaluate computed properties derived from buffers
+    // because we mutated the nested arrays without changing the Map keys.
+    triggerRef(buffers)
   }
   
   // ============================================================================
@@ -160,16 +185,22 @@ export const useWidgetDataStore = defineStore('widgetData', () => {
   
   function clearBuffer(widgetId: string) {
     const buffer = buffers.value.get(widgetId)
-    if (buffer) buffer.messages = []
+    if (buffer) {
+      buffer.messages = []
+      triggerRef(buffers)
+    }
   }
   
   function removeBuffer(widgetId: string) {
-    buffers.value.delete(widgetId)
+    if (buffers.value.delete(widgetId)) {
+      triggerRef(buffers)
+    }
   }
   
   function clearAllBuffers() {
     buffers.value.clear()
     memoryWarning.value = null
+    // cumulativeCount.value = 0 // Optional: keep lifetime count or reset? Grug say keep.
   }
   
   function updateBufferConfig(widgetId: string, maxCount?: number, maxAge?: number) {
@@ -181,14 +212,11 @@ export const useWidgetDataStore = defineStore('widgetData', () => {
       buffer.maxCount = safeMaxCount
       if (buffer.messages.length > safeMaxCount) {
         buffer.messages.splice(0, buffer.messages.length - safeMaxCount)
+        triggerRef(buffers)
       }
     }
     if (maxAge !== undefined) buffer.maxAge = maxAge
   }
-  
-  // ============================================================================
-  // COMPUTED
-  // ============================================================================
   
   function useLatestValue(widgetId: string) {
     return computed(() => getLatest(widgetId))
@@ -198,37 +226,13 @@ export const useWidgetDataStore = defineStore('widgetData', () => {
     return computed(() => getBuffer(widgetId))
   }
   
-  const activeBufferCount = computed(() => buffers.value.size)
-  
-  const totalMessageCount = computed(() => {
-    let total = 0
-    for (const buffer of buffers.value.values()) {
-      total += buffer.messages.length
-    }
-    return total
-  })
-  
-  const memoryEstimate = computed(() => {
-    return totalMessageCount.value * MEMORY_LIMITS.BYTES_PER_MESSAGE_ESTIMATE
-  })
-  
-  const hasMemoryWarning = computed(() => memoryWarning.value !== null)
-  
-  const memoryUsagePercent = computed(() => {
-    const percent = (totalMessageCount.value / MEMORY_LIMITS.MAX_TOTAL_MESSAGES) * 100
-    return Math.min(percent, 100)
-  })
-  
-  // ============================================================================
-  // RETURN PUBLIC API
-  // ============================================================================
-  
   return {
     buffers,
     memoryWarning,
+    cumulativeCount,
     initializeBuffer,
     addMessage,
-    batchAddMessages, // <--- IMPORTANT: This must be here
+    batchAddMessages,
     getBuffer,
     getLatest,
     getBufferSize,
@@ -239,7 +243,8 @@ export const useWidgetDataStore = defineStore('widgetData', () => {
     useLatestValue,
     useBuffer,
     activeBufferCount,
-    totalMessageCount,
+    totalMessageCount: totalBufferedCount,
+    totalBufferedCount,
     memoryEstimate,
     hasMemoryWarning,
     memoryUsagePercent,

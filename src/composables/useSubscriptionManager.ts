@@ -17,8 +17,8 @@ interface WidgetListener {
 }
 
 interface SubscriptionRef {
-  key: string // Changed from 'subject' to 'key' to reflect internal storage
-  subject: string // Keep track of actual NATS subject
+  key: string
+  subject: string
   natsSubscription?: Subscription 
   iterator?: ConsumerMessages
   listeners: Map<string, WidgetListener>
@@ -31,6 +31,7 @@ interface QueuedMessage {
   widgetId: string
   value: any
   raw: any
+  subject?: string // Added subject
   timestamp: number
 }
 
@@ -40,10 +41,8 @@ export function useSubscriptionManager() {
   const natsStore = useNatsStore()
   const dataStore = useWidgetDataStore()
   
-  // Maps internal unique Key -> SubscriptionRef
   const subscriptions = new Map<string, SubscriptionRef>()
   
-  // --- Throttling Logic ---
   const messageQueue: QueuedMessage[] = []
   let flushPending = false
   
@@ -58,7 +57,7 @@ export function useSubscriptionManager() {
     requestAnimationFrame(flushQueue)
   }
   
-  function queueMessage(widgetId: string, value: any, raw: any) {
+  function queueMessage(widgetId: string, value: any, raw: any, subject?: string) {
     if (messageQueue.length >= MAX_QUEUE_SIZE) {
       messageQueue.splice(0, 1000)
       if (Math.random() > 0.99) {
@@ -69,6 +68,7 @@ export function useSubscriptionManager() {
       widgetId,
       value,
       raw,
+      subject, // Pass subject
       timestamp: Date.now()
     })
     if (!flushPending) {
@@ -77,6 +77,7 @@ export function useSubscriptionManager() {
     }
   }
 
+  // ... existing calculateStartTime ...
   function calculateStartTime(windowStr: string | undefined): Date {
     const now = Date.now()
     if (!windowStr) return new Date(now - 10 * 60 * 1000)
@@ -98,23 +99,15 @@ export function useSubscriptionManager() {
     return new Date(now - ms)
   }
 
-  // --- Subscription Logic ---
-
-  /**
-   * Generates a unique key for the subscription map.
-   * 
-   * Core NATS: Shared by subject (all listeners get same live data).
-   * JetStream: Unique by Widget ID (each widget needs its own Consumer to replay history).
-   */
+  // ... existing getSubscriptionKey ...
   function getSubscriptionKey(widgetId: string, config: DataSourceConfig): string {
     if (config.useJetStream) {
-      // Must be unique per widget to ensure each gets its own historical replay
       return `js:${widgetId}`
     }
-    // Core subscriptions can be shared efficiently
     return `core:${config.subject}`
   }
 
+  // ... existing subscribe ...
   async function subscribe(widgetId: string, config: DataSourceConfig, jsonPath?: string) {
     if (!natsStore.nc) {
       console.error('Cannot subscribe: Not connected to NATS')
@@ -127,7 +120,6 @@ export function useSubscriptionManager() {
     const key = getSubscriptionKey(widgetId, config)
     let subRef = subscriptions.get(key)
     
-    // 1. If subscription exists (or is initializing), join it
     if (subRef) {
       if (subRef.initPromise) {
         try {
@@ -151,7 +143,6 @@ export function useSubscriptionManager() {
       }
     }
     
-    // 2. Create placeholder
     const newSubRef: SubscriptionRef = {
       key,
       subject,
@@ -185,18 +176,14 @@ export function useSubscriptionManager() {
             consumerOpts.opt_start_time = calculateStartTime(config.timeWindow).toISOString()
           }
 
-          // Generate an Ordered Consumer
           const consumer = await js.consumers.get(streamName, consumerOpts)
           const messages = await consumer.consume()
           
-          // console.log(`[SubMgr] Consuming ${subject} for ${widgetId} (${config.deliverPolicy})`)
-
           newSubRef.iterator = messages
           processJetStreamMessages(newSubRef)
 
         } else {
           const natsSub = natsStore.nc!.subscribe(subject)
-          // console.log(`[SubMgr] Subscribed to ${subject} (Core)`)
           
           newSubRef.natsSubscription = natsSub
           processCoreMessages(newSubRef)
@@ -216,9 +203,7 @@ export function useSubscriptionManager() {
     await newSubRef.initPromise
   }
   
-  /**
-   * Unsubscribe using WidgetID and Config (to reconstruct key)
-   */
+  // ... existing unsubscribe ...
   function unsubscribe(widgetId: string, config: DataSourceConfig) {
     if (!config.subject) return
 
@@ -239,7 +224,7 @@ export function useSubscriptionManager() {
     try {
       for await (const msg of subRef.natsSubscription) {
         if (!subRef.isActive) break
-        dispatchMessage(subRef, msg.data)
+        dispatchMessage(subRef, msg.data, msg.subject) // Pass subject
       }
     } catch (err) {
       // Connection closed
@@ -252,14 +237,14 @@ export function useSubscriptionManager() {
       for await (const msg of subRef.iterator) {
         if (!subRef.isActive) break
         msg.ack()
-        dispatchMessage(subRef, msg.data)
+        dispatchMessage(subRef, msg.data, msg.subject) // Pass subject
       }
     } catch (err) {
       // Iterator ended
     }
   }
 
-  function dispatchMessage(subRef: SubscriptionRef, rawData: Uint8Array) {
+  function dispatchMessage(subRef: SubscriptionRef, rawData: Uint8Array, subject: string) {
     let data: any
     try {
       const text = decodeBytes(rawData)
@@ -274,13 +259,14 @@ export function useSubscriptionManager() {
         if (listener.jsonPath) {
           value = extractJsonPath(data, listener.jsonPath)
         }
-        queueMessage(listener.widgetId, value, data)
+        queueMessage(listener.widgetId, value, data, subject) // Pass subject
       } catch (err) {
         // ignore
       }
     }
   }
   
+  // ... existing cleanup/utils ...
   function cleanup(subRef: SubscriptionRef) {
     subRef.isActive = false
     if (subRef.natsSubscription) {

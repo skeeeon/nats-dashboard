@@ -38,7 +38,7 @@
               v-for="(count, i) in throughputHistory"
               :key="i"
               class="throughput-bar"
-              :style="{ height: (count / maxThroughput * 100) + '%' }"
+              :style="{ height: getBarHeight(count) + '%' }"
             />
           </div>
           
@@ -46,7 +46,6 @@
           <div class="queue-stats">
             <div class="stat-row">
               <span class="stat-label">Processing Queue:</span>
-              <!-- Removed :class="queueHealthClass" from text to ensure readability -->
               <span class="stat-value">
                 {{ subStats.queueSize }} / {{ subStats.maxQueueSize }}
               </span>
@@ -74,7 +73,7 @@
           <div class="subscription-list">
             <div 
               v-for="sub in subStats.subscriptions" 
-              :key="sub.subject"
+              :key="sub.key"
               class="subscription-item"
             >
               <div class="sub-subject">{{ sub.subject }}</div>
@@ -91,8 +90,12 @@
             <span class="stat-value">{{ dataStore.activeBufferCount }}</span>
           </div>
           <div class="stat-row">
-            <span class="stat-label">Total Messages:</span>
-            <span class="stat-value">{{ dataStore.totalMessageCount }}</span>
+            <span class="stat-label">Buffered Msgs:</span>
+            <span class="stat-value">{{ dataStore.totalBufferedCount || 0 }}</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Total Processed:</span>
+            <span class="stat-value">{{ dataStore.cumulativeCount || 0 }}</span>
           </div>
           <div class="stat-row">
             <span class="stat-label">Memory Est:</span>
@@ -158,7 +161,7 @@ const dashboardStore = useDashboardStore()
 const dataStore = useWidgetDataStore()
 const subManager = getSubscriptionManager()
 
-const lastMessageCount = ref(0)
+const lastCumulativeCount = ref(0)
 const messagesPerSecond = ref(0)
 const throughputHistory = ref<number[]>(new Array(20).fill(0))
 const currentSubStats = ref(subManager.getStats())
@@ -171,7 +174,7 @@ function close() {
 }
 
 const statusClass = computed(() => `status-${natsStore.status}`)
-const memoryPercent = computed(() => dataStore.memoryUsagePercent)
+const memoryPercent = computed(() => dataStore.memoryUsagePercent || 0)
 const currentServer = computed(() => natsStore.nc?.getServer() || 'Unknown')
 
 const memoryPercentClass = computed(() => {
@@ -206,15 +209,36 @@ const widgetTypeCount = computed(() => {
   return counts
 })
 
-const maxThroughput = computed(() => Math.max(...throughputHistory.value, 10))
+const maxThroughput = computed(() => {
+  const max = Math.max(...throughputHistory.value)
+  return isNaN(max) || max < 10 ? 10 : max
+})
+
+function getBarHeight(count: number) {
+  const max = maxThroughput.value
+  if (max === 0 || isNaN(count)) return 0
+  return (count / max) * 100
+}
 
 function updateStats() {
   // Throughput
-  const currentCount = dataStore.totalMessageCount
-  const newMessages = currentCount - lastMessageCount.value
+  // Use strict number conversion to prevent NaN
+  const currentTotal = Number(dataStore.cumulativeCount) || 0
+  const lastTotal = Number(lastCumulativeCount.value) || 0
+  
+  let newMessages = 0
+  if (currentTotal >= lastTotal) {
+    newMessages = currentTotal - lastTotal
+  } else {
+    // Reset detected (e.g. store cleared)
+    newMessages = currentTotal
+  }
+  
+  // Safety cap to prevent UI glitches on massive spikes
+  if (isNaN(newMessages)) newMessages = 0
   
   messagesPerSecond.value = newMessages
-  lastMessageCount.value = currentCount
+  lastCumulativeCount.value = currentTotal
   
   throughputHistory.value.push(newMessages)
   if (throughputHistory.value.length > 20) {
@@ -228,6 +252,10 @@ function updateStats() {
 function clearAllBuffers() {
   if (confirm('Clear all widget data buffers? This will remove all message history.')) {
     dataStore.clearAllBuffers()
+    // Reset local counters to avoid spikes
+    lastCumulativeCount.value = 0
+    throughputHistory.value = new Array(20).fill(0)
+    messagesPerSecond.value = 0
   }
 }
 
@@ -238,8 +266,9 @@ function refreshStats() {
 // Only run stats loop when modal is open
 watch(() => props.modelValue, (isOpen) => {
   if (isOpen) {
-    lastMessageCount.value = dataStore.totalMessageCount
-    // Update every 1s
+    // Reset baseline when opening so we don't get a huge spike
+    lastCumulativeCount.value = Number(dataStore.cumulativeCount) || 0
+    
     updateInterval = setInterval(updateStats, 1000) as unknown as number
     // Also run immediately
     updateStats()
@@ -338,7 +367,7 @@ onUnmounted(() => {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--text); /* Changed from muted to text for better visibility */
+  color: var(--text);
   opacity: 0.7;
   margin-bottom: 12px;
 }
@@ -351,9 +380,8 @@ onUnmounted(() => {
   font-size: 13px;
 }
 
-/* Updated Colors for Contrast */
 .stat-label { 
-  color: var(--text-secondary); /* Darker than muted */
+  color: var(--text-secondary);
   font-weight: 500;
 }
 
@@ -363,14 +391,12 @@ onUnmounted(() => {
   font-family: var(--mono); 
 }
 
-/* Status colors */
 .stat-value.status-connected { color: var(--connection-connected); }
 .stat-value.status-connecting { color: var(--connection-connecting); }
 .stat-value.status-disconnected { color: var(--connection-disconnected); }
 .stat-value.memory-warning { color: var(--color-warning); }
 .stat-value.memory-critical { color: var(--color-error); }
 
-/* Subscription List */
 .subscription-list {
   margin-top: 8px;
   max-height: 150px;
@@ -384,7 +410,7 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 8px 10px;
-  background: var(--input-bg); /* Theme-aware background */
+  background: var(--input-bg);
   border-bottom: 1px solid var(--border);
   font-size: 12px;
 }
@@ -394,7 +420,7 @@ onUnmounted(() => {
 }
 
 .sub-subject {
-  color: var(--color-primary); /* Better contrast than accent in light mode */
+  color: var(--color-primary);
   font-family: var(--mono);
   font-weight: 600;
   overflow: hidden;
@@ -410,7 +436,6 @@ onUnmounted(() => {
   font-size: 11px;
 }
 
-/* Widget Breakdown */
 .widget-type-breakdown {
   display: flex;
   flex-wrap: wrap;
@@ -427,7 +452,6 @@ onUnmounted(() => {
   font-weight: 500;
 }
 
-/* Throughput Chart */
 .throughput-chart {
   display: flex;
   align-items: flex-end;
@@ -435,7 +459,7 @@ onUnmounted(() => {
   height: 40px;
   margin-top: 8px;
   gap: 2px;
-  background: var(--input-bg); /* Subtle background for chart area */
+  background: var(--input-bg);
   border-radius: 4px;
   padding: 2px;
 }
@@ -449,7 +473,6 @@ onUnmounted(() => {
   opacity: 0.8;
 }
 
-/* Queue Stats */
 .queue-stats {
   margin-top: 12px;
   background: var(--input-bg);

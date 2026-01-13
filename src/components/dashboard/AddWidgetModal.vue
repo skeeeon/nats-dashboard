@@ -60,6 +60,13 @@
             <div class="widget-type-name">Map Widget</div>
             <div class="widget-type-desc">Geographic location</div>
           </button>
+
+          <!-- Console Widget -->
+          <button class="widget-type-btn" @click="selectType('console')">
+            <div class="widget-type-icon">📟</div>
+            <div class="widget-type-name">Console</div>
+            <div class="widget-type-desc">Live log stream</div>
+          </button>
         </div>
       </div>
     </div>

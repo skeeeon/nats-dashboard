@@ -12,7 +12,7 @@
         
         <!-- Data Source (Shared by visualization widgets) -->
         <ConfigDataSource 
-          v-if="['text', 'chart', 'stat', 'gauge'].includes(widgetType || '')"
+          v-if="['text', 'chart', 'stat', 'gauge', 'console'].includes(widgetType || '')"
           :form="form" 
           :errors="errors" 
         />
@@ -71,6 +71,12 @@
           :form="form" 
           :errors="errors" 
         />
+
+        <ConfigConsole
+          v-if="widgetType === 'console'"
+          :form="form"
+          :errors="errors"
+        />
         
         <div class="modal-actions">
           <button class="btn-secondary" @click="close">
@@ -105,6 +111,7 @@ import ConfigKv from './config/ConfigKv.vue'
 import ConfigSwitch from './config/ConfigSwitch.vue'
 import ConfigSlider from './config/ConfigSlider.vue'
 import ConfigMap from './config/ConfigMap.vue'
+import ConfigConsole from './config/ConfigConsole.vue'
 
 interface Props {
   modelValue: boolean
@@ -164,6 +171,8 @@ const form = ref<WidgetFormState>({
   mapCenterLon: -98.5795,
   mapZoom: 4,
   mapMarkers: [],
+  consoleFontSize: 12,
+  consoleShowTimestamp: true,
   
   // JetStream Defaults
   useJetStream: false,
@@ -230,6 +239,14 @@ watch(() => props.widgetId, (widgetId) => {
     mapMarkers = JSON.parse(JSON.stringify(widget.mapConfig.markers || []))
   }
 
+  let consoleFontSize = 12
+  let consoleShowTimestamp = true
+
+  if (widget.type === 'console' && widget.consoleConfig) {
+    consoleFontSize = widget.consoleConfig.fontSize ?? 12
+    consoleShowTimestamp = widget.consoleConfig.showTimestamp ?? true
+  }
+
   form.value = {
     title: widget.title,
     subject: currentSubject,
@@ -272,6 +289,8 @@ watch(() => props.widgetId, (widgetId) => {
     mapCenterLon,
     mapZoom,
     mapMarkers,
+    consoleFontSize,
+    consoleShowTimestamp,
     
     // JetStream Props
     useJetStream: widget.dataSource.useJetStream || false,
@@ -290,7 +309,7 @@ function validate(): boolean {
   const titleResult = validator.validateWidgetTitle(form.value.title)
   if (!titleResult.valid) errors.value.title = titleResult.error!
   
-  if (['text', 'chart', 'stat', 'gauge'].includes(widget.type)) {
+  if (['text', 'chart', 'stat', 'gauge', 'console'].includes(widget.type)) {
     const subjectResult = validator.validateSubject(form.value.subject)
     if (!subjectResult.valid) errors.value.subject = subjectResult.error!
     
@@ -357,7 +376,7 @@ function save() {
   
   const updates: any = { title: form.value.title.trim() }
   
-  if (['text', 'chart', 'stat', 'gauge'].includes(widget.type)) {
+  if (['text', 'chart', 'stat', 'gauge', 'console'].includes(widget.type)) {
     updates.dataSource = { 
       ...widget.dataSource, 
       subject: form.value.subject.trim(),
@@ -446,6 +465,11 @@ function save() {
       center: { lat: form.value.mapCenterLat, lon: form.value.mapCenterLon },
       zoom: form.value.mapZoom,
       markers: JSON.parse(JSON.stringify(form.value.mapMarkers)),
+    }
+  } else if (widget.type === 'console') {
+    updates.consoleConfig = {
+      fontSize: form.value.consoleFontSize,
+      showTimestamp: form.value.consoleShowTimestamp
     }
   }
   

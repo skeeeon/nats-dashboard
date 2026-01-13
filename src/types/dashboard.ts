@@ -3,7 +3,7 @@
 /**
  * Widget Types
  */
-export type WidgetType = 'chart' | 'text' | 'button' | 'kv' | 'switch' | 'slider' | 'stat' | 'gauge' | 'map'
+export type WidgetType = 'chart' | 'text' | 'button' | 'kv' | 'switch' | 'slider' | 'stat' | 'gauge' | 'map' | 'console'
 export type DataSourceType = 'subscription' | 'consumer' | 'kv'
 export type ChartType = 'line' | 'bar' | 'pie' | 'gauge'
 
@@ -132,6 +132,11 @@ export interface GaugeWidgetConfig {
   }[]
 }
 
+export interface ConsoleWidgetConfig {
+  fontSize?: number
+  showTimestamp?: boolean
+}
+
 // --- Map Widget Types ---
 
 export const MAP_LIMITS = {
@@ -227,6 +232,7 @@ export interface WidgetConfig {
   statConfig?: StatCardWidgetConfig
   gaugeConfig?: GaugeWidgetConfig
   mapConfig?: MapWidgetConfig
+  consoleConfig?: ConsoleWidgetConfig
 }
 
 export type StorageType = 'local' | 'kv'
@@ -255,6 +261,7 @@ export const DEFAULT_WIDGET_SIZES: Record<WidgetType, { w: number; h: number }> 
   stat: { w: 3, h: 2 },
   gauge: { w: 3, h: 3 },
   map: { w: 6, h: 4 },
+  console: { w: 6, h: 4 },
 }
 
 export const DEFAULT_BUFFER_CONFIG: BufferConfig = {
@@ -347,6 +354,14 @@ export function createDefaultWidget(type: WidgetType, position: { x: number; y: 
         zoom: 4,
         markers: []
       }
+      break
+    case 'console':
+      base.dataSource = { type: 'subscription', subject: '>' } // Default to wildcard
+      base.consoleConfig = {
+        fontSize: 12,
+        showTimestamp: true
+      }
+      base.buffer.maxCount = 100 // Default buffer for console
       break
   }
   
