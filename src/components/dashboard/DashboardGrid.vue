@@ -112,6 +112,16 @@ function checkMobile() {
   isMobile.value = window.innerWidth < 768
 }
 
+/**
+ * Helper: Sanitize layout array to remove undefined/null items.
+ * This prevents crashes during rapid responsive updates where the library
+ * might emit a sparse array.
+ */
+function sanitizeLayout(layout: any[]): any[] {
+  if (!Array.isArray(layout)) return []
+  return layout.filter(item => item && item.i != null)
+}
+
 const sortedWidgets = computed(() => {
   return [...props.widgets].sort((a, b) => {
     if (a.y !== b.y) return a.y - b.y
@@ -244,15 +254,23 @@ watch(() => props.widgets, (newWidgets) => {
 
 function handleBreakpointChange(breakpoint: string, newLayout: any[]) {
   currentBreakpoint.value = breakpoint
-  if (breakpoint === 'lg') layoutItems.value = mapWidgetsToLayout(props.widgets)
-  else layoutItems.value = newLayout
+  if (breakpoint === 'lg') {
+    layoutItems.value = mapWidgetsToLayout(props.widgets)
+  } else {
+    // Sanitize incoming layout from library to prevent "reading 'i' of undefined" errors
+    layoutItems.value = sanitizeLayout(newLayout)
+  }
 }
 
 function handleLayoutUpdate(newLayout: Array<{ i: string; x: number; y: number; w: number; h: number }>) {
   if (dashboardStore.isLocked || isMobile.value) return
-  layoutItems.value = newLayout
+  
+  // Sanitize here as well just to be safe
+  const cleanLayout = sanitizeLayout(newLayout)
+  layoutItems.value = cleanLayout
+  
   if (currentBreakpoint.value === 'lg') {
-    const updates = newLayout.map(item => ({
+    const updates = cleanLayout.map(item => ({
       id: item.i, x: item.x, y: item.y, w: item.w, h: item.h
     }))
     dashboardStore.batchUpdateLayout(updates)
