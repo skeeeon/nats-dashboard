@@ -11,6 +11,7 @@
         <ConfigCommon :form="form" :errors="errors" />
         
         <!-- Data Source (Shared by visualization widgets) -->
+        <!-- Grug say: Status widget now handles its own data source config (like Switch) to fix ordering -->
         <ConfigDataSource 
           v-if="showDataSourceConfig"
           :form="form" 
@@ -43,7 +44,7 @@ import { ref, computed, watch } from 'vue'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useValidation } from '@/composables/useValidation'
 import { useWidgetOperations } from '@/composables/useWidgetOperations'
-import type { WidgetType, ThresholdRule, MapMarker } from '@/types/dashboard'
+import type { WidgetType, ThresholdRule, MapMarker, StatusMapping } from '@/types/dashboard'
 import type { WidgetFormState } from '@/types/config'
 
 // Import sub-components
@@ -60,6 +61,7 @@ import ConfigSlider from './config/ConfigSlider.vue'
 import ConfigMap from './config/ConfigMap.vue'
 import ConfigConsole from './config/ConfigConsole.vue'
 import ConfigPublisher from './config/ConfigPublisher.vue'
+import ConfigStatus from './config/ConfigStatus.vue'
 
 interface Props {
   modelValue: boolean
@@ -89,7 +91,8 @@ const configComponents: Record<string, any> = {
   slider: ConfigSlider,
   map: ConfigMap,
   console: ConfigConsole,
-  publisher: ConfigPublisher
+  publisher: ConfigPublisher,
+  status: ConfigStatus
 }
 
 const form = ref<WidgetFormState>({
@@ -97,6 +100,7 @@ const form = ref<WidgetFormState>({
   subject: '',
   jsonPath: '',
   bufferSize: 100,
+  dataSourceType: 'subscription',
   kvBucket: '',
   kvKey: '',
   buttonLabel: '',
@@ -140,6 +144,15 @@ const form = ref<WidgetFormState>({
   publisherDefaultPayload: '',
   publisherTimeout: 2000,
   
+  // Status Defaults
+  statusMappings: [],
+  statusDefaultColor: 'var(--color-info)',
+  statusDefaultLabel: 'Unknown',
+  statusShowStale: true,
+  statusStalenessThreshold: 60000,
+  statusStaleColor: 'var(--muted)',
+  statusStaleLabel: 'Stale',
+  
   // JetStream Defaults
   useJetStream: false,
   deliverPolicy: 'last',
@@ -163,6 +176,9 @@ const activeConfigComponent = computed(() => {
 // Logic for showing the generic Data Source config block
 const showDataSourceConfig = computed(() => {
   const typesWithDataSource = ['text', 'chart', 'stat', 'gauge', 'console']
+  // Status widget handles its own data source config internally now
+  if (widgetType.value === 'status') return false
+  
   return typesWithDataSource.includes(widgetType.value || '')
 })
 
@@ -203,6 +219,9 @@ watch(() => props.widgetId, (widgetId) => {
   } else if (widget.type === 'kv') {
     currentKvBucket = widget.dataSource.kvBucket || ''
     currentKvKey = widget.dataSource.kvKey || ''
+  } else if (widget.type === 'status' && widget.dataSource.type === 'kv') {
+    currentKvBucket = widget.dataSource.kvBucket || ''
+    currentKvKey = widget.dataSource.kvKey || ''
   }
 
   let mapCenterLat = 39.8283
@@ -235,11 +254,35 @@ watch(() => props.widgetId, (widgetId) => {
     publisherTimeout = widget.publisherConfig.timeout || 2000
   }
 
+  // Status Config
+  let statusMappings: StatusMapping[] = []
+  let statusDefaultColor = 'var(--color-info)'
+  let statusDefaultLabel = 'Unknown'
+  let statusShowStale = true
+  let statusStalenessThreshold = 60000
+  let statusStaleColor = 'var(--muted)'
+  let statusStaleLabel = 'Stale'
+  let dataSourceType: 'subscription' | 'kv' = 'subscription'
+
+  if (widget.type === 'status') {
+    dataSourceType = widget.dataSource.type === 'kv' ? 'kv' : 'subscription'
+    if (widget.statusConfig) {
+      statusMappings = JSON.parse(JSON.stringify(widget.statusConfig.mappings || []))
+      statusDefaultColor = widget.statusConfig.defaultColor || 'var(--color-info)'
+      statusDefaultLabel = widget.statusConfig.defaultLabel || 'Unknown'
+      statusShowStale = widget.statusConfig.showStale ?? true
+      statusStalenessThreshold = widget.statusConfig.stalenessThreshold || 60000
+      statusStaleColor = widget.statusConfig.staleColor || 'var(--muted)'
+      statusStaleLabel = widget.statusConfig.staleLabel || 'Stale'
+    }
+  }
+
   form.value = {
     title: widget.title,
     subject: currentSubject,
     jsonPath: widget.jsonPath || '',
     bufferSize: widget.buffer.maxCount,
+    dataSourceType,
     kvBucket: currentKvBucket,
     kvKey: currentKvKey,
     buttonLabel: widget.buttonConfig?.label || '',
@@ -283,6 +326,15 @@ watch(() => props.widgetId, (widgetId) => {
     publisherDefaultPayload,
     publisherTimeout,
     
+    // Status
+    statusMappings,
+    statusDefaultColor,
+    statusDefaultLabel,
+    statusShowStale,
+    statusStalenessThreshold,
+    statusStaleColor,
+    statusStaleLabel,
+    
     // JetStream Props
     useJetStream: widget.dataSource.useJetStream || false,
     deliverPolicy: widget.dataSource.deliverPolicy || 'last',
@@ -300,7 +352,8 @@ function validate(): boolean {
   const titleResult = validator.validateWidgetTitle(form.value.title)
   if (!titleResult.valid) errors.value.title = titleResult.error!
   
-  if (['text', 'chart', 'stat', 'gauge', 'console'].includes(widget.type)) {
+  // Standard Subscription Validation
+  if (['text', 'chart', 'stat', 'gauge', 'console'].includes(widget.type) || (widget.type === 'status' && form.value.dataSourceType === 'subscription')) {
     const subjectResult = validator.validateSubject(form.value.subject)
     if (!subjectResult.valid) errors.value.subject = subjectResult.error!
     
@@ -320,7 +373,7 @@ function validate(): boolean {
       const jsonResult = validator.validateJson(form.value.buttonPayload)
       if (!jsonResult.valid) errors.value.buttonPayload = jsonResult.error!
     }
-  } else if (widget.type === 'kv') {
+  } else if (widget.type === 'kv' || (widget.type === 'status' && form.value.dataSourceType === 'kv')) {
     const bucketResult = validator.validateKvBucket(form.value.kvBucket)
     if (!bucketResult.valid) errors.value.kvBucket = bucketResult.error!
     const keyResult = validator.validateKvKey(form.value.kvKey)
@@ -469,6 +522,35 @@ function save() {
       defaultPayload: form.value.publisherDefaultPayload,
       history: currentHistory,
       timeout: form.value.publisherTimeout
+    }
+  } else if (widget.type === 'status') {
+    // Handle KV vs Subscription mode
+    if (form.value.dataSourceType === 'kv') {
+      updates.dataSource = {
+        type: 'kv',
+        kvBucket: form.value.kvBucket.trim(),
+        kvKey: form.value.kvKey.trim(),
+      }
+    } else {
+      updates.dataSource = { 
+        type: 'subscription',
+        subject: form.value.subject.trim(),
+        useJetStream: form.value.useJetStream,
+        deliverPolicy: form.value.deliverPolicy,
+        timeWindow: form.value.jetstreamTimeWindow
+      }
+    }
+    updates.jsonPath = form.value.jsonPath.trim() || undefined
+    updates.buffer = { maxCount: form.value.bufferSize }
+    
+    updates.statusConfig = {
+      mappings: [...form.value.statusMappings],
+      defaultColor: form.value.statusDefaultColor,
+      defaultLabel: form.value.statusDefaultLabel,
+      showStale: form.value.statusShowStale,
+      stalenessThreshold: form.value.statusStalenessThreshold,
+      staleColor: form.value.statusStaleColor,
+      staleLabel: form.value.statusStaleLabel
     }
   }
   

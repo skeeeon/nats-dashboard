@@ -71,6 +71,7 @@ import GaugeWidget from '@/components/widgets/GaugeWidget.vue'
 import MapWidget from '@/components/widgets/MapWidget.vue'
 import ConsoleWidget from '@/components/widgets/ConsoleWidget.vue'
 import PublisherWidget from '@/components/widgets/PublisherWidget.vue'
+import StatusWidget from '@/components/widgets/StatusWidget.vue'
 
 const props = defineProps<{
   config?: WidgetConfig
@@ -102,6 +103,7 @@ const widgetComponent = computed(() => {
     case 'map': return MapWidget
     case 'console': return ConsoleWidget
     case 'publisher': return PublisherWidget
+    case 'status': return StatusWidget
     default: return null
   }
 })

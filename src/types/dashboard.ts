@@ -3,7 +3,7 @@
 /**
  * Widget Types
  */
-export type WidgetType = 'chart' | 'text' | 'button' | 'kv' | 'switch' | 'slider' | 'stat' | 'gauge' | 'map' | 'console' | 'publisher'
+export type WidgetType = 'chart' | 'text' | 'button' | 'kv' | 'switch' | 'slider' | 'stat' | 'gauge' | 'map' | 'console' | 'publisher' | 'status'
 export type DataSourceType = 'subscription' | 'consumer' | 'kv'
 export type ChartType = 'line' | 'bar' | 'pie' | 'gauge'
 
@@ -150,6 +150,27 @@ export interface PublisherWidgetConfig {
   timeout?: number
 }
 
+// --- Status Widget Types ---
+export interface StatusMapping {
+  id: string
+  value: string
+  color: string
+  label?: string
+  blink?: boolean
+}
+
+export interface StatusWidgetConfig {
+  mappings: StatusMapping[]
+  defaultColor: string
+  defaultLabel?: string
+  
+  // Staleness Logic
+  showStale?: boolean
+  stalenessThreshold?: number // milliseconds
+  staleColor?: string
+  staleLabel?: string
+}
+
 // --- Map Widget Types ---
 
 export const MAP_LIMITS = {
@@ -247,6 +268,7 @@ export interface WidgetConfig {
   mapConfig?: MapWidgetConfig
   consoleConfig?: ConsoleWidgetConfig
   publisherConfig?: PublisherWidgetConfig
+  statusConfig?: StatusWidgetConfig
 }
 
 export type StorageType = 'local' | 'kv'
@@ -277,6 +299,7 @@ export const DEFAULT_WIDGET_SIZES: Record<WidgetType, { w: number; h: number }> 
   map: { w: 6, h: 4 },
   console: { w: 6, h: 4 },
   publisher: { w: 4, h: 4 },
+  status: { w: 2, h: 2 },
 }
 
 export const DEFAULT_BUFFER_CONFIG: BufferConfig = {
@@ -385,6 +408,22 @@ export function createDefaultWidget(type: WidgetType, position: { x: number; y: 
         defaultPayload: '{\n  "action": "test"\n}',
         history: [],
         timeout: 2000
+      }
+      break
+    case 'status':
+      base.title = 'Status'
+      base.dataSource = { type: 'subscription', subject: 'service.status' }
+      base.statusConfig = {
+        mappings: [
+          { id: '1', value: 'online', color: 'var(--color-success)', label: 'Online', blink: false },
+          { id: '2', value: 'error', color: 'var(--color-error)', label: 'Error', blink: true }
+        ],
+        defaultColor: 'var(--color-info)',
+        defaultLabel: 'Unknown',
+        showStale: true,
+        stalenessThreshold: 60000, // 1 min
+        staleColor: 'var(--muted)',
+        staleLabel: 'Stale'
       }
       break
   }

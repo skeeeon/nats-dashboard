@@ -54,16 +54,32 @@ export function useWidgetOperations() {
   }
 
   function subscribeAllWidgets() {
-    dashboardStore.activeWidgets.forEach(widget => subscribeWidget(widget.id))
+    dashboardStore.activeWidgets.forEach(widget => {
+      if (needsSubscription(widget.type, widget)) {
+        subscribeWidget(widget.id)
+      }
+    })
   }
 
   function unsubscribeAllWidgets(keepData: boolean = false) {
-    dashboardStore.activeWidgets.forEach(widget => unsubscribeWidget(widget.id, keepData))
+    dashboardStore.activeWidgets.forEach(widget => {
+      if (needsSubscription(widget.type, widget)) {
+        unsubscribeWidget(widget.id, keepData)
+      }
+    })
   }
 
-  function needsSubscription(widgetType: WidgetType): boolean {
+  function needsSubscription(widgetType: WidgetType, config?: WidgetConfig): boolean {
     const selfManagedTypes: WidgetType[] = ['button', 'kv', 'switch', 'slider', 'map', 'publisher']
-    return !selfManagedTypes.includes(widgetType)
+    
+    if (selfManagedTypes.includes(widgetType)) return false
+    
+    // Status widget is self-managed ONLY if in KV mode
+    if (widgetType === 'status') {
+      return config?.dataSource?.type !== 'kv'
+    }
+    
+    return true
   }
 
   function createWidget(type: WidgetType) {
@@ -129,11 +145,27 @@ export function useWidgetOperations() {
           history: []
         }
         break
+      case 'status':
+        widget.title = 'Status'
+        widget.dataSource = { type: 'subscription', subject: 'service.status' }
+        widget.statusConfig = {
+          mappings: [
+            { id: '1', value: 'online', color: 'var(--color-success)', label: 'Online', blink: false },
+            { id: '2', value: 'error', color: 'var(--color-error)', label: 'Error', blink: true }
+          ],
+          defaultColor: 'var(--color-info)',
+          defaultLabel: 'Unknown',
+          showStale: true,
+          stalenessThreshold: 60000,
+          staleColor: 'var(--muted)',
+          staleLabel: 'Stale'
+        }
+        break
     }
     
     dashboardStore.addWidget(widget)
     
-    if (natsStore.isConnected && needsSubscription(type)) {
+    if (natsStore.isConnected && needsSubscription(type, widget)) {
       subscribeWidget(widget.id)
     }
     
@@ -157,7 +189,7 @@ export function useWidgetOperations() {
     
     dashboardStore.addWidget(copy)
     
-    if (natsStore.isConnected && needsSubscription(copy.type)) {
+    if (natsStore.isConnected && needsSubscription(copy.type, copy)) {
       subscribeWidget(copy.id)
     }
     
@@ -169,14 +201,15 @@ export function useWidgetOperations() {
     if (!widget) return
 
     // Unsubscribe using CURRENT config (before updates applied)
-    // This ensures we clean up the correct subscription key
-    if (needsSubscription(widget.type)) {
+    if (needsSubscription(widget.type, widget)) {
       unsubscribeWidget(widgetId, false) 
     }
 
     dashboardStore.updateWidget(widgetId, updates)
 
-    if (natsStore.isConnected && needsSubscription(widget.type)) {
+    // Check if we need to subscribe with NEW config
+    const updatedWidget = dashboardStore.getWidget(widgetId)!
+    if (natsStore.isConnected && needsSubscription(updatedWidget.type, updatedWidget)) {
       subscribeWidget(widgetId)
     }
   }
@@ -185,7 +218,7 @@ export function useWidgetOperations() {
     const widget = dashboardStore.getWidget(widgetId)
     if (!widget || !natsStore.isConnected) return
     
-    if (needsSubscription(widget.type)) {
+    if (needsSubscription(widget.type, widget)) {
       unsubscribeWidget(widgetId, false)
       subscribeWidget(widgetId)
     }

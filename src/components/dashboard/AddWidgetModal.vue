@@ -14,6 +14,11 @@
             <div class="widget-type-name">Text Widget</div>
             <div class="widget-type-desc">Display latest value</div>
           </button>
+          <button class="widget-type-btn" @click="selectType('status')">
+            <div class="widget-type-icon">🚦</div>
+            <div class="widget-type-name">Status Indicator</div>
+            <div class="widget-type-desc">State mapping & watchdog</div>
+          </button>
           <button class="widget-type-btn" @click="selectType('chart')">
             <div class="widget-type-icon">📈</div>
             <div class="widget-type-name">Chart Widget</div>

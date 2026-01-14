@@ -1,5 +1,5 @@
 // src/types/config.ts
-import type { ThresholdRule, MapMarker } from './dashboard'
+import type { ThresholdRule, MapMarker, StatusMapping } from './dashboard'
 
 export interface WidgetFormState {
   // Common
@@ -7,6 +7,9 @@ export interface WidgetFormState {
   subject: string
   jsonPath: string
   bufferSize: number
+  
+  // Data Source Type (New)
+  dataSourceType: 'subscription' | 'kv'
   
   // KV Widget
   kvBucket: string
@@ -70,6 +73,15 @@ export interface WidgetFormState {
   publisherDefaultPayload: string
   publisherTimeout: number
   
+  // Status Widget
+  statusMappings: StatusMapping[]
+  statusDefaultColor: string
+  statusDefaultLabel: string
+  statusShowStale: boolean
+  statusStalenessThreshold: number
+  statusStaleColor: string
+  statusStaleLabel: string
+
   // JetStream
   useJetStream: boolean
   deliverPolicy: 'all' | 'last' | 'new' | 'last_per_subject' | 'by_start_time'
@@ -82,6 +94,7 @@ export function createEmptyFormState(): WidgetFormState {
     subject: '',
     jsonPath: '',
     bufferSize: 100,
+    dataSourceType: 'subscription',
     kvBucket: '',
     kvKey: '',
     buttonLabel: '',
@@ -124,6 +137,16 @@ export function createEmptyFormState(): WidgetFormState {
     publisherDefaultSubject: '',
     publisherDefaultPayload: '',
     publisherTimeout: 2000,
+    
+    // Status Defaults
+    statusMappings: [],
+    statusDefaultColor: 'var(--color-info)',
+    statusDefaultLabel: 'Unknown',
+    statusShowStale: true,
+    statusStalenessThreshold: 60000,
+    statusStaleColor: 'var(--muted)',
+    statusStaleLabel: 'Stale',
+
     useJetStream: false,
     deliverPolicy: 'last',
     jetstreamTimeWindow: '10m'
