@@ -5,10 +5,11 @@ export interface WidgetFormState {
   // Common
   title: string
   subject: string
+  subjects: string[]
   jsonPath: string
   bufferSize: number
   
-  // Data Source Type (New)
+  // Data Source Type
   dataSourceType: 'subscription' | 'kv'
   
   // KV Widget
@@ -82,16 +83,20 @@ export interface WidgetFormState {
   statusStaleColor: string
   statusStaleLabel: string
 
+  // Markdown Widget
+  markdownContent: string
+
   // JetStream
   useJetStream: boolean
   deliverPolicy: 'all' | 'last' | 'new' | 'last_per_subject' | 'by_start_time'
-  jetstreamTimeWindow: string // e.g. "10m"
+  jetstreamTimeWindow: string 
 }
 
 export function createEmptyFormState(): WidgetFormState {
   return {
     title: '',
     subject: '',
+    subjects: [],
     jsonPath: '',
     bufferSize: 100,
     dataSourceType: 'subscription',
@@ -137,8 +142,6 @@ export function createEmptyFormState(): WidgetFormState {
     publisherDefaultSubject: '',
     publisherDefaultPayload: '',
     publisherTimeout: 2000,
-    
-    // Status Defaults
     statusMappings: [],
     statusDefaultColor: 'var(--color-info)',
     statusDefaultLabel: 'Unknown',
@@ -146,7 +149,7 @@ export function createEmptyFormState(): WidgetFormState {
     statusStalenessThreshold: 60000,
     statusStaleColor: 'var(--muted)',
     statusStaleLabel: 'Stale',
-
+    markdownContent: '', // Default empty
     useJetStream: false,
     deliverPolicy: 'last',
     jetstreamTimeWindow: '10m'

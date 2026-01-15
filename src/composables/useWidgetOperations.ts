@@ -20,18 +20,20 @@ export function useWidgetOperations() {
     dataStore.initializeBuffer(widgetId, widget.buffer.maxCount, widget.buffer.maxAge)
     
     if (widget.dataSource.type === 'subscription') {
-      const rawSubject = widget.dataSource.subject
-      if (!rawSubject) return
-      
-      const subject = resolveTemplate(rawSubject, dashboardStore.currentVariableValues)
-      
-      // Clone config to ensure we pass the resolved subject
-      const config = { 
-        ...widget.dataSource, 
-        subject 
-      }
-      
-      subManager.subscribe(widgetId, config, widget.jsonPath)
+      const subjectsToSubscribe = (widget.dataSource.subjects && widget.dataSource.subjects.length > 0)
+        ? widget.dataSource.subjects
+        : (widget.dataSource.subject ? [widget.dataSource.subject] : [])
+
+      if (subjectsToSubscribe.length === 0) return
+
+      subjectsToSubscribe.forEach(rawSub => {
+        const subject = resolveTemplate(rawSub, dashboardStore.currentVariableValues)
+        const config = { 
+          ...widget.dataSource, 
+          subject 
+        }
+        subManager.subscribe(widgetId, config, widget.jsonPath)
+      })
     }
   }
 
@@ -39,13 +41,16 @@ export function useWidgetOperations() {
     const widget = dashboardStore.getWidget(widgetId)
     if (!widget) return
     
-    if (widget.dataSource.type === 'subscription' && widget.dataSource.subject) {
-      const subject = resolveTemplate(widget.dataSource.subject, dashboardStore.currentVariableValues)
-      
-      // We must pass the config so the manager knows if it's JS or Core
-      // to calculate the correct map key
-      const config = { ...widget.dataSource, subject }
-      subManager.unsubscribe(widgetId, config)
+    if (widget.dataSource.type === 'subscription') {
+      const subjectsToUnsubscribe = (widget.dataSource.subjects && widget.dataSource.subjects.length > 0)
+        ? widget.dataSource.subjects
+        : (widget.dataSource.subject ? [widget.dataSource.subject] : [])
+
+      subjectsToUnsubscribe.forEach(rawSub => {
+        const subject = resolveTemplate(rawSub, dashboardStore.currentVariableValues)
+        const config = { ...widget.dataSource, subject }
+        subManager.unsubscribe(widgetId, config)
+      })
     }
     
     if (!keepData) {
@@ -70,11 +75,10 @@ export function useWidgetOperations() {
   }
 
   function needsSubscription(widgetType: WidgetType, config?: WidgetConfig): boolean {
-    const selfManagedTypes: WidgetType[] = ['button', 'kv', 'switch', 'slider', 'map', 'publisher']
+    const selfManagedTypes: WidgetType[] = ['button', 'kv', 'switch', 'slider', 'map', 'publisher', 'markdown'] // Added markdown
     
     if (selfManagedTypes.includes(widgetType)) return false
     
-    // Status widget is self-managed ONLY if in KV mode
     if (widgetType === 'status') {
       return config?.dataSource?.type !== 'kv'
     }
@@ -133,9 +137,9 @@ export function useWidgetOperations() {
         break
       case 'console':
         widget.title = 'Console Stream'
-        widget.dataSource = { type: 'subscription', subject: '>' }
+        widget.dataSource = { type: 'subscription', subject: '>', subjects: ['>'] }
         widget.consoleConfig = { fontSize: 12, showTimestamp: true }
-        widget.buffer.maxCount = 200 // Higher default for console
+        widget.buffer.maxCount = 200
         break
       case 'publisher':
         widget.title = 'Publisher'
@@ -159,6 +163,12 @@ export function useWidgetOperations() {
           stalenessThreshold: 60000,
           staleColor: 'var(--muted)',
           staleLabel: 'Stale'
+        }
+        break
+      case 'markdown':
+        widget.title = ''
+        widget.markdownConfig = {
+          content: '### Notes\n\nThis is a text block. You can use **markdown**.\n\nVariables: {{device_id}}'
         }
         break
     }
@@ -200,14 +210,12 @@ export function useWidgetOperations() {
     const widget = dashboardStore.getWidget(widgetId)
     if (!widget) return
 
-    // Unsubscribe using CURRENT config (before updates applied)
     if (needsSubscription(widget.type, widget)) {
       unsubscribeWidget(widgetId, false) 
     }
 
     dashboardStore.updateWidget(widgetId, updates)
 
-    // Check if we need to subscribe with NEW config
     const updatedWidget = dashboardStore.getWidget(widgetId)!
     if (natsStore.isConnected && needsSubscription(updatedWidget.type, updatedWidget)) {
       subscribeWidget(widgetId)

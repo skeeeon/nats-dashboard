@@ -17,6 +17,7 @@
     "grid-layout-plus": "^1.0.5",
     "jsonpath-plus": "^10.2.0",
     "leaflet": "^1.9.4",
+    "marked": "^17.0.1",
     "pinia": "^2.3.0",
     "vue": "^3.5.13",
     "vue-echarts": "^7.0.3",

@@ -1,6 +1,37 @@
 <template>
   <div class="config-data-source">
-    <div class="form-group">
+    
+    <!-- MULTI-SUBJECT MODE -->
+    <div v-if="allowMultiple" class="form-group">
+      <label>NATS Subjects</label>
+      <div class="tag-input-container" :class="{ 'has-error': errors.subjects }">
+        <div class="tags-area">
+          <span v-for="(sub, index) in localSubjects" :key="index" class="subject-tag">
+            {{ sub }}
+            <button class="remove-tag" @click="removeSubject(index)">×</button>
+          </span>
+          <input 
+            ref="tagInput"
+            v-model="newSubject"
+            type="text" 
+            class="tag-input-field"
+            placeholder="Add subject (Enter)..."
+            @keydown.enter.prevent="addSubject"
+            @keydown.backspace="handleBackspace"
+            @blur="addSubject"
+          />
+        </div>
+      </div>
+      <div v-if="errors.subjects" class="error-text">
+        {{ errors.subjects }}
+      </div>
+      <div v-else class="help-text">
+        Type subject and press Enter. Supports wildcards (e.g. <code>logs.></code>).
+      </div>
+    </div>
+
+    <!-- SINGLE SUBJECT MODE -->
+    <div v-else class="form-group">
       <label>NATS Subject</label>
       <input 
         v-model="form.subject" 
@@ -93,12 +124,58 @@
 </template>
 
 <script setup lang="ts">
+import { ref, watch } from 'vue'
 import type { WidgetFormState } from '@/types/config'
 
-defineProps<{
+const props = defineProps<{
   form: WidgetFormState
   errors: Record<string, string>
+  allowMultiple?: boolean
 }>()
+
+// --- Multi-Subject Logic ---
+const newSubject = ref('')
+const localSubjects = ref<string[]>([])
+
+// Sync local array with form state
+watch(() => props.form.subjects, (val) => {
+  if (val) localSubjects.value = [...val]
+  else localSubjects.value = []
+}, { immediate: true })
+
+// Sync array back to form state
+function updateForm() {
+  props.form.subjects = [...localSubjects.value]
+  // Update legacy field for compatibility
+  if (localSubjects.value.length > 0) {
+    props.form.subject = localSubjects.value[0]
+  } else {
+    props.form.subject = ''
+  }
+}
+
+function addSubject() {
+  const sub = newSubject.value.trim()
+  if (!sub) return
+  
+  if (!localSubjects.value.includes(sub)) {
+    localSubjects.value.push(sub)
+    updateForm()
+  }
+  newSubject.value = ''
+}
+
+function removeSubject(index: number) {
+  localSubjects.value.splice(index, 1)
+  updateForm()
+}
+
+function handleBackspace() {
+  if (newSubject.value === '' && localSubjects.value.length > 0) {
+    localSubjects.value.pop()
+    updateForm()
+  }
+}
 </script>
 
 <style scoped>
@@ -123,6 +200,72 @@ defineProps<{
 
 .mt-2 {
   margin-top: 8px;
+}
+
+/* Tag Input Styles */
+.tag-input-container {
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  min-height: 42px;
+  cursor: text;
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.tag-input-container:focus-within {
+  border-color: var(--color-accent);
+}
+
+.tag-input-container.has-error {
+  border-color: var(--color-error);
+}
+
+.tags-area {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: 100%;
+}
+
+.subject-tag {
+  display: inline-flex;
+  align-items: center;
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  border: 1px solid var(--color-info-border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.remove-tag {
+  background: none;
+  border: none;
+  color: inherit;
+  margin-left: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  padding: 0 2px;
+  opacity: 0.7;
+}
+
+.remove-tag:hover {
+  opacity: 1;
+}
+
+.tag-input-field {
+  flex: 1;
+  min-width: 120px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 4px;
+  outline: none;
 }
 
 @keyframes slideDown {

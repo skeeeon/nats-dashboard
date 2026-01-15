@@ -79,6 +79,13 @@
             <div class="widget-type-name">Publisher</div>
             <div class="widget-type-desc">Send ad-hoc messages</div>
           </button>
+
+          <!-- Markdown Widget -->
+          <button class="widget-type-btn" @click="selectType('markdown')">
+            <div class="widget-type-icon">📝</div>
+            <div class="widget-type-name">Markdown</div>
+            <div class="widget-type-desc">Static text & images</div>
+          </button>
         </div>
       </div>
     </div>
@@ -87,13 +94,6 @@
 
 <script setup lang="ts">
 import type { WidgetType } from '@/types/dashboard'
-
-/**
- * Add Widget Modal Component
- * 
- * Grug say: Show widget type picker. User clicks, we tell parent.
- * Simple modal, no complex logic.
- */
 
 interface Props {
   modelValue: boolean
@@ -222,7 +222,6 @@ function selectType(type: WidgetType) {
   line-height: 1.3;
 }
 
-/* Responsive */
 @media (max-width: 600px) {
   .widget-type-buttons {
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));

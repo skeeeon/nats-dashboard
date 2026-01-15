@@ -1,3 +1,4 @@
+<!-- src/components/dashboard/WidgetContainer.vue -->
 <template>
   <div 
     class="widget-container" 
@@ -18,11 +19,9 @@
         v-if="shouldShowHeader" 
         class="widget-header vue-draggable-handle"
       >
-        <!-- On Mobile: Hide title text in header to save space & avoid dupes (card has title) -->
         <div v-if="!isMobile" class="widget-title" :title="config.title">{{ config.title }}</div>
         <div v-else class="widget-title mobile-spacer"></div>
 
-        <!-- Offline Indicator -->
         <div v-if="!natsStore.isConnected" class="offline-indicator" title="Disconnected from NATS">
           ⚠️
         </div>
@@ -72,6 +71,7 @@ import MapWidget from '@/components/widgets/MapWidget.vue'
 import ConsoleWidget from '@/components/widgets/ConsoleWidget.vue'
 import PublisherWidget from '@/components/widgets/PublisherWidget.vue'
 import StatusWidget from '@/components/widgets/StatusWidget.vue'
+import MarkdownWidget from '@/components/widgets/MarkdownWidget.vue'
 
 const props = defineProps<{
   config?: WidgetConfig
@@ -104,12 +104,15 @@ const widgetComponent = computed(() => {
     case 'console': return ConsoleWidget
     case 'publisher': return PublisherWidget
     case 'status': return StatusWidget
+    case 'markdown': return MarkdownWidget
     default: return null
   }
 })
 
 const shouldShowHeader = computed(() => {
   if (!dashboardStore.isLocked) return true
+  // Markdown widget might want header hidden even in view mode if title is empty? 
+  // Grug say: Keep standard behavior for consistency.
   if (props.isMobile) return false
   return true
 })
@@ -129,6 +132,7 @@ onErrorCaptured((err) => {
 </script>
 
 <style scoped>
+/* Same styles as before */
 .widget-container {
   height: 100%;
   display: flex;
@@ -154,7 +158,6 @@ onErrorCaptured((err) => {
   transform: translateY(-2px);
 }
 
-/* Offline State */
 .widget-container.is-offline {
   border-color: var(--color-warning);
 }
@@ -162,7 +165,6 @@ onErrorCaptured((err) => {
 .widget-container.is-offline .widget-body {
   opacity: 0.7;
   filter: grayscale(0.8);
-  /* Note: We do NOT disable pointer-events here so users can still copy text from consoles/kv widgets */
 }
 
 .offline-indicator {
@@ -204,7 +206,7 @@ onErrorCaptured((err) => {
 }
 
 .widget-title.mobile-spacer {
-  flex: 1; /* Consume remaining space */
+  flex: 1;
 }
 
 .widget-actions {
@@ -243,11 +245,10 @@ onErrorCaptured((err) => {
   min-height: 0;
   position: relative;
   container-type: size;
-  display: flex; /* Ensure content stretches */
+  display: flex;
   flex-direction: column;
 }
 
-/* Ensure component fills body */
 .widget-body > * {
   flex: 1;
 }

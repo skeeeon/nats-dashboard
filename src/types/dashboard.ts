@@ -3,7 +3,7 @@
 /**
  * Widget Types
  */
-export type WidgetType = 'chart' | 'text' | 'button' | 'kv' | 'switch' | 'slider' | 'stat' | 'gauge' | 'map' | 'console' | 'publisher' | 'status'
+export type WidgetType = 'chart' | 'text' | 'button' | 'kv' | 'switch' | 'slider' | 'stat' | 'gauge' | 'map' | 'console' | 'publisher' | 'status' | 'markdown'
 export type DataSourceType = 'subscription' | 'consumer' | 'kv'
 export type ChartType = 'line' | 'bar' | 'pie' | 'gauge'
 
@@ -35,6 +35,7 @@ export type DeliverPolicy = 'all' | 'last' | 'new' | 'last_per_subject' | 'by_st
 export interface DataSourceConfig {
   type: DataSourceType
   subject?: string
+  subjects?: string[]
   stream?: string
   consumer?: string
   kvBucket?: string
@@ -43,7 +44,7 @@ export interface DataSourceConfig {
   // JetStream Options
   useJetStream?: boolean
   deliverPolicy?: DeliverPolicy
-  timeWindow?: string // e.g. "10m", "1h" (Only for by_start_time)
+  timeWindow?: string
 }
 
 export interface BufferConfig {
@@ -150,7 +151,6 @@ export interface PublisherWidgetConfig {
   timeout?: number
 }
 
-// --- Status Widget Types ---
 export interface StatusMapping {
   id: string
   value: string
@@ -163,16 +163,18 @@ export interface StatusWidgetConfig {
   mappings: StatusMapping[]
   defaultColor: string
   defaultLabel?: string
-  
-  // Staleness Logic
   showStale?: boolean
-  stalenessThreshold?: number // milliseconds
+  stalenessThreshold?: number
   staleColor?: string
   staleLabel?: string
 }
 
-// --- Map Widget Types ---
+// New: Markdown Configuration
+export interface MarkdownWidgetConfig {
+  content: string
+}
 
+// --- Map Widget Types ---
 export const MAP_LIMITS = {
   MAX_MARKERS: 50,
   MAX_ITEMS_PER_MARKER: 10,
@@ -199,7 +201,6 @@ export interface MapItemTextConfig {
   subject: string
   jsonPath?: string
   unit?: string
-  // JetStream Fields
   useJetStream?: boolean
   deliverPolicy?: DeliverPolicy
   timeWindow?: string
@@ -217,10 +218,8 @@ export interface MapMarkerItem {
   label: string
   subject?: string
   payload?: string
-  // New Request/Reply fields for 'publish' type
   actionType?: 'publish' | 'request'
   timeout?: number
-  
   switchConfig?: MapItemSwitchConfig
   textConfig?: MapItemTextConfig
   kvConfig?: MapItemKvConfig
@@ -269,6 +268,7 @@ export interface WidgetConfig {
   consoleConfig?: ConsoleWidgetConfig
   publisherConfig?: PublisherWidgetConfig
   statusConfig?: StatusWidgetConfig
+  markdownConfig?: MarkdownWidgetConfig // Added
 }
 
 export type StorageType = 'local' | 'kv'
@@ -301,6 +301,7 @@ export const DEFAULT_WIDGET_SIZES: Record<WidgetType, { w: number; h: number }> 
   console: { w: 6, h: 4 },
   publisher: { w: 4, h: 4 },
   status: { w: 2, h: 2 },
+  markdown: { w: 4, h: 4 }, // Added default size
 }
 
 export const DEFAULT_BUFFER_CONFIG: BufferConfig = {
@@ -395,12 +396,9 @@ export function createDefaultWidget(type: WidgetType, position: { x: number; y: 
       }
       break
     case 'console':
-      base.dataSource = { type: 'subscription', subject: '>' } // Default to wildcard
-      base.consoleConfig = {
-        fontSize: 12,
-        showTimestamp: true
-      }
-      base.buffer.maxCount = 100 // Default buffer for console
+      base.dataSource = { type: 'subscription', subject: '>', subjects: ['>'] }
+      base.consoleConfig = { fontSize: 12, showTimestamp: true }
+      base.buffer.maxCount = 100
       break
     case 'publisher':
       base.title = 'Publisher'
@@ -422,9 +420,15 @@ export function createDefaultWidget(type: WidgetType, position: { x: number; y: 
         defaultColor: 'var(--color-info)',
         defaultLabel: 'Unknown',
         showStale: true,
-        stalenessThreshold: 60000, // 1 min
+        stalenessThreshold: 60000,
         staleColor: 'var(--muted)',
         staleLabel: 'Stale'
+      }
+      break
+    case 'markdown':
+      base.title = '' // Empty title often looks better for static text
+      base.markdownConfig = {
+        content: '### Hello World\n\nThis is a **markdown** widget.\n\nYou can use variables like {{device_id}}.'
       }
       break
   }

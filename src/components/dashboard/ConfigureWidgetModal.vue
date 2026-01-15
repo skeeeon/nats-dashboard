@@ -11,11 +11,11 @@
         <ConfigCommon :form="form" :errors="errors" />
         
         <!-- Data Source (Shared by visualization widgets) -->
-        <!-- Grug say: Status widget now handles its own data source config (like Switch) to fix ordering -->
         <ConfigDataSource 
           v-if="showDataSourceConfig"
           :form="form" 
           :errors="errors" 
+          :allow-multiple="widgetType === 'console'"
         />
 
         <!-- Widget Specific Config (Dynamic) -->
@@ -62,6 +62,7 @@ import ConfigMap from './config/ConfigMap.vue'
 import ConfigConsole from './config/ConfigConsole.vue'
 import ConfigPublisher from './config/ConfigPublisher.vue'
 import ConfigStatus from './config/ConfigStatus.vue'
+import ConfigMarkdown from './config/ConfigMarkdown.vue' // Added
 
 interface Props {
   modelValue: boolean
@@ -92,12 +93,14 @@ const configComponents: Record<string, any> = {
   map: ConfigMap,
   console: ConfigConsole,
   publisher: ConfigPublisher,
-  status: ConfigStatus
+  status: ConfigStatus,
+  markdown: ConfigMarkdown, // Added
 }
 
 const form = ref<WidgetFormState>({
   title: '',
   subject: '',
+  subjects: [],
   jsonPath: '',
   bufferSize: 100,
   dataSourceType: 'subscription',
@@ -143,8 +146,6 @@ const form = ref<WidgetFormState>({
   publisherDefaultSubject: '',
   publisherDefaultPayload: '',
   publisherTimeout: 2000,
-  
-  // Status Defaults
   statusMappings: [],
   statusDefaultColor: 'var(--color-info)',
   statusDefaultLabel: 'Unknown',
@@ -152,8 +153,7 @@ const form = ref<WidgetFormState>({
   statusStalenessThreshold: 60000,
   statusStaleColor: 'var(--muted)',
   statusStaleLabel: 'Stale',
-  
-  // JetStream Defaults
+  markdownContent: '', // Added
   useJetStream: false,
   deliverPolicy: 'last',
   jetstreamTimeWindow: '10m'
@@ -176,9 +176,7 @@ const activeConfigComponent = computed(() => {
 // Logic for showing the generic Data Source config block
 const showDataSourceConfig = computed(() => {
   const typesWithDataSource = ['text', 'chart', 'stat', 'gauge', 'console']
-  // Status widget handles its own data source config internally now
   if (widgetType.value === 'status') return false
-  
   return typesWithDataSource.includes(widgetType.value || '')
 })
 
@@ -189,6 +187,8 @@ watch(() => props.widgetId, (widgetId) => {
   if (!widget) return
   
   let currentSubject = ''
+  let currentSubjects: string[] = []
+
   if (widget.type === 'button') {
     currentSubject = widget.buttonConfig?.publishSubject || ''
   } else if (widget.type === 'switch') {
@@ -197,6 +197,11 @@ watch(() => props.widgetId, (widgetId) => {
     currentSubject = widget.sliderConfig?.publishSubject || ''
   } else {
     currentSubject = widget.dataSource.subject || ''
+    if (widget.dataSource.subjects && widget.dataSource.subjects.length > 0) {
+      currentSubjects = [...widget.dataSource.subjects]
+    } else if (currentSubject) {
+      currentSubjects = [currentSubject]
+    }
   }
 
   let currentThresholds: ThresholdRule[] = []
@@ -277,9 +282,16 @@ watch(() => props.widgetId, (widgetId) => {
     }
   }
 
+  // Markdown Config
+  let markdownContent = ''
+  if (widget.type === 'markdown') {
+    markdownContent = widget.markdownConfig?.content || ''
+  }
+
   form.value = {
     title: widget.title,
     subject: currentSubject,
+    subjects: currentSubjects,
     jsonPath: widget.jsonPath || '',
     bufferSize: widget.buffer.maxCount,
     dataSourceType,
@@ -325,8 +337,6 @@ watch(() => props.widgetId, (widgetId) => {
     publisherDefaultSubject,
     publisherDefaultPayload,
     publisherTimeout,
-    
-    // Status
     statusMappings,
     statusDefaultColor,
     statusDefaultLabel,
@@ -334,8 +344,7 @@ watch(() => props.widgetId, (widgetId) => {
     statusStalenessThreshold,
     statusStaleColor,
     statusStaleLabel,
-    
-    // JetStream Props
+    markdownContent, // Added
     useJetStream: widget.dataSource.useJetStream || false,
     deliverPolicy: widget.dataSource.deliverPolicy || 'last',
     jetstreamTimeWindow: widget.dataSource.timeWindow || '10m'
@@ -350,12 +359,26 @@ function validate(): boolean {
   if (!widget) return false
   
   const titleResult = validator.validateWidgetTitle(form.value.title)
-  if (!titleResult.valid) errors.value.title = titleResult.error!
+  // Markdown widget allows empty title for cleaner look
+  if (!titleResult.valid && widget.type !== 'markdown') errors.value.title = titleResult.error!
   
   // Standard Subscription Validation
   if (['text', 'chart', 'stat', 'gauge', 'console'].includes(widget.type) || (widget.type === 'status' && form.value.dataSourceType === 'subscription')) {
-    const subjectResult = validator.validateSubject(form.value.subject)
-    if (!subjectResult.valid) errors.value.subject = subjectResult.error!
+    if (widget.type === 'console') {
+      if (form.value.subjects.length === 0) {
+        errors.value.subjects = 'At least one subject is required'
+      }
+      for (const sub of form.value.subjects) {
+        const res = validator.validateSubject(sub)
+        if (!res.valid) {
+          errors.value.subjects = `Invalid subject "${sub}": ${res.error}`
+          break
+        }
+      }
+    } else {
+      const subjectResult = validator.validateSubject(form.value.subject)
+      if (!subjectResult.valid) errors.value.subject = subjectResult.error!
+    }
     
     if (form.value.jsonPath) {
       const jsonResult = validator.validateJsonPath(form.value.jsonPath)
@@ -424,6 +447,7 @@ function save() {
     updates.dataSource = { 
       ...widget.dataSource, 
       subject: form.value.subject.trim(),
+      subjects: form.value.subjects,
       useJetStream: form.value.useJetStream,
       deliverPolicy: form.value.deliverPolicy,
       timeWindow: form.value.jetstreamTimeWindow
@@ -524,7 +548,6 @@ function save() {
       timeout: form.value.publisherTimeout
     }
   } else if (widget.type === 'status') {
-    // Handle KV vs Subscription mode
     if (form.value.dataSourceType === 'kv') {
       updates.dataSource = {
         type: 'kv',
@@ -552,6 +575,10 @@ function save() {
       staleColor: form.value.statusStaleColor,
       staleLabel: form.value.statusStaleLabel
     }
+  } else if (widget.type === 'markdown') {
+    updates.markdownConfig = {
+      content: form.value.markdownContent
+    }
   }
   
   updateWidgetConfiguration(props.widgetId, updates)
@@ -566,6 +593,7 @@ function close() {
 </script>
 
 <style scoped>
+/* Same style block as previous */
 .modal-overlay {
   position: fixed;
   top: 0;
