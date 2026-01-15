@@ -78,7 +78,11 @@ Open `http://localhost:5173`.
     *   *Static Mode:* Documentation, links, runbooks.
     *   *Dynamic Mode:* Bind to a NATS Subject or KV Key. Incoming JSON is flattened and exposed as variables (e.g., `{{firmware_version}}`) inside the markdown.
 *   **Map Widget (Leaflet):** Real-time geospatial tracking.
-    *   *Live Markers:* Update positions via NATS.
+    *   *Static Markers:* Fixed points of interest.
+    *   *Dynamic Markers (Fleet Tracking):* Bind markers to NATS subjects.
+        *   **Subject:** `fleet.truck.1` (supports variables like `fleet.{{truck_id}}`).
+        *   **JSONPath:** Extract coordinates from complex payloads (e.g., Lat: `$.gps.lat`, Lon: `$.gps.lon`).
+        *   **JetStream:** Enable "Last Per Subject" to immediately show the last known position upon load.
     *   *Interactive Popups:* Embed buttons, switches, or live data displays *inside* marker popups.
 
 ---
@@ -111,6 +115,7 @@ Create a single dashboard layout that works across multiple contexts (e.g., swit
 *   ✅ KV Buckets/Keys
 *   ✅ Payloads (JSON)
 *   ✅ Markdown Content
+*   ✅ Map Marker Subjects
 
 ---
 
@@ -148,9 +153,10 @@ The dashboard uses a "Squishy Grid" system that adapts to your screen size.
 *   Check protocol: Use `ws://` for insecure (localhost) and `wss://` for secure connections.
 *   If using self-signed certs with `wss://`, visit the NATS port in your browser once to accept the certificate.
 
-**"JetStream/KV widgets not working"**
-*   Ensure JetStream is enabled in `nats.conf`.
-*   Verify the Stream or Bucket actually exists.
+**"Map markers not moving"**
+*   Ensure the marker is set to **Dynamic Mode**.
+*   Check your **JSONPath**. If your payload is `{"lat": 10, "lon": 20}`, paths should be `$.lat` and `$.lon`.
+*   Verify the subject matches the incoming messages (wildcards are supported in Console, but Map Markers usually bind to specific subjects or variables).
 
 **"Markdown variables not resolving"**
 *   Global variables (from the toolbar) work everywhere.
