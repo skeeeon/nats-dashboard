@@ -285,6 +285,7 @@ export interface Dashboard {
   storage?: StorageType
   kvKey?: string
   kvRevision?: number
+  columnCount?: number
 }
 
 export const DEFAULT_WIDGET_SIZES: Record<WidgetType, { w: number; h: number }> = {
@@ -442,7 +443,8 @@ export function createDefaultDashboard(name: string): Dashboard {
     widgets: [],
     variables: [],
     isLocked: false,
-    storage: 'local'
+    storage: 'local',
+    columnCount: 12
   }
 }
 

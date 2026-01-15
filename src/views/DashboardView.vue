@@ -63,6 +63,25 @@
         
         <!-- Row 2: Actions -->
         <div class="toolbar-actions">
+          <!-- Grid Columns Select (Only visible when Unlocked) -->
+          <div v-if="!dashboardStore.isLocked" class="grid-controls">
+            <select 
+              :value="dashboardStore.activeDashboard?.columnCount ?? 12"
+              @change="handleGridChange"
+              class="grid-select"
+              title="Grid Columns"
+            >
+              <option :value="0">Auto</option>
+              <option :value="4">4 Cols</option>
+              <option :value="6">6 Cols</option>
+              <option :value="8">8 Cols</option>
+              <option :value="10">10 Cols</option>
+              <option :value="12">12 Cols</option>
+              <option :value="16">16 Cols</option>
+              <option :value="20">20 Cols</option>
+            </select>
+          </div>
+
           <!-- Variable Toggle -->
           <button 
             v-if="hasVariables || !dashboardStore.isLocked"
@@ -123,6 +142,7 @@
         <DashboardGrid
           v-if="dashboardStore.activeWidgets.length > 0"
           :widgets="dashboardStore.activeWidgets"
+          :column-count="dashboardStore.activeDashboard?.columnCount"
           @delete-widget="handleDeleteWidget"
           @configure-widget="handleConfigureWidget"
           @duplicate-widget="handleDuplicateWidget"
@@ -139,7 +159,7 @@
       </div>
     </div>
     
-    <!-- Modals -->
+    <!-- Modals (Unchanged) -->
     <AddWidgetModal v-model="showAddWidget" @select="handleCreateWidget" />
     <ConfigureWidgetModal v-model="showConfigWidget" :widget-id="configWidgetId" @saved="handleWidgetConfigSaved" />
     <KeyboardShortcutsModal v-model="showShortcutsModal" :shortcuts="shortcuts" />
@@ -376,6 +396,14 @@ function handleReloadRemote() {
   }
 }
 
+function handleGridChange(event: Event) {
+  const select = event.target as HTMLSelectElement
+  const val = parseInt(select.value)
+  if (dashboardStore.activeDashboard) {
+    dashboardStore.updateDashboard(dashboardStore.activeDashboard.id, { columnCount: val })
+  }
+}
+
 const { shortcuts } = useKeyboardShortcuts([
   { 
     key: 's', 
@@ -469,10 +497,7 @@ onUnmounted(() => {
   window.removeEventListener('show-shortcuts-help', handleShowShortcuts)
 })
 
-// Grug say: Watch connection. If connected, ensure we are subscribed.
-// If disconnected, DO NOTHING. Let nats.js handle reconnect.
-// If manual reconnect (new connection object), subscribeAllWidgets will fix it
-// because useSubscriptionManager checks for closed subs.
+// Watchers (Unchanged)
 watch(() => natsStore.isConnected, (connected) => {
   if (connected) {
     subscribeAllWidgets()
@@ -487,7 +512,6 @@ watch(() => dashboardStore.activeDashboardId, async () => {
   }
 })
 
-// Watch for variable changes -> Resubscribe
 watch(() => dashboardStore.currentVariableValues, () => {
   if (natsStore.isConnected) {
     console.log('[Dashboard] Variables changed, resubscribing...')
@@ -505,7 +529,7 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 </script>
 
 <style scoped>
-/* Same styles as before */
+/* Keeping existing styles with additions for grid selector */
 .dashboard-view {
   height: 100vh;
   display: flex;
@@ -733,6 +757,37 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   background: rgba(255, 255, 255, 0.15);
 }
 
+/* Grid Select Styling */
+.grid-controls {
+  display: flex;
+  align-items: center;
+}
+
+.grid-select {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s;
+  font-family: var(--mono);
+}
+
+.grid-select:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: var(--color-accent);
+}
+
+.grid-select option {
+  background: var(--panel);
+  color: var(--text);
+}
+
 .dashboard-content {
   flex: 1;
   min-height: 0;
@@ -774,6 +829,7 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   font-size: 14px;
 }
 
+/* Fullscreen modal styles (unchanged) */
 .fullscreen-modal {
   position: fixed;
   top: 0;
@@ -849,7 +905,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   display: none;
 }
 
-/* Transition for Variable Bar */
 .slide-fade-enter-active,
 .slide-fade-leave-active {
   transition: all 0.2s ease-out;
@@ -918,6 +973,18 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
     padding: 0;
     width: 100%;
     justify-content: center;
+  }
+
+  /* Grid select styling for mobile toolbar */
+  .grid-controls {
+    grid-column: span 1;
+  }
+  
+  .grid-select {
+    width: 100%;
+    height: 44px;
+    justify-content: center;
+    text-align: center;
   }
 
   .btn-text { display: none; }

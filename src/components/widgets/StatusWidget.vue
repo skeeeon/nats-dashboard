@@ -1,25 +1,51 @@
 <template>
   <div class="status-widget" :class="{ 'card-layout': layoutMode === 'card' }">
-    <!-- Main Indicator -->
-    <div 
-      class="status-indicator"
-      :class="{ 'is-blinking': currentState.blink }"
-      :style="{ 
-        backgroundColor: currentState.color,
-        boxShadow: `0 0 20px ${currentState.color}40`
-      }"
-    >
-      <div class="status-content">
-        <span class="status-label">{{ currentState.label }}</span>
-        <span class="status-value" v-if="showValue">{{ displayValue }}</span>
+    
+    <!-- CARD LAYOUT (Mobile) -->
+    <template v-if="layoutMode === 'card'">
+      <div class="card-content">
+        <div class="card-info">
+          <div class="card-title">{{ config.title }}</div>
+          
+          <div class="card-status-row">
+            <div 
+              class="status-dot-card"
+              :class="{ 'is-blinking': currentState.blink }"
+              :style="{ backgroundColor: currentState.color, boxShadow: `0 0 8px ${currentState.color}60` }"
+            ></div>
+            <div class="card-status-label" :style="{ color: currentState.color }">
+              <span v-if="isStale" class="stale-icon">⚠️</span>
+              {{ currentState.label }}
+            </div>
+          </div>
+        </div>
+        
+        <div class="card-meta">{{ timeAgo }}</div>
       </div>
-    </div>
+    </template>
 
-    <!-- Footer Info (Last Updated) -->
-    <div class="status-footer">
-      <span v-if="isStale" class="stale-warning">⚠️ Stale</span>
-      <span class="time-ago">{{ timeAgo }}</span>
-    </div>
+    <!-- STANDARD LAYOUT (Desktop) -->
+    <template v-else>
+      <!-- Main Indicator -->
+      <div 
+        class="status-indicator"
+        :class="{ 'is-blinking': currentState.blink }"
+        :style="{ 
+          backgroundColor: currentState.color,
+          boxShadow: `0 0 20px ${currentState.color}40`
+        }"
+      >
+        <div class="status-content">
+          <span class="status-label">{{ currentState.label }}</span>
+        </div>
+      </div>
+
+      <!-- Footer Info (Last Updated) -->
+      <div class="status-footer">
+        <span v-if="isStale" class="stale-warning">⚠️ Stale</span>
+        <span class="time-ago">{{ timeAgo }}</span>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -110,16 +136,11 @@ const currentState = computed(() => {
   }
 })
 
-const showValue = computed(() => {
-  // Only show raw value if label is different, or if using default
-  return currentState.value.label !== displayValue.value && !isStale.value
-})
-
 const timeAgo = computed(() => {
   if (!latestMsg.value) return 'No data'
   const seconds = Math.floor((now.value - latestMsg.value.timestamp) / 1000)
-  if (seconds < 60) return `${seconds}s ago`
-  return `${Math.floor(seconds / 60)}m ago`
+  if (seconds < 60) return `${seconds}s` // Shortened for mobile card space
+  return `${Math.floor(seconds / 60)}m`
 })
 
 // --- KV Logic ---
@@ -207,6 +228,7 @@ watch([() => natsStore.isConnected, isKvMode, () => dashboardStore.currentVariab
   position: relative;
 }
 
+/* --- STANDARD LAYOUT --- */
 .status-indicator {
   width: 100%;
   flex: 1;
@@ -219,7 +241,8 @@ watch([() => natsStore.isConnected, isKvMode, () => dashboardStore.currentVariab
   max-height: 120px;
 }
 
-.status-indicator.is-blinking {
+.status-indicator.is-blinking,
+.status-dot-card.is-blinking {
   animation: pulse 2s infinite;
 }
 
@@ -231,8 +254,10 @@ watch([() => natsStore.isConnected, isKvMode, () => dashboardStore.currentVariab
 
 .status-content {
   text-align: center;
-  color: white; /* Always white text on colored background usually looks best, or use mix-blend-mode */
+  color: white; 
   text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  padding: 0 8px;
+  overflow: hidden;
 }
 
 .status-label {
@@ -240,14 +265,9 @@ watch([() => natsStore.isConnected, isKvMode, () => dashboardStore.currentVariab
   font-size: clamp(16px, 15cqw, 32px);
   font-weight: 700;
   line-height: 1.2;
-}
-
-.status-value {
-  display: block;
-  font-size: 12px;
-  opacity: 0.9;
-  font-family: var(--mono);
-  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-footer {
@@ -264,28 +284,73 @@ watch([() => natsStore.isConnected, isKvMode, () => dashboardStore.currentVariab
   font-weight: 600;
 }
 
-/* Card Layout Overrides */
+/* --- CARD LAYOUT (MOBILE) --- */
 .status-widget.card-layout {
   padding: 12px;
+  display: flex;
   flex-direction: row;
+  align-items: stretch;
+}
+
+.card-content {
+  display: flex;
   justify-content: space-between;
+  align-items: center;
+  width: 100%;
 }
 
-.status-widget.card-layout .status-indicator {
-  width: 40px;
-  height: 40px;
-  min-height: 0;
-  flex: 0 0 40px;
-  border-radius: 50%; /* Circle in card mode */
-}
-
-.status-widget.card-layout .status-label {
-  display: none; /* Hide label inside circle in card mode */
-}
-
-.status-widget.card-layout .status-footer {
-  margin-top: 0;
+.card-info {
+  flex: 1;
+  display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
+  gap: 4px;
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.card-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-dot-card {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.card-status-label {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stale-icon {
+  font-size: 12px;
+  margin-right: 2px;
+}
+
+.card-meta {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--mono);
+  margin-left: 8px;
+  align-self: flex-start;
+  padding-top: 2px;
 }
 </style>
