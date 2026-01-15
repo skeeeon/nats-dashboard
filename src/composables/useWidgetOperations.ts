@@ -19,20 +19,39 @@ export function useWidgetOperations() {
     
     dataStore.initializeBuffer(widgetId, widget.buffer.maxCount, widget.buffer.maxAge)
     
+    // 1. Standard Data Source Subscription
     if (widget.dataSource.type === 'subscription') {
       const subjectsToSubscribe = (widget.dataSource.subjects && widget.dataSource.subjects.length > 0)
         ? widget.dataSource.subjects
         : (widget.dataSource.subject ? [widget.dataSource.subject] : [])
 
-      if (subjectsToSubscribe.length === 0) return
+      if (subjectsToSubscribe.length > 0) {
+        subjectsToSubscribe.forEach(rawSub => {
+          const subject = resolveTemplate(rawSub, dashboardStore.currentVariableValues)
+          const config = { 
+            ...widget.dataSource, 
+            subject 
+          }
+          subManager.subscribe(widgetId, config, widget.jsonPath)
+        })
+      }
+    }
 
-      subjectsToSubscribe.forEach(rawSub => {
-        const subject = resolveTemplate(rawSub, dashboardStore.currentVariableValues)
-        const config = { 
-          ...widget.dataSource, 
-          subject 
+    // 2. Map Widget Dynamic Markers Subscription (NEW)
+    if (widget.type === 'map' && widget.mapConfig?.markers) {
+      widget.mapConfig.markers.forEach(marker => {
+        const pos = marker.positionConfig
+        if (pos && pos.mode === 'dynamic' && pos.subject) {
+          const subject = resolveTemplate(pos.subject, dashboardStore.currentVariableValues)
+          if (subject) {
+            subManager.subscribe(widgetId, {
+              type: 'subscription',
+              subject: subject,
+              useJetStream: pos.useJetStream,
+              deliverPolicy: pos.deliverPolicy || 'last'
+            })
+          }
         }
-        subManager.subscribe(widgetId, config, widget.jsonPath)
       })
     }
   }
@@ -41,6 +60,7 @@ export function useWidgetOperations() {
     const widget = dashboardStore.getWidget(widgetId)
     if (!widget) return
     
+    // 1. Unsubscribe Standard Data Source
     if (widget.dataSource.type === 'subscription') {
       const subjectsToUnsubscribe = (widget.dataSource.subjects && widget.dataSource.subjects.length > 0)
         ? widget.dataSource.subjects
@@ -50,6 +70,22 @@ export function useWidgetOperations() {
         const subject = resolveTemplate(rawSub, dashboardStore.currentVariableValues)
         const config = { ...widget.dataSource, subject }
         subManager.unsubscribe(widgetId, config)
+      })
+    }
+
+    // 2. Unsubscribe Map Markers (NEW)
+    if (widget.type === 'map' && widget.mapConfig?.markers) {
+      widget.mapConfig.markers.forEach(marker => {
+        const pos = marker.positionConfig
+        if (pos && pos.mode === 'dynamic' && pos.subject) {
+          const subject = resolveTemplate(pos.subject, dashboardStore.currentVariableValues)
+          if (subject) {
+            subManager.unsubscribe(widgetId, {
+              type: 'subscription',
+              subject: subject
+            })
+          }
+        }
       })
     }
     
@@ -75,8 +111,11 @@ export function useWidgetOperations() {
   }
 
   function needsSubscription(widgetType: WidgetType, config?: WidgetConfig): boolean {
-    // Markdown removed from this list so it can subscribe if configured
-    const selfManagedTypes: WidgetType[] = ['button', 'kv', 'switch', 'slider', 'map', 'publisher'] 
+    // Map is now a hybrid. It manages its own subscriptions if it has dynamic markers.
+    // But we return true here so `subscribeWidget` gets called, which checks the markers.
+    if (widgetType === 'map') return true
+
+    const selfManagedTypes: WidgetType[] = ['button', 'kv', 'switch', 'slider', 'publisher'] 
     
     if (selfManagedTypes.includes(widgetType)) return false
     
@@ -87,6 +126,7 @@ export function useWidgetOperations() {
     return true
   }
 
+  // ... createWidget, deleteWidget, duplicateWidget, updateWidgetConfiguration, resubscribeWidget (unchanged) ...
   function createWidget(type: WidgetType) {
     const position = { x: 0, y: 100 }
     const widget = createDefaultWidget(type, position)

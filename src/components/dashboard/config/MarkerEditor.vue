@@ -5,7 +5,8 @@
       <span class="marker-icon">📍</span>
       <span class="marker-label">{{ marker.label || 'Unnamed Marker' }}</span>
       <span class="marker-coords">
-        {{ marker.lat.toFixed(4) }}, {{ marker.lon.toFixed(4) }}
+        <template v-if="isDynamic">Dynamic</template>
+        <template v-else>{{ marker.lat.toFixed(4) }}, {{ marker.lon.toFixed(4) }}</template>
       </span>
       <span class="item-count">
         {{ marker.items.length }} item{{ marker.items.length !== 1 ? 's' : '' }}
@@ -22,9 +23,10 @@
     
     <!-- Marker Body -->
     <div v-if="isExpanded" class="marker-body">
-      <!-- Basic Info -->
+      
+      <!-- POSITION SECTION -->
       <div class="marker-section">
-        <div class="section-title">Location</div>
+        <div class="section-title">Position</div>
         
         <div class="form-row">
           <label>Label</label>
@@ -33,11 +35,33 @@
             @input="updateMarkerField('label', ($event.target as HTMLInputElement).value)"
             type="text" 
             class="form-input"
-            placeholder="Building A"
+            placeholder="Truck 1"
           />
         </div>
+
+        <!-- Mode Toggle -->
+        <div class="form-row">
+          <label>Mode</label>
+          <div class="mode-toggle">
+            <button 
+              class="mode-btn" 
+              :class="{ active: !isDynamic }"
+              @click="setMode('static')"
+            >
+              Static
+            </button>
+            <button 
+              class="mode-btn" 
+              :class="{ active: isDynamic }"
+              @click="setMode('dynamic')"
+            >
+              Dynamic (Live)
+            </button>
+          </div>
+        </div>
         
-        <div class="coord-row">
+        <!-- STATIC MODE INPUTS -->
+        <div v-if="!isDynamic" class="coord-row">
           <div class="form-row">
             <label>Latitude</label>
             <input 
@@ -63,15 +87,77 @@
         </div>
         
         <button 
+          v-if="!isDynamic"
           type="button"
           class="btn-use-center"
           @click="$emit('use-center')"
         >
           📍 Use Map Center
         </button>
+
+        <!-- DYNAMIC MODE INPUTS -->
+        <template v-if="isDynamic">
+          <div class="form-row">
+            <label>Subject</label>
+            <input 
+              :value="posConfig.subject"
+              @input="updatePosConfig('subject', ($event.target as HTMLInputElement).value)"
+              type="text" 
+              class="form-input"
+              placeholder="fleet.truck1.gps"
+            />
+          </div>
+
+          <div class="coord-row">
+            <div class="form-row">
+              <label>Lat JSONPath</label>
+              <input 
+                :value="posConfig.latJsonPath"
+                @input="updatePosConfig('latJsonPath', ($event.target as HTMLInputElement).value)"
+                type="text" 
+                class="form-input"
+                placeholder="$.lat"
+              />
+            </div>
+            <div class="form-row">
+              <label>Lon JSONPath</label>
+              <input 
+                :value="posConfig.lonJsonPath"
+                @input="updatePosConfig('lonJsonPath', ($event.target as HTMLInputElement).value)"
+                type="text" 
+                class="form-input"
+                placeholder="$.lon"
+              />
+            </div>
+          </div>
+
+          <!-- JetStream Options -->
+          <div class="form-row checkbox-row">
+            <label class="checkbox-label">
+              <input 
+                type="checkbox" 
+                :checked="posConfig.useJetStream"
+                @change="updatePosConfig('useJetStream', ($event.target as HTMLInputElement).checked)"
+              />
+              <span>Use JetStream (History)</span>
+            </label>
+          </div>
+
+          <div v-if="posConfig.useJetStream" class="form-row">
+            <label>Deliver Policy</label>
+            <select 
+              :value="posConfig.deliverPolicy || 'last'"
+              @change="updatePosConfig('deliverPolicy', ($event.target as HTMLSelectElement).value)"
+              class="form-input"
+            >
+              <option value="last">Last (Current Position)</option>
+              <option value="new">New (Live Only)</option>
+            </select>
+          </div>
+        </template>
       </div>
       
-      <!-- Items -->
+      <!-- ITEMS SECTION -->
       <div class="marker-section">
         <div class="section-title">
           Popup Items
@@ -112,7 +198,7 @@
 import { ref, computed } from 'vue'
 import MarkerItemEditor from './MarkerItemEditor.vue'
 import { createDefaultItem, MAP_LIMITS } from '@/types/dashboard'
-import type { MapMarker, MapMarkerItem, MapItemType } from '@/types/dashboard'
+import type { MapMarker, MapMarkerItem, MapItemType, MarkerPositionConfig } from '@/types/dashboard'
 
 const MAX_ITEMS_PER_MARKER = MAP_LIMITS.MAX_ITEMS_PER_MARKER
 
@@ -131,43 +217,50 @@ const isExpanded = ref(true)
 
 const isAtLimit = computed(() => props.marker.items.length >= MAX_ITEMS_PER_MARKER)
 
-/**
- * Emit updated marker to parent
- */
+const isDynamic = computed(() => props.marker.positionConfig?.mode === 'dynamic')
+
+const posConfig = computed<MarkerPositionConfig>(() => {
+  return props.marker.positionConfig || {
+    mode: 'static',
+    subject: '',
+    latJsonPath: '$.lat',
+    lonJsonPath: '$.lon',
+    useJetStream: false,
+    deliverPolicy: 'last'
+  }
+})
+
 function emitMarkerUpdate(updates: Partial<MapMarker>) {
   emit('update:marker', { ...props.marker, ...updates })
 }
 
-/**
- * Update a field on the marker
- */
 function updateMarkerField(field: keyof MapMarker, value: any) {
   emitMarkerUpdate({ [field]: value })
 }
 
-/**
- * Add new item to marker
- */
+function setMode(mode: 'static' | 'dynamic') {
+  const newConfig = { ...posConfig.value, mode }
+  emitMarkerUpdate({ positionConfig: newConfig })
+}
+
+function updatePosConfig(field: keyof MarkerPositionConfig, value: any) {
+  const newConfig = { ...posConfig.value, [field]: value }
+  emitMarkerUpdate({ positionConfig: newConfig })
+}
+
 function addItem(type: MapItemType) {
   if (isAtLimit.value) return
-  
   const item = createDefaultItem(type)
   const newItems = [...props.marker.items, item]
   emitMarkerUpdate({ items: newItems })
 }
 
-/**
- * Remove item from marker
- */
 function removeItem(index: number) {
   const newItems = [...props.marker.items]
   newItems.splice(index, 1)
   emitMarkerUpdate({ items: newItems })
 }
 
-/**
- * Update a specific item
- */
 function updateItem(index: number, updatedItem: MapMarkerItem) {
   const newItems = [...props.marker.items]
   newItems[index] = updatedItem
@@ -319,6 +412,53 @@ function updateItem(index: number, updatedItem: MapMarkerItem) {
 .form-input:focus {
   outline: none;
   border-color: var(--color-accent);
+}
+
+/* Mode Toggle */
+.mode-toggle {
+  display: flex;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px;
+}
+
+.mode-btn {
+  flex: 1;
+  padding: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.2s;
+}
+
+.mode-btn.active {
+  background: var(--color-accent);
+  color: white;
+}
+
+.checkbox-row {
+  flex-direction: row;
+  align-items: center;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary);
 }
 
 .btn-use-center {

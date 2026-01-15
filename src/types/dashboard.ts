@@ -225,11 +225,29 @@ export interface MapMarkerItem {
   kvConfig?: MapItemKvConfig
 }
 
+export interface MarkerPositionConfig {
+  mode: 'static' | 'dynamic'
+  
+  // Dynamic settings
+  subject?: string
+  latJsonPath?: string // e.g. "$.lat" or "$[0]"
+  lonJsonPath?: string // e.g. "$.lon" or "$[1]"
+  
+  // JetStream settings
+  useJetStream?: boolean
+  deliverPolicy?: DeliverPolicy
+  timeWindow?: string
+}
+
 export interface MapMarker {
   id: string
   label: string
   lat: number
   lon: number
+  
+  // NEW: Position Config
+  positionConfig?: MarkerPositionConfig
+  
   color?: string
   items: MapMarkerItem[]
 }

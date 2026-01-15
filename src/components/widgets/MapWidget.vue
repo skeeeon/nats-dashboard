@@ -43,6 +43,8 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useLeafletMap } from '@/composables/useLeafletMap'
 import { useMapInteractions } from '@/composables/useMapInteractions'
 import { useTheme } from '@/composables/useTheme'
+import { useWidgetDataStore } from '@/stores/widgetData'
+import { useDashboardStore } from '@/stores/dashboard'
 import type { WidgetConfig } from '@/types/dashboard'
 import ResponseModal from '@/components/common/ResponseModal.vue'
 
@@ -54,7 +56,9 @@ const props = withDefaults(defineProps<{
 })
 
 const { theme } = useTheme()
-const { initMap, updateTheme, renderMarkers, invalidateSize, cleanup } = useLeafletMap()
+const dataStore = useWidgetDataStore()
+const dashboardStore = useDashboardStore()
+const { initMap, updateTheme, renderMarkers, updateMarkerPositions, invalidateSize, cleanup } = useLeafletMap()
 
 // Unique ID
 const mapContainerId = computed(() => {
@@ -67,8 +71,10 @@ const markers = computed(() => props.config.mapConfig?.markers || [])
 const mapCenter = computed(() => props.config.mapConfig?.center || { lat: 39.8283, lon: -98.5795 })
 const mapZoom = computed(() => props.config.mapConfig?.zoom || 4)
 
-// Initialize Interactions Logic (The "Brain")
-// We pass a getter for markers so the composable can find the active marker config
+// Data Buffer for Dynamic Markers
+const buffer = computed(() => dataStore.getBuffer(props.config.id))
+
+// Initialize Interactions Logic
 const interactions = useMapInteractions(() => markers.value)
 
 // Initialization tracking
@@ -82,7 +88,7 @@ async function initializeMap() {
 
   await nextTick()
   initTimeout = window.setTimeout(() => {
-    if (!document.getElementById(mapContainerId.value)) return // DOM check
+    if (!document.getElementById(mapContainerId.value)) return
 
     initMap(
       mapContainerId.value,
@@ -90,16 +96,24 @@ async function initializeMap() {
       mapZoom.value,
       theme.value === 'dark'
     )
-    // Pass the callbacks from our new composable to the map renderer
     renderMarkers(markers.value, interactions.callbacks)
     mapReady.value = true
     initTimeout = null
+    
+    // Initial position update if we have buffered data
+    if (buffer.value.length > 0) {
+      updateMarkerPositions(markers.value, buffer.value, dashboardStore.currentVariableValues)
+    }
   }, 50)
 }
 
 function updateMarkers() {
   if (!mapReady.value) return
   renderMarkers(markers.value, interactions.callbacks)
+  // Re-apply positions after re-render
+  if (buffer.value.length > 0) {
+    updateMarkerPositions(markers.value, buffer.value, dashboardStore.currentVariableValues)
+  }
 }
 
 let resizeObserver: ResizeObserver | null = null
@@ -129,9 +143,16 @@ watch(theme, (newTheme) => updateTheme(newTheme === 'dark'))
 watch(markers, updateMarkers, { deep: true })
 watch([mapCenter, mapZoom], () => {
   if (initTimeout) clearTimeout(initTimeout)
-  cleanup() // Safe clean
+  cleanup()
   mapReady.value = false
-  initializeMap() // Re-init
+  initializeMap()
+}, { deep: true })
+
+// Watch buffer for live updates
+watch(buffer, (newMessages) => {
+  if (mapReady.value && newMessages.length > 0) {
+    updateMarkerPositions(markers.value, newMessages, dashboardStore.currentVariableValues)
+  }
 }, { deep: true })
 </script>
 

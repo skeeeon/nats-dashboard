@@ -1,16 +1,11 @@
-/**
- * Leaflet Map Composable
- * 
- * Grug say: Handle all Leaflet stuff in one place.
- * Theme switching, marker rendering, popup items.
- * 
- * V2: Supports publish, switch, text, and kv items.
- */
-
+// src/composables/useLeafletMap.ts
 import { ref, shallowRef } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import type { MapMarker, MapMarkerItem } from '@/types/dashboard'
+import { JSONPath } from 'jsonpath-plus'
+import { resolveTemplate } from '@/utils/variables'
+import type { BufferedMessage } from '@/stores/widgetData'
 
 // Tile providers
 const TILE_URLS = {
@@ -20,9 +15,6 @@ const TILE_URLS = {
 
 const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
 
-/**
- * Popup event callbacks - EXPORTED for use by MapWidget
- */
 export interface PopupCallbacks {
   onPublishItem: (item: MapMarkerItem) => void
   onSwitchToggle: (item: MapMarkerItem) => void
@@ -30,11 +22,8 @@ export interface PopupCallbacks {
   onPopupClose: (markerId: string) => void
 }
 
-/**
- * Fix Leaflet's broken icon paths in bundlers
- */
 function fixLeafletIcons() {
-  // @ts-ignore - Leaflet internals
+  // @ts-ignore
   delete L.Icon.Default.prototype._getIconUrl
   L.Icon.Default.mergeOptions({
     iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -49,19 +38,14 @@ export function useLeafletMap() {
   const tileLayer = shallowRef<L.TileLayer | null>(null)
   const initialized = ref(false)
   
-  // Track marker instances for popup events
   const markerInstances = new Map<string, L.Marker>()
 
-  /**
-   * Initialize the map
-   */
   function initMap(
     containerId: string,
     center: { lat: number; lon: number },
     zoom: number,
     isDarkMode: boolean
   ) {
-    // 1. Clean up existing map instance managed by this composable
     if (map.value) {
       map.value.remove()
       map.value = null
@@ -69,21 +53,15 @@ export function useLeafletMap() {
     markerInstances.clear()
     fixLeafletIcons()
 
-    // 2. Safety Check: Check for zombie Leaflet instance on the DOM element
-    // This handles the "Map container is already initialized" error on mobile re-renders
     const container = document.getElementById(containerId)
     if (container) {
       if ((container as any)._leaflet_id) {
-        // Leaflet thinks this container is in use, but our state says otherwise.
-        // Force a reset by clearing the Leaflet ID.
         ;(container as any)._leaflet_id = null
       }
     } else {
-      // Container not found in DOM, cannot init
       return
     }
 
-    // 3. Create Map
     const mapInstance = L.map(containerId, {
       center: [center.lat, center.lon],
       zoom: zoom,
@@ -92,32 +70,22 @@ export function useLeafletMap() {
     })
 
     map.value = mapInstance
-
-    // Add tile layer
     updateTheme(isDarkMode)
 
-    // Create marker layer group
     const layerGroup = L.layerGroup()
     layerGroup.addTo(mapInstance)
     markersLayer.value = layerGroup
 
     initialized.value = true
 
-    // Handle container resize
     setTimeout(() => {
       mapInstance.invalidateSize()
     }, 100)
   }
 
-  /**
-   * Update tile layer based on theme
-   */
   function updateTheme(isDarkMode: boolean) {
     if (!map.value) return
-
-    if (tileLayer.value) {
-      map.value.removeLayer(tileLayer.value)
-    }
+    if (tileLayer.value) map.value.removeLayer(tileLayer.value)
 
     const url = isDarkMode ? TILE_URLS.dark : TILE_URLS.light
     const newTileLayer = L.tileLayer(url, {
@@ -128,22 +96,18 @@ export function useLeafletMap() {
     tileLayer.value = newTileLayer
   }
 
-  /**
-   * Render markers on the map
-   */
   function renderMarkers(markers: MapMarker[], callbacks: PopupCallbacks) {
     if (!map.value || !markersLayer.value) return
 
-    // Clear existing markers
     markersLayer.value.clearLayers()
     markerInstances.clear()
 
     markers.forEach(markerConfig => {
       const { id, lat, lon, label, items } = markerConfig
-
+      
+      // Use configured lat/lon as initial position
       const marker = L.marker([lat, lon], { title: label })
 
-      // Build popup content with callbacks wired up
       const popupContent = createPopupContent(id, label, items, callbacks)
       const popup = L.popup({
         className: 'nats-map-popup',
@@ -154,12 +118,9 @@ export function useLeafletMap() {
       
       marker.bindPopup(popup)
 
-      // Track popup open/close events
       marker.on('popupopen', () => {
         const popupEl = popup.getElement()
-        if (popupEl) {
-          callbacks.onPopupOpen(id, popupEl)
-        }
+        if (popupEl) callbacks.onPopupOpen(id, popupEl)
       })
 
       marker.on('popupclose', () => {
@@ -169,19 +130,80 @@ export function useLeafletMap() {
       markerInstances.set(id, marker)
       markersLayer.value!.addLayer(marker)
     })
-
-    // Fit bounds if multiple markers
-    if (markers.length > 1) {
-      const bounds = markers.map(m => [m.lat, m.lon] as [number, number])
-      map.value.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 })
-    } else if (markers.length === 1) {
-      map.value.setView([markers[0].lat, markers[0].lon], map.value.getZoom())
-    }
   }
 
   /**
-   * Create popup HTML content with item buttons/toggles/displays
+   * Update marker positions based on incoming messages
    */
+  function updateMarkerPositions(
+    markersConfig: MapMarker[], 
+    messages: BufferedMessage[],
+    variables: Record<string, string>
+  ) {
+    if (!map.value || messages.length === 0) return
+
+    // Filter for dynamic markers
+    const dynamicMarkers = markersConfig.filter(m => 
+      m.positionConfig?.mode === 'dynamic' && m.positionConfig.subject
+    )
+
+    if (dynamicMarkers.length === 0) return
+
+    // For each dynamic marker, find the latest relevant message
+    dynamicMarkers.forEach(marker => {
+      const pos = marker.positionConfig!
+      const resolvedSubject = resolveTemplate(pos.subject, variables)
+      
+      // Find latest message matching this subject
+      // Iterate backwards for speed
+      let match: BufferedMessage | undefined
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].subject === resolvedSubject) {
+          match = messages[i]
+          break
+        }
+      }
+
+      if (match) {
+        // Extract Lat/Lon
+        const lat = extractValue(match.value, pos.latJsonPath)
+        const lon = extractValue(match.value, pos.lonJsonPath)
+
+        if (isValidCoord(lat) && isValidCoord(lon)) {
+          const leafletMarker = markerInstances.get(marker.id)
+          if (leafletMarker) {
+            const current = leafletMarker.getLatLng()
+            // Only update if moved significantly (micro-optimization)
+            if (Math.abs(current.lat - lat) > 0.000001 || Math.abs(current.lng - lon) > 0.000001) {
+              leafletMarker.setLatLng([lat, lon])
+            }
+          }
+        }
+      }
+    })
+  }
+
+  function extractValue(data: any, path?: string): number {
+    if (!path) return NaN
+    try {
+      // If data is object, query it. If string, try parse.
+      let json = data
+      if (typeof data === 'string') {
+        try { json = JSON.parse(data) } catch { return NaN }
+      }
+      
+      const result = JSONPath({ path, json, wrap: false })
+      return parseFloat(result)
+    } catch {
+      return NaN
+    }
+  }
+
+  function isValidCoord(val: number): boolean {
+    return typeof val === 'number' && !isNaN(val)
+  }
+
+  // ... createPopupContent and other helpers (unchanged) ...
   function createPopupContent(
     _markerId: string,
     label: string,
@@ -191,13 +213,11 @@ export function useLeafletMap() {
     const container = document.createElement('div')
     container.className = 'map-popup-content'
 
-    // Header
     const header = document.createElement('div')
     header.className = 'map-popup-header'
     header.textContent = label
     container.appendChild(header)
 
-    // Items
     if (items.length > 0) {
       const itemList = document.createElement('div')
       itemList.className = 'map-popup-items'
@@ -226,9 +246,6 @@ export function useLeafletMap() {
     return container
   }
 
-  /**
-   * Create publish item button
-   */
   function createPublishButton(
     item: MapMarkerItem,
     onAction: (item: MapMarkerItem) => void
@@ -242,7 +259,6 @@ export function useLeafletMap() {
       e.stopPropagation()
       onAction(item)
       
-      // Visual feedback
       btn.classList.add('action-success')
       const originalText = btn.textContent
       btn.textContent = '✓ Sent!'
@@ -255,9 +271,6 @@ export function useLeafletMap() {
     return btn
   }
 
-  /**
-   * Create switch item toggle
-   */
   function createSwitchToggle(
     item: MapMarkerItem,
     onToggle: (item: MapMarkerItem) => void
@@ -266,22 +279,18 @@ export function useLeafletMap() {
     container.className = 'map-popup-switch'
     container.dataset.itemId = item.id
 
-    // Label
     const label = document.createElement('span')
     label.className = 'switch-label'
     label.textContent = item.label
 
-    // Toggle track
     const track = document.createElement('button')
     track.className = 'switch-track state-unknown'
     track.dataset.state = 'unknown'
 
-    // Thumb
     const thumb = document.createElement('span')
     thumb.className = 'switch-thumb'
     track.appendChild(thumb)
 
-    // State text
     const stateText = document.createElement('span')
     stateText.className = 'switch-state-text state-unknown'
     stateText.textContent = '...'
@@ -298,9 +307,6 @@ export function useLeafletMap() {
     return container
   }
 
-  /**
-   * Create value display for Text/KV items
-   */
   function createValueDisplay(item: MapMarkerItem): HTMLElement {
     const container = document.createElement('div')
     container.className = 'map-popup-value-display'
@@ -312,7 +318,7 @@ export function useLeafletMap() {
 
     const value = document.createElement('span')
     value.className = 'value-text'
-    value.textContent = '...' // Placeholder
+    value.textContent = '...' 
 
     const unit = document.createElement('span')
     unit.className = 'value-unit'
@@ -327,15 +333,11 @@ export function useLeafletMap() {
     return container
   }
 
-  /**
-   * Update switch toggle state in popup
-   */
   function updateSwitchState(
     itemId: string,
     state: 'on' | 'off' | 'pending' | 'unknown',
     labels?: { on?: string; off?: string }
   ) {
-    // Find the switch element in any open popup
     const switchEl = document.querySelector(
       `.map-popup-switch[data-item-id="${itemId}"]`
     ) as HTMLElement | null
@@ -371,9 +373,6 @@ export function useLeafletMap() {
     }
   }
 
-  /**
-   * Update value display in popup
-   */
   function updateItemValue(itemId: string, value: string) {
     const displayEl = document.querySelector(
       `.map-popup-value-display[data-item-id="${itemId}"]`
@@ -387,32 +386,20 @@ export function useLeafletMap() {
     }
   }
 
-  /**
-   * Update map view (center + zoom)
-   */
   function setView(lat: number, lon: number, zoom: number) {
     if (!map.value) return
     map.value.setView([lat, lon], zoom)
   }
 
-  /**
-   * Force map to recalculate size
-   */
   function invalidateSize() {
     if (!map.value) return
     map.value.invalidateSize()
   }
 
-  /**
-   * Get marker instance by ID
-   */
   function getMarker(markerId: string): L.Marker | undefined {
     return markerInstances.get(markerId)
   }
 
-  /**
-   * Cleanup
-   */
   function cleanup() {
     if (map.value) {
       map.value.remove()
@@ -430,6 +417,7 @@ export function useLeafletMap() {
     initMap,
     updateTheme,
     renderMarkers,
+    updateMarkerPositions, // Exported
     updateSwitchState,
     updateItemValue,
     setView,
