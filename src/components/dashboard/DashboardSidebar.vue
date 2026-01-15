@@ -61,7 +61,7 @@
               :is-active="dashboard.id === activeDashboardId"
               @select="selectDashboard(dashboard)"
               @rename="startRename(dashboard.id)"
-              @duplicate="duplicateDashboard(dashboard.id)"
+              @duplicate="startDuplicateLocal(dashboard.id)"
               @export="exportDashboard(dashboard.id)"
               @delete="confirmDelete(dashboard.id, 'local')"
               @share="handleShare(dashboard.id)"
@@ -88,6 +88,8 @@
               :active-id="activeDashboardId"
               @select="selectRemoteDashboard"
               @delete="confirmDelete($event, 'remote')"
+              @duplicate="handleRemoteDuplicate"
+              @export="handleRemoteExport"
             />
           </div>
         </template>
@@ -182,12 +184,45 @@
         </div>
       </div>
     </div>
+
+    <!-- Duplicate Local Modal -->
+    <div v-if="showDuplicateLocal" class="modal-overlay" @click.self="showDuplicateLocal = false">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Duplicate Dashboard</h3>
+          <button class="close-btn" @click="showDuplicateLocal = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>New Name</label>
+            <input 
+              ref="duplicateLocalInput"
+              v-model="duplicateLocalName"
+              type="text"
+              class="form-input"
+              placeholder="Dashboard Name"
+              @keyup.enter="saveDuplicateLocal"
+              @keyup.escape="showDuplicateLocal = false"
+            />
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-secondary" @click="showDuplicateLocal = false">Cancel</button>
+          <button class="btn-primary" @click="saveDuplicateLocal">Duplicate</button>
+        </div>
+      </div>
+    </div>
     
-    <!-- Share / Create Remote Modal -->
+    <!-- Share / Create / Duplicate Remote Modal -->
     <div v-if="showShareModal" class="modal-overlay" @click.self="showShareModal = false">
       <div class="modal">
         <div class="modal-header">
-          <h3>{{ modalMode === 'create' ? 'Create Shared Dashboard' : 'Share to KV' }}</h3>
+          <h3>
+            {{ 
+              modalMode === 'create' ? 'Create Shared Dashboard' : 
+              modalMode === 'duplicate' ? 'Duplicate Shared Dashboard' : 'Share to KV' 
+            }}
+          </h3>
           <button class="close-btn" @click="showShareModal = false">✕</button>
         </div>
         <div class="modal-body">
@@ -242,7 +277,10 @@
         <div class="modal-actions">
           <button class="btn-secondary" @click="showShareModal = false">Cancel</button>
           <button class="btn-primary" @click="handleModalSubmit">
-            {{ modalMode === 'create' ? 'Create' : 'Share' }}
+            {{ 
+              modalMode === 'create' ? 'Create' : 
+              modalMode === 'duplicate' ? 'Duplicate' : 'Share' 
+            }}
           </button>
         </div>
       </div>
@@ -328,9 +366,15 @@ const renameId = ref<string | null>(null)
 const renameName = ref('')
 const renameInput = ref<HTMLInputElement | null>(null)
 
-// Share/Create Remote state
+// Duplicate Local state
+const showDuplicateLocal = ref(false)
+const duplicateLocalId = ref<string | null>(null)
+const duplicateLocalName = ref('')
+const duplicateLocalInput = ref<HTMLInputElement | null>(null)
+
+// Share/Create/Duplicate Remote state
 const showShareModal = ref(false)
-const modalMode = ref<'share' | 'create'>('share')
+const modalMode = ref<'share' | 'create' | 'duplicate'>('share')
 const shareForm = ref({
   id: '',
   name: '',
@@ -427,13 +471,11 @@ function startResizing() {
   isResizing.value = true
   document.addEventListener('mousemove', handleResizing)
   document.addEventListener('mouseup', stopResizing)
-  // Prevent text selection while dragging
   document.body.style.userSelect = 'none'
 }
 
 function handleResizing(e: MouseEvent) {
   if (!isResizing.value) return
-  // Constrain width between 200px and 600px
   const newWidth = Math.max(200, Math.min(600, e.clientX))
   sidebarWidth.value = newWidth
 }
@@ -492,8 +534,24 @@ function saveRename() {
   renameName.value = ''
 }
 
-function duplicateDashboard(id: string) {
-  dashboardStore.duplicateDashboard(id)
+function startDuplicateLocal(id: string) {
+  const dashboard = dashboards.value.find(d => d.id === id)
+  if (!dashboard) return
+  duplicateLocalId.value = id
+  duplicateLocalName.value = `${dashboard.name} (Copy)`
+  showDuplicateLocal.value = true
+  nextTick(() => {
+    duplicateLocalInput.value?.focus()
+    duplicateLocalInput.value?.select()
+  })
+}
+
+function saveDuplicateLocal() {
+  if (!duplicateLocalId.value || !duplicateLocalName.value.trim()) return
+  dashboardStore.duplicateDashboard(duplicateLocalId.value, duplicateLocalName.value.trim())
+  showDuplicateLocal.value = false
+  duplicateLocalId.value = null
+  duplicateLocalName.value = ''
 }
 
 function exportDashboard(id: string) {
@@ -566,20 +624,81 @@ function handleShare(id: string) {
 
 function handleModalSubmit() {
   if (!shareForm.value.name.trim()) return
+  
   if (modalMode.value === 'share') {
     dashboardStore.uploadLocalToRemote(
       shareForm.value.id, 
       shareForm.value.folder.trim(),
       shareForm.value.name.trim()
     )
-  } else {
+  } else if (modalMode.value === 'create') {
     dashboardStore.createRemoteDashboard(
       shareForm.value.name.trim(),
       shareForm.value.folder.trim()
     )
+  } else if (modalMode.value === 'duplicate') {
+    dashboardStore.duplicateRemoteDashboard(
+      shareForm.value.id, // sourceKey
+      shareForm.value.name.trim(),
+      shareForm.value.folder.trim()
+    )
   }
+  
   showShareModal.value = false
   if (isMobile.value) closeSidebar()
+}
+
+// --- NEW HANDLERS ---
+async function handleRemoteDuplicate(key: string) {
+  // 1. Fetch to get the real name
+  const json = await dashboardStore.fetchRemoteDashboardJson(key)
+  if (!json) return // Error handled in store
+
+  let currentName = 'Dashboard'
+  try {
+    const parsed = JSON.parse(json)
+    currentName = parsed.name
+  } catch {}
+
+  // 2. Extract current folder from key
+  const lastDot = key.lastIndexOf('.')
+  let currentFolder = ''
+  if (lastDot > -1) {
+    currentFolder = key.substring(0, lastDot)
+  }
+
+  // 3. Setup Form
+  shareForm.value = {
+    id: key, // Use ID to store source key
+    name: `${currentName} (Copy)`,
+    folder: currentFolder,
+    mode: knownFolders.value.length > 0 ? 'existing' : 'new'
+  }
+  
+  modalMode.value = 'duplicate'
+  showShareModal.value = true
+}
+
+async function handleRemoteExport(key: string) {
+  const json = await dashboardStore.fetchRemoteDashboardJson(key)
+  if (!json) return
+  
+  // Try to parse to get name for filename
+  let filename = 'shared-dashboard.json'
+  try {
+    const parsed = JSON.parse(json)
+    if (parsed.name) filename = `${parsed.name}.json`
+  } catch {}
+  
+  // Wrap in export envelope
+  const exportData = {
+    version: '1.0',
+    exportDate: Date.now(),
+    appVersion: '0.1.0',
+    dashboards: [JSON.parse(json)]
+  }
+  
+  downloadJSON(JSON.stringify(exportData, null, 2), filename)
 }
 
 onMounted(() => {

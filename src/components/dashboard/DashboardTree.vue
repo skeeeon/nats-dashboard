@@ -21,6 +21,8 @@
           :active-id="activeId"
           @select="$emit('select', $event)"
           @delete="$emit('delete', $event)"
+          @duplicate="$emit('duplicate', $event)"
+          @export="$emit('export', $event)"
         />
       </div>
     </div>
@@ -55,7 +57,20 @@
               <span class="menu-icon">🏠</span>
               <span class="menu-text">Set as Startup</span>
             </button>
+            
             <div class="menu-divider"></div>
+            
+            <button class="menu-item" @click="handleDuplicate(item.key)">
+              <span class="menu-icon">📋</span>
+              <span class="menu-text">Duplicate</span>
+            </button>
+            <button class="menu-item" @click="handleExport(item.key)">
+              <span class="menu-icon">💾</span>
+              <span class="menu-text">Export</span>
+            </button>
+            
+            <div class="menu-divider"></div>
+            
             <button class="menu-item danger" @click="handleDelete(item.key)">
               <span class="menu-icon">🗑️</span>
               <span class="menu-text">Delete</span>
@@ -84,6 +99,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [key: string]
   delete: [key: string]
+  duplicate: [key: string]
+  export: [key: string]
 }>()
 
 const dashboardStore = useDashboardStore()
@@ -131,6 +148,16 @@ function toggleMenu(key: string) {
 function handleSetStartup(key: string) {
   dashboardStore.setStartupDashboard(key, 'kv')
   activeMenuId.value = null
+}
+
+function handleDuplicate(key: string) {
+  activeMenuId.value = null
+  emit('duplicate', key)
+}
+
+function handleExport(key: string) {
+  activeMenuId.value = null
+  emit('export', key)
 }
 
 function handleDelete(key: string) {
@@ -190,11 +217,11 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 4px; /* Increased vertical padding slightly */
+  padding: 8px 4px;
   cursor: pointer;
   border-radius: 6px;
   color: var(--text-secondary);
-  font-size: 15px; /* Bumped to 15px */
+  font-size: 15px;
   font-weight: 500;
   user-select: none;
   white-space: nowrap;
@@ -218,7 +245,7 @@ onUnmounted(() => {
 }
 
 .folder-icon {
-  font-size: 18px; /* Bumped to 18px */
+  font-size: 18px;
   flex-shrink: 0;
   opacity: 0.8;
 }
@@ -228,11 +255,6 @@ onUnmounted(() => {
   text-overflow: ellipsis;
 }
 
-/* 
-   Indentation Logic (Preserved)
-   - Margin Left: 12px (Aligns with chevron center)
-   - Padding Left: 10px (Space between line and child)
-*/
 .folder-content {
   padding-left: 10px;
   border-left: 1px solid var(--border);
@@ -251,13 +273,13 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 8px; /* Increased vertical padding */
+  padding: 8px 8px;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
   color: var(--text);
-  font-size: 15px; /* Bumped to 15px */
-  font-weight: 500; /* Added weight to match local list */
+  font-size: 15px;
+  font-weight: 500;
   border: 1px solid transparent;
 }
 
@@ -273,7 +295,7 @@ onUnmounted(() => {
 }
 
 .item-icon {
-  font-size: 18px; /* Bumped to 18px */
+  font-size: 18px;
   opacity: 0.7;
   width: 18px;
   text-align: center;
