@@ -62,7 +62,7 @@ import ConfigMap from './config/ConfigMap.vue'
 import ConfigConsole from './config/ConfigConsole.vue'
 import ConfigPublisher from './config/ConfigPublisher.vue'
 import ConfigStatus from './config/ConfigStatus.vue'
-import ConfigMarkdown from './config/ConfigMarkdown.vue' // Added
+import ConfigMarkdown from './config/ConfigMarkdown.vue'
 
 interface Props {
   modelValue: boolean
@@ -94,7 +94,7 @@ const configComponents: Record<string, any> = {
   console: ConfigConsole,
   publisher: ConfigPublisher,
   status: ConfigStatus,
-  markdown: ConfigMarkdown, // Added
+  markdown: ConfigMarkdown,
 }
 
 const form = ref<WidgetFormState>({
@@ -153,7 +153,7 @@ const form = ref<WidgetFormState>({
   statusStalenessThreshold: 60000,
   statusStaleColor: 'var(--muted)',
   statusStaleLabel: 'Stale',
-  markdownContent: '', // Added
+  markdownContent: '',
   useJetStream: false,
   deliverPolicy: 'last',
   jetstreamTimeWindow: '10m'
@@ -176,7 +176,7 @@ const activeConfigComponent = computed(() => {
 // Logic for showing the generic Data Source config block
 const showDataSourceConfig = computed(() => {
   const typesWithDataSource = ['text', 'chart', 'stat', 'gauge', 'console']
-  if (widgetType.value === 'status') return false
+  if (widgetType.value === 'status' || widgetType.value === 'markdown') return false
   return typesWithDataSource.includes(widgetType.value || '')
 })
 
@@ -224,7 +224,7 @@ watch(() => props.widgetId, (widgetId) => {
   } else if (widget.type === 'kv') {
     currentKvBucket = widget.dataSource.kvBucket || ''
     currentKvKey = widget.dataSource.kvKey || ''
-  } else if (widget.type === 'status' && widget.dataSource.type === 'kv') {
+  } else if ((widget.type === 'status' || widget.type === 'markdown') && widget.dataSource.type === 'kv') {
     currentKvBucket = widget.dataSource.kvBucket || ''
     currentKvKey = widget.dataSource.kvKey || ''
   }
@@ -267,7 +267,7 @@ watch(() => props.widgetId, (widgetId) => {
   let statusStalenessThreshold = 60000
   let statusStaleColor = 'var(--muted)'
   let statusStaleLabel = 'Stale'
-  let dataSourceType: 'subscription' | 'kv' = 'subscription'
+  let dataSourceType: 'subscription' | 'kv' | 'none' = 'subscription'
 
   if (widget.type === 'status') {
     dataSourceType = widget.dataSource.type === 'kv' ? 'kv' : 'subscription'
@@ -285,6 +285,10 @@ watch(() => props.widgetId, (widgetId) => {
   // Markdown Config
   let markdownContent = ''
   if (widget.type === 'markdown') {
+    if (widget.dataSource.type === 'kv') dataSourceType = 'kv'
+    else if (widget.dataSource.subject) dataSourceType = 'subscription'
+    else dataSourceType = 'none'
+    
     markdownContent = widget.markdownConfig?.content || ''
   }
 
@@ -344,7 +348,7 @@ watch(() => props.widgetId, (widgetId) => {
     statusStalenessThreshold,
     statusStaleColor,
     statusStaleLabel,
-    markdownContent, // Added
+    markdownContent, 
     useJetStream: widget.dataSource.useJetStream || false,
     deliverPolicy: widget.dataSource.deliverPolicy || 'last',
     jetstreamTimeWindow: widget.dataSource.timeWindow || '10m'
@@ -363,7 +367,8 @@ function validate(): boolean {
   if (!titleResult.valid && widget.type !== 'markdown') errors.value.title = titleResult.error!
   
   // Standard Subscription Validation
-  if (['text', 'chart', 'stat', 'gauge', 'console'].includes(widget.type) || (widget.type === 'status' && form.value.dataSourceType === 'subscription')) {
+  if (['text', 'chart', 'stat', 'gauge', 'console', 'markdown'].includes(widget.type) || (widget.type === 'status' && form.value.dataSourceType === 'subscription')) {
+    
     if (widget.type === 'console') {
       if (form.value.subjects.length === 0) {
         errors.value.subjects = 'At least one subject is required'
@@ -373,6 +378,16 @@ function validate(): boolean {
         if (!res.valid) {
           errors.value.subjects = `Invalid subject "${sub}": ${res.error}`
           break
+        }
+      }
+    } else if (widget.type === 'markdown') {
+      // Validate subject only if in subscription mode
+      if (form.value.dataSourceType === 'subscription') {
+        if (form.value.subject) {
+          const subjectResult = validator.validateSubject(form.value.subject)
+          if (!subjectResult.valid) errors.value.subject = subjectResult.error!
+        } else {
+          errors.value.subject = 'Subject is required in subscription mode'
         }
       }
     } else {
@@ -388,7 +403,9 @@ function validate(): boolean {
     const bufferResult = validator.validateBufferSize(form.value.bufferSize)
     if (!bufferResult.valid) errors.value.bufferSize = bufferResult.error!
 
-  } else if (widget.type === 'button') {
+  } 
+  
+  if (widget.type === 'button') {
     const subjectResult = validator.validateSubject(form.value.subject)
     if (!subjectResult.valid) errors.value.subject = subjectResult.error!
     if (!form.value.buttonLabel.trim()) errors.value.buttonLabel = 'Label required'
@@ -396,7 +413,7 @@ function validate(): boolean {
       const jsonResult = validator.validateJson(form.value.buttonPayload)
       if (!jsonResult.valid) errors.value.buttonPayload = jsonResult.error!
     }
-  } else if (widget.type === 'kv' || (widget.type === 'status' && form.value.dataSourceType === 'kv')) {
+  } else if (widget.type === 'kv' || ((widget.type === 'status' || widget.type === 'markdown') && form.value.dataSourceType === 'kv')) {
     const bucketResult = validator.validateKvBucket(form.value.kvBucket)
     if (!bucketResult.valid) errors.value.kvBucket = bucketResult.error!
     const keyResult = validator.validateKvKey(form.value.kvKey)
@@ -576,6 +593,29 @@ function save() {
       staleLabel: form.value.statusStaleLabel
     }
   } else if (widget.type === 'markdown') {
+    // Markdown Data Source Save Logic
+    if (form.value.dataSourceType === 'kv') {
+      updates.dataSource = {
+        type: 'kv',
+        kvBucket: form.value.kvBucket.trim(),
+        kvKey: form.value.kvKey.trim(),
+      }
+    } else if (form.value.dataSourceType === 'subscription') {
+      updates.dataSource = { 
+        type: 'subscription',
+        subject: form.value.subject.trim(),
+        useJetStream: form.value.useJetStream,
+        deliverPolicy: form.value.deliverPolicy,
+        timeWindow: form.value.jetstreamTimeWindow
+      }
+    } else {
+      // None mode
+      updates.dataSource = {
+        type: 'subscription',
+        subject: '' // Empty subject = no sub
+      }
+    }
+    updates.jsonPath = form.value.jsonPath.trim() || undefined
     updates.markdownConfig = {
       content: form.value.markdownContent
     }
@@ -593,7 +633,7 @@ function close() {
 </script>
 
 <style scoped>
-/* Same style block as previous */
+/* Keeping existing styles */
 .modal-overlay {
   position: fixed;
   top: 0;

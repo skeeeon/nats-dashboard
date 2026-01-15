@@ -10,7 +10,7 @@ export interface WidgetFormState {
   bufferSize: number
   
   // Data Source Type
-  dataSourceType: 'subscription' | 'kv'
+  dataSourceType: 'subscription' | 'kv' | 'none' // Added 'none'
   
   // KV Widget
   kvBucket: string
@@ -149,7 +149,7 @@ export function createEmptyFormState(): WidgetFormState {
     statusStalenessThreshold: 60000,
     statusStaleColor: 'var(--muted)',
     statusStaleLabel: 'Stale',
-    markdownContent: '', // Default empty
+    markdownContent: '', 
     useJetStream: false,
     deliverPolicy: 'last',
     jetstreamTimeWindow: '10m'

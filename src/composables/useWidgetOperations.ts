@@ -75,7 +75,8 @@ export function useWidgetOperations() {
   }
 
   function needsSubscription(widgetType: WidgetType, config?: WidgetConfig): boolean {
-    const selfManagedTypes: WidgetType[] = ['button', 'kv', 'switch', 'slider', 'map', 'publisher', 'markdown'] // Added markdown
+    // Markdown removed from this list so it can subscribe if configured
+    const selfManagedTypes: WidgetType[] = ['button', 'kv', 'switch', 'slider', 'map', 'publisher'] 
     
     if (selfManagedTypes.includes(widgetType)) return false
     
@@ -167,6 +168,7 @@ export function useWidgetOperations() {
         break
       case 'markdown':
         widget.title = ''
+        widget.dataSource = { type: 'subscription', subject: '' } // Default empty subject (Static mode)
         widget.markdownConfig = {
           content: '### Notes\n\nThis is a text block. You can use **markdown**.\n\nVariables: {{device_id}}'
         }
