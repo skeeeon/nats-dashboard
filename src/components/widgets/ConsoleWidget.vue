@@ -252,7 +252,6 @@ onMounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #0d1117; /* Terminal-like background */
   border-radius: 4px;
   overflow: hidden;
   position: relative;
