@@ -6,7 +6,6 @@
       class="mobile-layout"
       :class="{ 'is-editing': !dashboardStore.isLocked }"
     >
-      <!-- ... existing mobile code ... -->
       <div 
         v-for="widget in sortedWidgets" 
         :key="widget.id"
@@ -34,8 +33,10 @@
     </div>
 
     <!-- TABLET/DESKTOP LAYOUT -->
+    <!-- Key forces remount when dashboard changes, preventing stale state -->
     <GridLayout
-      v-else
+      v-else-if="validLayoutItems.length > 0"
+      :key="gridKey"
       v-model:layout="layoutItems"
       :col-num="activeColNum"
       :row-height="80"
@@ -52,7 +53,7 @@
       @layout-updated="handleLayoutUpdate"
     >
       <GridItem
-        v-for="item in layoutItems"
+        v-for="item in validLayoutItems"
         :key="item.i"
         v-bind="item"
         :min-w="1"
@@ -90,7 +91,7 @@ import type { WidgetConfig } from '@/types/dashboard'
 
 const props = defineProps<{
   widgets: WidgetConfig[]
-  columnCount?: number // New prop
+  columnCount?: number
 }>()
 
 const emit = defineEmits<{
@@ -108,23 +109,26 @@ const isMobile = ref(false)
 const breakpoints = { lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }
 
 /**
+ * Grid Key - Forces complete remount when dashboard changes
+ * This prevents stale layout state from causing crashes
+ */
+const gridKey = computed(() => {
+  return dashboardStore.activeDashboardId || 'no-dashboard'
+})
+
+/**
  * Computed Column Configuration
- * If user set a specific number, force that number across all non-mobile breakpoints.
- * If user set "Auto" (0 or undefined), use standard responsive steps.
  */
 const cols = computed(() => {
-  const count = props.columnCount || 12 // Default to 12 if not set
+  const count = props.columnCount || 12
   
   if (count > 0) {
-    // Fixed mode: Squish the grid, don't reflow
     return { lg: count, md: count, sm: count, xs: 2, xxs: 2 }
   } else {
-    // Auto mode: Reflow based on screen size (Standard Bootstrap-ish grid)
     return { lg: 12, md: 10, sm: 6, xs: 2, xxs: 2 }
   }
 })
 
-// Current max columns (for the grid library prop)
 const activeColNum = computed(() => {
   const count = props.columnCount || 12
   return count > 0 ? count : 12
@@ -135,7 +139,9 @@ function checkMobile() {
   isMobile.value = width < 768
 }
 
-// ... existing logic for mobileWidgetLayout, sorting, and watchers (kept same) ...
+// ============================================================================
+// MOBILE LAYOUT HELPERS
+// ============================================================================
 
 const sortedWidgets = computed(() => {
   return [...props.widgets].sort((a, b) => {
@@ -193,9 +199,16 @@ function shouldSpanFullMobile(widgetId: string): boolean {
   return mobileWidgetLayout.value.get(widgetId) ?? true
 }
 
+// ============================================================================
+// DESKTOP LAYOUT
+// ============================================================================
+
 const isDraggable = computed(() => !dashboardStore.isLocked)
 const isResizable = computed(() => !dashboardStore.isLocked)
 
+/**
+ * Map widgets to layout items for grid-layout-plus
+ */
 function mapWidgetsToLayout(widgets: WidgetConfig[]) {
   return widgets.map(w => ({
     i: w.id, x: w.x, y: w.y, w: w.w, h: w.h,
@@ -204,42 +217,84 @@ function mapWidgetsToLayout(widgets: WidgetConfig[]) {
 
 const layoutItems = ref(mapWidgetsToLayout(props.widgets))
 
-function getLayoutWidgetIds(): string[] { return layoutItems.value.map(item => item.i) }
-function getPropsWidgetIds(): string[] { return props.widgets.map(w => w.id) }
+/**
+ * Set of valid widget IDs from props - used for filtering
+ */
+const validWidgetIds = computed(() => {
+  return new Set(props.widgets.map(w => w.id))
+})
 
-function isWidgetSetChanged(layoutIds: string[], propsIds: string[]): boolean {
-  if (layoutIds.length !== propsIds.length) return true
-  const propsSet = new Set(propsIds)
-  return layoutIds.some(id => !propsSet.has(id))
+/**
+ * Filtered layout items - ONLY includes items that have corresponding widgets
+ * This is the key safety mechanism that prevents crashes
+ */
+const validLayoutItems = computed(() => {
+  return layoutItems.value.filter(item => validWidgetIds.value.has(item.i))
+})
+
+/**
+ * Get widget config by ID - returns undefined if not found
+ * WidgetContainer handles undefined gracefully
+ */
+function getWidgetConfig(id: string): WidgetConfig | undefined {
+  return props.widgets.find(w => w.id === id)
 }
 
+/**
+ * Check if the widget set has changed (additions/removals)
+ */
+function hasWidgetSetChanged(currentIds: string[], newIds: string[]): boolean {
+  if (currentIds.length !== newIds.length) return true
+  const newIdSet = new Set(newIds)
+  return currentIds.some(id => !newIdSet.has(id))
+}
+
+/**
+ * Watch for widget changes and sync layout
+ * Only rebuilds layout when widgets are added/removed, not on every prop change
+ */
 watch(() => props.widgets, (newWidgets) => {
   if (isMobile.value) return
-  const currentLayoutIds = getLayoutWidgetIds()
-  const newPropsIds = getPropsWidgetIds()
   
-  if (isWidgetSetChanged(currentLayoutIds, newPropsIds)) {
+  const currentLayoutIds = layoutItems.value.map(item => item.i)
+  const newWidgetIds = newWidgets.map(w => w.id)
+  
+  if (hasWidgetSetChanged(currentLayoutIds, newWidgetIds)) {
     layoutItems.value = mapWidgetsToLayout(newWidgets)
   }
 }, { deep: true })
 
+/**
+ * Handle layout updates from grid-layout-plus
+ * Batches updates to the dashboard store
+ */
 function handleLayoutUpdate(newLayout: Array<{ i: string; x: number; y: number; w: number; h: number }>) {
   if (dashboardStore.isLocked || isMobile.value) return
+  
+  // Only process items that exist in current widgets
+  const validUpdates = newLayout.filter(item => validWidgetIds.value.has(item.i))
+  
   layoutItems.value = newLayout
-  const updates = newLayout.map(item => ({
+  
+  const updates = validUpdates.map(item => ({
     id: item.i, x: item.x, y: item.y, w: item.w, h: item.h
   }))
+  
   dashboardStore.batchUpdateLayout(updates)
 }
 
-function getWidgetConfig(id: string): WidgetConfig | undefined {
-  return props.widgets.find(w => w.id === id)
-}
+// ============================================================================
+// EVENT HANDLERS
+// ============================================================================
 
 function handleWidgetDelete(id: string) { emit('deleteWidget', id) }
 function handleWidgetConfigure(id: string) { emit('configureWidget', id) }
 function handleWidgetDuplicate(id: string) { emit('duplicateWidget', id) }
 function handleWidgetFullscreen(id: string) { emit('fullscreenWidget', id) }
+
+// ============================================================================
+// LIFECYCLE
+// ============================================================================
 
 onMounted(() => {
   checkMobile()
@@ -252,7 +307,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* Keeping existing styles */
 .dashboard-grid-container {
   height: 100%;
   width: 100%;
