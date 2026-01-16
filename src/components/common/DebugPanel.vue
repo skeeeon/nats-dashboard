@@ -1,304 +1,300 @@
 <template>
-  <div v-if="modelValue" class="modal-overlay" @click.self="close">
-    <div class="modal debug-modal">
-      <div class="modal-header">
-        <h3>Debug Panel</h3>
-        <button class="close-btn" @click="close">✕</button>
-      </div>
-      
-      <div class="modal-body">
-        <!-- Connection Stats -->
-        <div class="debug-section">
-          <div class="section-title">Connection</div>
-          <div class="stat-row">
-            <span class="stat-label">Status:</span>
-            <span class="stat-value" :class="statusClass">
-              {{ natsStore.status }}
-            </span>
-          </div>
-          <div v-if="natsStore.rtt" class="stat-row">
-            <span class="stat-label">RTT:</span>
-            <span class="stat-value">{{ natsStore.rtt }}ms</span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">Server:</span>
-            <span class="stat-value">{{ currentServer }}</span>
-          </div>
+  <Teleport to="body">
+    <div v-if="modelValue" class="debug-overlay" @click.self="close">
+      <div class="debug-panel">
+        <div class="panel-header">
+          <h3>🔧 Debug Panel</h3>
+          <button class="close-btn" @click="close">✕</button>
         </div>
         
-        <!-- Throughput & Queue -->
-        <div class="debug-section">
-          <div class="section-title">Throughput</div>
-          <div class="stat-row">
-            <span class="stat-label">Msgs/sec:</span>
-            <span class="stat-value">{{ messagesPerSecond }}</span>
-          </div>
-          <div class="throughput-chart">
-            <div 
-              v-for="(count, i) in throughputHistory"
-              :key="i"
-              class="throughput-bar"
-              :style="{ height: getBarHeight(count) + '%' }"
-            />
-          </div>
+        <div class="panel-body">
+          <!-- Connection Section -->
+          <section class="debug-section">
+            <h4>Connection</h4>
+            <div class="stat-grid">
+              <div class="stat-item">
+                <span class="stat-label">Status</span>
+                <span class="stat-value" :class="statusClass">{{ natsStore.status }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">RTT</span>
+                <span class="stat-value">{{ natsStore.rtt ? `${natsStore.rtt}ms` : '—' }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Reconnects</span>
+                <span class="stat-value" :class="{ 'text-warning': natsStore.reconnectCount > 0 }">
+                  {{ natsStore.reconnectCount }}
+                </span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Server</span>
+                <span class="stat-value mono">{{ natsStore.serverUrls[0] || '—' }}</span>
+              </div>
+            </div>
+            <div v-if="natsStore.lastError" class="error-box">{{ natsStore.lastError }}</div>
+          </section>
           
-          <!-- Processing Queue Stats -->
-          <div class="queue-stats">
-            <div class="stat-row">
-              <span class="stat-label">Processing Queue:</span>
-              <span class="stat-value">
-                {{ subStats.queueSize }} / {{ subStats.maxQueueSize }}
-              </span>
+          <!-- Subscription Manager Section -->
+          <section class="debug-section">
+            <h4>Subscription Manager</h4>
+            <div class="stat-grid">
+              <div class="stat-item">
+                <span class="stat-label">Active Subs</span>
+                <span class="stat-value">{{ subStats.subscriptionCount }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Queue Size</span>
+                <span class="stat-value" :class="queueStatusClass">
+                  {{ subStats.queueSize }} / {{ subStats.maxQueueSize }}
+                </span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Msgs Received</span>
+                <span class="stat-value">{{ formatNumber(subStats.messagesReceived) }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Msgs Dropped</span>
+                <span class="stat-value" :class="{ 'text-error': subStats.messagesDropped > 0 }">
+                  {{ formatNumber(subStats.messagesDropped) }}
+                </span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Sub Errors</span>
+                <span class="stat-value" :class="{ 'text-error': subStats.subscriptionErrors > 0 }">
+                  {{ subStats.subscriptionErrors }}
+                </span>
+              </div>
+              <div v-if="subStats.lastDropTime" class="stat-item">
+                <span class="stat-label">Last Drop</span>
+                <span class="stat-value text-warning">{{ formatTime(subStats.lastDropTime) }}</span>
+              </div>
             </div>
-            <div class="queue-bar-bg">
+            
+            <!-- Subscription List -->
+            <div v-if="subStats.subscriptions.length > 0" class="sub-list">
+              <div class="sub-list-header">Active Subscriptions</div>
               <div 
-                class="queue-bar-fill"
-                :class="queueHealthClass"
-                :style="{ width: queuePercent + '%' }"
-              ></div>
+                v-for="sub in subStats.subscriptions" 
+                :key="sub.key"
+                class="sub-item"
+                :class="{ 'is-error': sub.error, 'is-inactive': !sub.isActive }"
+              >
+                <div class="sub-info">
+                  <span class="sub-type" :class="sub.type.toLowerCase()">
+                    {{ sub.type === 'JetStream' ? 'JS' : 'Core' }}
+                  </span>
+                  <span class="sub-subject">{{ sub.subject }}</span>
+                  <span class="sub-listeners">{{ sub.listenerCount }} listener(s)</span>
+                </div>
+                <div v-if="sub.error" class="sub-error">{{ sub.error }}</div>
+              </div>
             </div>
-            <div class="help-text" v-if="queuePercent > 50">
-              High queue indicates main thread is blocked.
+          </section>
+          
+          <!-- Buffer Stats Section -->
+          <section class="debug-section">
+            <h4>Data Buffers</h4>
+            <div class="stat-grid">
+              <div class="stat-item">
+                <span class="stat-label">Active Buffers</span>
+                <span class="stat-value">{{ dataStore.activeBufferCount }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Total Messages</span>
+                <span class="stat-value">{{ formatNumber(dataStore.totalBufferedCount) }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Memory Est.</span>
+                <span class="stat-value" :class="memoryStatusClass">{{ formatBytes(dataStore.memoryEstimate) }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Cumulative</span>
+                <span class="stat-value">{{ formatNumber(dataStore.cumulativeCount) }}</span>
+              </div>
             </div>
-          </div>
-        </div>
-        
-        <!-- Subscription Stats -->
-        <div class="debug-section">
-          <div class="section-title">Subscriptions</div>
-          <div class="stat-row">
-            <span class="stat-label">Active:</span>
-            <span class="stat-value">{{ subStats.subscriptionCount }}</span>
-          </div>
-          <div class="subscription-list">
-            <div 
-              v-for="sub in subStats.subscriptions" 
-              :key="sub.key"
-              class="subscription-item"
-            >
-              <div class="sub-subject">{{ sub.subject }}</div>
-              <div class="sub-listeners">{{ sub.listenerCount }} widget{{ sub.listenerCount !== 1 ? 's' : '' }}</div>
+            
+            <!-- Memory Usage Bar -->
+            <div class="memory-bar-container">
+              <div class="memory-bar-label">Memory Usage: {{ dataStore.memoryUsagePercent.toFixed(1) }}%</div>
+              <div class="memory-bar">
+                <div 
+                  class="memory-bar-fill" 
+                  :style="{ width: `${dataStore.memoryUsagePercent}%` }"
+                  :class="memoryBarClass"
+                ></div>
+              </div>
             </div>
-          </div>
-        </div>
-        
-        <!-- Buffer Stats -->
-        <div class="debug-section">
-          <div class="section-title">Data Buffers</div>
-          <div class="stat-row">
-            <span class="stat-label">Active Buffers:</span>
-            <span class="stat-value">{{ dataStore.activeBufferCount }}</span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">Buffered Msgs:</span>
-            <span class="stat-value">{{ dataStore.totalBufferedCount || 0 }}</span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">Total Processed:</span>
-            <span class="stat-value">{{ dataStore.cumulativeCount || 0 }}</span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">Memory Est:</span>
-            <span 
-              class="stat-value"
-              :class="{ 'memory-warning': memoryMBNumber > 10 }"
-            >
-              {{ memoryMB }}MB
-            </span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">Usage:</span>
-            <span class="stat-value" :class="memoryPercentClass">
-              {{ memoryPercent.toFixed(1) }}%
-            </span>
-          </div>
-        </div>
-        
-        <!-- Widget Stats -->
-        <div class="debug-section">
-          <div class="section-title">Widgets</div>
-          <div class="stat-row">
-            <span class="stat-label">Total:</span>
-            <span class="stat-value">{{ dashboardStore.activeWidgets.length }}</span>
-          </div>
-          <div class="widget-type-breakdown">
-            <div v-for="(count, type) in widgetTypeCount" :key="type" class="type-count">
-              {{ type }}: {{ count }}
+            
+            <div v-if="dataStore.hasMemoryWarning" class="warning-box">{{ dataStore.memoryWarning }}</div>
+          </section>
+          
+          <!-- Dashboard Stats -->
+          <section class="debug-section">
+            <h4>Dashboard</h4>
+            <div class="stat-grid">
+              <div class="stat-item">
+                <span class="stat-label">Widgets</span>
+                <span class="stat-value">{{ dashboardStore.activeWidgets.length }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Storage</span>
+                <span class="stat-value">{{ storageSize.sizeKB.toFixed(1) }} KB</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Locked</span>
+                <span class="stat-value">{{ dashboardStore.isLocked ? 'Yes' : 'No' }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Dirty</span>
+                <span class="stat-value" :class="{ 'text-warning': dashboardStore.isDirty }">
+                  {{ dashboardStore.isDirty ? 'Yes' : 'No' }}
+                </span>
+              </div>
             </div>
-          </div>
+          </section>
+          
+          <!-- Actions -->
+          <section class="debug-section">
+            <h4>Actions</h4>
+            <div class="action-buttons">
+              <button class="btn-action" @click="refreshStats">🔄 Refresh Stats</button>
+              <button class="btn-action warning" @click="clearBuffers">🗑️ Clear Buffers</button>
+              <button class="btn-action" @click="copyDebugInfo">📋 Copy Debug Info</button>
+            </div>
+          </section>
         </div>
-      </div>
-      
-      <div class="modal-actions">
-        <button class="btn-secondary" @click="refreshStats">
-          Refresh Stats
-        </button>
-        <button class="btn-danger" @click="clearAllBuffers">
-          Clear All Buffers
-        </button>
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onUnmounted, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useNatsStore } from '@/stores/nats'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useWidgetDataStore } from '@/stores/widgetData'
 import { getSubscriptionManager } from '@/composables/useSubscriptionManager'
 
-const props = defineProps<{
-  modelValue: boolean
-}>()
-
-const emit = defineEmits<{
-  'update:modelValue': [value: boolean]
-}>()
+const props = defineProps<{ modelValue: boolean }>()
+const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 
 const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
 const dataStore = useWidgetDataStore()
 const subManager = getSubscriptionManager()
 
-const lastCumulativeCount = ref(0)
-const messagesPerSecond = ref(0)
-const throughputHistory = ref<number[]>(new Array(20).fill(0))
-const currentSubStats = ref(subManager.getStats())
+const subStats = ref(subManager.getStats())
+const storageSize = ref(dashboardStore.getStorageSize())
 
-// Update interval
-let updateInterval: number | null = null
+// Refresh stats when panel opens
+watch(() => props.modelValue, (open) => {
+  if (open) refreshStats()
+})
+
+function refreshStats() {
+  subStats.value = subManager.getStats()
+  storageSize.value = dashboardStore.getStorageSize()
+}
 
 function close() {
   emit('update:modelValue', false)
 }
 
-const statusClass = computed(() => `status-${natsStore.status}`)
-const memoryPercent = computed(() => dataStore.memoryUsagePercent || 0)
-const currentServer = computed(() => natsStore.nc?.getServer() || 'Unknown')
-
-const memoryPercentClass = computed(() => {
-  if (memoryPercent.value >= 90) return 'memory-critical'
-  if (memoryPercent.value >= 70) return 'memory-warning'
-  return ''
-})
-
-const subStats = computed(() => currentSubStats.value)
-
-// Queue Health Logic
-const queuePercent = computed(() => {
-  const size = subStats.value.queueSize
-  const max = subStats.value.maxQueueSize || 1000
-  return Math.min((size / max) * 100, 100)
-})
-
-const queueHealthClass = computed(() => {
-  if (queuePercent.value > 80) return 'memory-critical' // Red
-  if (queuePercent.value > 40) return 'memory-warning'  // Orange
-  return 'status-connected' // Green
-})
-
-const memoryMB = computed(() => (dataStore.memoryEstimate / 1024 / 1024).toFixed(2))
-const memoryMBNumber = computed(() => dataStore.memoryEstimate / 1024 / 1024)
-
-const widgetTypeCount = computed(() => {
-  const counts: Record<string, number> = {}
-  dashboardStore.activeWidgets.forEach(w => {
-    counts[w.type] = (counts[w.type] || 0) + 1
-  })
-  return counts
-})
-
-const maxThroughput = computed(() => {
-  const max = Math.max(...throughputHistory.value)
-  return isNaN(max) || max < 10 ? 10 : max
-})
-
-function getBarHeight(count: number) {
-  const max = maxThroughput.value
-  if (max === 0 || isNaN(count)) return 0
-  return (count / max) * 100
-}
-
-function updateStats() {
-  // Throughput
-  // Use strict number conversion to prevent NaN
-  const currentTotal = Number(dataStore.cumulativeCount) || 0
-  const lastTotal = Number(lastCumulativeCount.value) || 0
-  
-  let newMessages = 0
-  if (currentTotal >= lastTotal) {
-    newMessages = currentTotal - lastTotal
-  } else {
-    // Reset detected (e.g. store cleared)
-    newMessages = currentTotal
-  }
-  
-  // Safety cap to prevent UI glitches on massive spikes
-  if (isNaN(newMessages)) newMessages = 0
-  
-  messagesPerSecond.value = newMessages
-  lastCumulativeCount.value = currentTotal
-  
-  throughputHistory.value.push(newMessages)
-  if (throughputHistory.value.length > 20) {
-    throughputHistory.value.shift()
-  }
-
-  // Live Queue & Sub Stats
-  currentSubStats.value = subManager.getStats()
-}
-
-function clearAllBuffers() {
-  if (confirm('Clear all widget data buffers? This will remove all message history.')) {
+function clearBuffers() {
+  if (confirm('Clear all message buffers? This cannot be undone.')) {
     dataStore.clearAllBuffers()
-    // Reset local counters to avoid spikes
-    lastCumulativeCount.value = 0
-    throughputHistory.value = new Array(20).fill(0)
-    messagesPerSecond.value = 0
+    refreshStats()
   }
 }
 
-function refreshStats() {
-  updateStats()
-}
-
-// Only run stats loop when modal is open
-watch(() => props.modelValue, (isOpen) => {
-  if (isOpen) {
-    // Reset baseline when opening so we don't get a huge spike
-    lastCumulativeCount.value = Number(dataStore.cumulativeCount) || 0
-    
-    updateInterval = setInterval(updateStats, 1000) as unknown as number
-    // Also run immediately
-    updateStats()
-  } else {
-    if (updateInterval) {
-      clearInterval(updateInterval)
-      updateInterval = null
+function copyDebugInfo() {
+  const info = {
+    timestamp: new Date().toISOString(),
+    connection: {
+      status: natsStore.status,
+      rtt: natsStore.rtt,
+      reconnectCount: natsStore.reconnectCount,
+      server: natsStore.serverUrls[0],
+      lastError: natsStore.lastError
+    },
+    subscriptions: subStats.value,
+    buffers: {
+      count: dataStore.activeBufferCount,
+      totalMessages: dataStore.totalBufferedCount,
+      memoryEstimate: dataStore.memoryEstimate,
+      memoryUsagePercent: dataStore.memoryUsagePercent,
+      warning: dataStore.memoryWarning
+    },
+    dashboard: {
+      widgets: dashboardStore.activeWidgets.length,
+      locked: dashboardStore.isLocked,
+      dirty: dashboardStore.isDirty,
+      storage: storageSize.value
     }
   }
-})
+  navigator.clipboard.writeText(JSON.stringify(info, null, 2))
+    .then(() => alert('Debug info copied!'))
+    .catch(() => alert('Failed to copy'))
+}
 
-onUnmounted(() => {
-  if (updateInterval) {
-    clearInterval(updateInterval)
+const statusClass = computed(() => ({
+  'text-success': natsStore.status === 'connected',
+  'text-warning': natsStore.status === 'reconnecting',
+  'text-error': natsStore.status === 'disconnected'
+}))
+
+const queueStatusClass = computed(() => {
+  const pct = (subStats.value.queueSize / subStats.value.maxQueueSize) * 100
+  return {
+    'text-success': pct < 50,
+    'text-warning': pct >= 50 && pct < 80,
+    'text-error': pct >= 80
   }
 })
+
+const memoryStatusClass = computed(() => {
+  const pct = dataStore.memoryUsagePercent
+  return {
+    'text-success': pct < 50,
+    'text-warning': pct >= 50 && pct < 80,
+    'text-error': pct >= 80
+  }
+})
+
+const memoryBarClass = computed(() => {
+  const pct = dataStore.memoryUsagePercent
+  if (pct >= 80) return 'bar-error'
+  if (pct >= 50) return 'bar-warning'
+  return 'bar-success'
+})
+
+function formatNumber(n: number): string {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
+  return String(n)
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+  if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return bytes + ' B'
+}
+
+function formatTime(ts: number): string {
+  const d = new Date(ts)
+  return d.toLocaleTimeString()
+}
 </script>
 
 <style scoped>
-.modal-overlay {
+.debug-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   background: rgba(0, 0, 0, 0.7);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2000;
+  z-index: 9999;
   animation: fadeIn 0.2s ease-out;
 }
 
@@ -307,25 +303,19 @@ onUnmounted(() => {
   to { opacity: 1; }
 }
 
-.modal {
+.debug-panel {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   width: 90%;
-  max-width: 500px;
+  max-width: 600px;
   max-height: 85vh;
   display: flex;
   flex-direction: column;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  animation: slideUp 0.2s ease-out;
 }
 
-@keyframes slideUp {
-  from { transform: translateY(20px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-
-.modal-header {
+.panel-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -333,213 +323,208 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--border);
 }
 
-.modal-header h3 { margin: 0; font-size: 18px; color: var(--text); }
+.panel-header h3 {
+  margin: 0;
+  font-size: 18px;
+}
 
 .close-btn {
   background: none;
   border: none;
   color: var(--muted);
-  font-size: 24px;
+  font-size: 20px;
   cursor: pointer;
 }
 
 .close-btn:hover { color: var(--text); }
 
-.modal-body {
-  padding: 20px;
+.panel-body {
+  padding: 16px 20px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
-.debug-section {
-  margin-bottom: 20px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--border);
-}
-
-.debug-section:last-child {
-  border-bottom: none;
-  margin-bottom: 0;
-  padding-bottom: 0;
-}
-
-.section-title {
-  font-size: 11px;
-  font-weight: 700;
+.debug-section h4 {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--text);
-  opacity: 0.7;
-  margin-bottom: 12px;
+  color: var(--muted);
 }
 
-.stat-row {
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.stat-item {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-  font-size: 13px;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.stat-label { 
-  color: var(--text-secondary);
-  font-weight: 500;
+.stat-label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
 }
 
-.stat-value { 
-  color: var(--text); 
-  font-weight: 600; 
-  font-family: var(--mono); 
-}
-
-.stat-value.status-connected { color: var(--connection-connected); }
-.stat-value.status-connecting { color: var(--connection-connecting); }
-.stat-value.status-disconnected { color: var(--connection-disconnected); }
-.stat-value.memory-warning { color: var(--color-warning); }
-.stat-value.memory-critical { color: var(--color-error); }
-
-.subscription-list {
-  margin-top: 8px;
-  max-height: 150px;
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-}
-
-.subscription-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 10px;
-  background: var(--input-bg);
-  border-bottom: 1px solid var(--border);
-  font-size: 12px;
-}
-
-.subscription-item:last-child {
-  border-bottom: none;
-}
-
-.sub-subject {
-  color: var(--color-primary);
-  font-family: var(--mono);
+.stat-value {
+  font-size: 14px;
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  margin-right: 8px;
-}
-
-.sub-listeners { 
-  color: var(--text-secondary); 
-  flex-shrink: 0; 
-  font-size: 11px;
-}
-
-.widget-type-breakdown {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.type-count {
-  font-size: 11px;
-  padding: 4px 8px;
-  background: var(--input-bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
   color: var(--text);
-  font-weight: 500;
 }
 
-.throughput-chart {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  height: 40px;
-  margin-top: 8px;
-  gap: 2px;
-  background: var(--input-bg);
-  border-radius: 4px;
-  padding: 2px;
-}
+.stat-value.mono { font-family: var(--mono); font-size: 12px; }
+.text-success { color: var(--color-success); }
+.text-warning { color: var(--color-warning); }
+.text-error { color: var(--color-error); }
 
-.throughput-bar {
-  flex: 1;
-  background: var(--color-accent);
-  border-radius: 2px 2px 0 0;
-  min-height: 2px;
-  transition: height 0.3s ease;
-  opacity: 0.8;
-}
-
-.queue-stats {
+.error-box, .warning-box {
   margin-top: 12px;
-  background: var(--input-bg);
-  padding: 10px;
+  padding: 10px 12px;
   border-radius: 4px;
-  border: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
-.queue-bar-bg {
-  height: 8px;
-  background: rgba(128, 128, 128, 0.2);
-  border-radius: 4px;
-  overflow: hidden;
-  margin-top: 6px;
+.error-box {
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  color: var(--color-error);
 }
 
-.queue-bar-fill {
-  height: 100%;
-  background: var(--connection-connected);
-  transition: width 0.3s ease;
-}
-
-.queue-bar-fill.memory-warning { background: var(--color-warning); }
-.queue-bar-fill.memory-critical { background: var(--color-error); }
-
-.help-text {
-  margin-top: 4px;
-  font-size: 10px;
+.warning-box {
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
   color: var(--color-warning);
 }
 
-.modal-actions {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-  padding: 16px 20px;
-  border-top: 1px solid var(--border);
+/* Subscription List */
+.sub-list {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
-.btn-secondary, .btn-danger {
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
+.sub-list-header {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.1);
+  border-bottom: 1px solid var(--border);
+}
+
+.sub-item {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sub-item:last-child { border-bottom: none; }
+.sub-item.is-error { background: var(--color-error-bg); }
+.sub-item.is-inactive { opacity: 0.5; }
+
+.sub-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sub-type {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.sub-type.core {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+.sub-type.jetstream {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.sub-subject {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  flex: 1;
+}
+
+.sub-listeners {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.sub-error {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-error);
+}
+
+/* Memory Bar */
+.memory-bar-container { margin-top: 12px; }
+
+.memory-bar-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.memory-bar {
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.memory-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.bar-success { background: var(--color-success); }
+.bar-warning { background: var(--color-warning); }
+.bar-error { background: var(--color-error); }
+
+/* Actions */
+.action-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-action {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 12px;
   cursor: pointer;
-  border: none;
   transition: all 0.2s;
 }
 
-.btn-secondary {
+.btn-action:hover {
   background: rgba(255, 255, 255, 0.1);
-  color: var(--text);
-  border: 1px solid var(--border);
+  border-color: var(--color-accent);
 }
 
-.btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.15);
-}
-
-.btn-danger {
-  background: var(--color-error-bg);
-  color: var(--color-error);
-  border: 1px solid var(--color-error-border);
-}
-
-.btn-danger:hover {
-  background: var(--color-error);
-  color: white;
+.btn-action.warning:hover {
+  border-color: var(--color-warning);
+  color: var(--color-warning);
 }
 </style>

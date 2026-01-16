@@ -3,15 +3,20 @@ import { ref, computed } from 'vue'
 import { 
   wsconnect, 
   credsAuthenticator, 
-  type NatsConnection
+  type NatsConnection,
+  type Status
 } from '@nats-io/nats-core'
 
 /**
  * NATS Connection Store
  * 
- * Manages connection to NATS server with WebSocket support
- * Stores connection settings in localStorage/sessionStorage
- * Handles authentication via .creds file, token, or user/pass
+ * Manages connection to NATS server with WebSocket support.
+ * Handles authentication, reconnection events, and graceful shutdown.
+ * 
+ * Key behaviors:
+ * - Emits 'nats:reconnected' event when connection is restored
+ * - Uses drain() for graceful disconnect
+ * - Tracks connection statistics
  */
 export const useNatsStore = defineStore('nats', () => {
   // ============================================================================
@@ -26,7 +31,9 @@ export const useNatsStore = defineStore('nats', () => {
   
   // Stats
   const rtt = ref<number | null>(null)
+  const reconnectCount = ref(0)
   let statsInterval: number | null = null
+  let statusMonitorAbort: AbortController | null = null
 
   // ============================================================================
   // COMPUTED
@@ -41,11 +48,10 @@ export const useNatsStore = defineStore('nats', () => {
   const STORAGE_KEYS = {
     URLS: 'nats_dashboard_urls',
     AUTO_CONNECT: 'nats_dashboard_autoconnect',
-    CREDS: 'nats_dashboard_creds', // Store last creds file content
+    CREDS: 'nats_dashboard_creds',
   }
 
   function loadSettings() {
-    // Load URLs
     const savedUrls = localStorage.getItem(STORAGE_KEYS.URLS)
     if (savedUrls) {
       try {
@@ -57,7 +63,6 @@ export const useNatsStore = defineStore('nats', () => {
       serverUrls.value = ['ws://localhost:9222']
     }
 
-    // Load auto-connect preference
     const savedAuto = localStorage.getItem(STORAGE_KEYS.AUTO_CONNECT)
     autoConnect.value = savedAuto === 'true'
   }
@@ -67,13 +72,7 @@ export const useNatsStore = defineStore('nats', () => {
     localStorage.setItem(STORAGE_KEYS.AUTO_CONNECT, String(autoConnect.value))
   }
 
-  /**
-   * Save credentials to storage
-   * @param content The .creds file content
-   * @param remember If true, save to localStorage (persistent). If false, sessionStorage (session only).
-   */
   function saveCredsFile(content: string, remember: boolean) {
-    // Clear old entries to prevent duplicates/confusion
     localStorage.removeItem(STORAGE_KEYS.CREDS)
     sessionStorage.removeItem(STORAGE_KEYS.CREDS)
 
@@ -85,7 +84,6 @@ export const useNatsStore = defineStore('nats', () => {
   }
 
   function getStoredCreds(): string | null {
-    // Check session first (safer), then local
     return sessionStorage.getItem(STORAGE_KEYS.CREDS) || localStorage.getItem(STORAGE_KEYS.CREDS)
   }
 
@@ -113,10 +111,6 @@ export const useNatsStore = defineStore('nats', () => {
 
   /**
    * Connect to NATS server
-   * 
-   * @param specificUrl - Optional specific URL to connect to
-   * @param authOptions - Authentication options
-   * @param rememberCreds - If true, persist credentials to localStorage
    */
   async function connect(
     specificUrl?: string,
@@ -130,7 +124,6 @@ export const useNatsStore = defineStore('nats', () => {
   ) {
     if (nc.value) await disconnect()
 
-    // Validation
     const url = specificUrl || serverUrls.value[0]
     if (!url) {
       throw new Error('No NATS URL configured')
@@ -138,34 +131,34 @@ export const useNatsStore = defineStore('nats', () => {
 
     status.value = 'connecting'
     lastError.value = null
+    reconnectCount.value = 0
 
     try {
       const opts: any = { 
         servers: [url],
         name: 'nats-dashboard',
+        // Reconnection settings
+        reconnect: true,
+        maxReconnectAttempts: -1, // Infinite
+        reconnectTimeWait: 2000,  // 2s between attempts
+        reconnectJitter: 500,
       }
 
       // Setup authentication
       if (authOptions?.credsContent) {
-        // Process .creds file content
         let rawText = authOptions.credsContent
-        
-        // Check if JWT section exists and strip any content before it
         const jwtIndex = rawText.indexOf("-----BEGIN NATS USER JWT-----")
         if (jwtIndex > 0) {
           rawText = rawText.substring(jwtIndex)
         } else if (jwtIndex === -1) {
           throw new Error("Invalid .creds file: JWT section not found")
         }
-        
-        // Normalize line endings
         rawText = rawText.replace(/\r\n/g, "\n")
         
         const encoder = new TextEncoder()
         const credsBytes = encoder.encode(rawText)
         opts.authenticator = credsAuthenticator(credsBytes)
         
-        // Save creds based on user preference
         saveCredsFile(authOptions.credsContent, rememberCreds)
       } else if (authOptions?.token) {
         opts.token = authOptions.token
@@ -174,10 +167,11 @@ export const useNatsStore = defineStore('nats', () => {
         opts.pass = authOptions.pass || ''
       }
 
-      console.log(`Connecting to NATS at ${url}...`)
+      console.log(`[NATS] Connecting to ${url}...`)
       
       nc.value = await wsconnect(opts)
       status.value = 'connected'
+      console.log('[NATS] Connected successfully')
 
       monitorConnection()
       startStatsLoop()
@@ -185,7 +179,7 @@ export const useNatsStore = defineStore('nats', () => {
       return nc.value
 
     } catch (err: any) {
-      console.error('NATS Connection Error:', err)
+      console.error('[NATS] Connection Error:', err)
       status.value = 'disconnected'
       lastError.value = err.message
       
@@ -199,39 +193,124 @@ export const useNatsStore = defineStore('nats', () => {
     }
   }
 
+  /**
+   * Graceful disconnect using drain()
+   * Drain ensures in-flight messages are processed before closing
+   */
   async function disconnect() {
+    // Stop monitoring
+    if (statusMonitorAbort) {
+      statusMonitorAbort.abort()
+      statusMonitorAbort = null
+    }
+    
     if (statsInterval) {
       clearInterval(statsInterval)
       statsInterval = null
     }
 
     if (nc.value) {
-      await nc.value.close()
+      try {
+        // Drain is the graceful way to close - it:
+        // 1. Stops new messages from being delivered
+        // 2. Processes all in-flight messages
+        // 3. Closes the connection
+        console.log('[NATS] Draining connection...')
+        await nc.value.drain()
+        console.log('[NATS] Connection drained and closed')
+      } catch (err) {
+        // If drain fails (e.g., already closed), force close
+        console.warn('[NATS] Drain failed, forcing close:', err)
+        try {
+          await nc.value.close()
+        } catch { /* ignore */ }
+      }
       nc.value = null
     }
+    
     status.value = 'disconnected'
     rtt.value = null
+    reconnectCount.value = 0
   }
 
+  /**
+   * Monitor connection status and emit events on state changes
+   * 
+   * Key events:
+   * - 'disconnect': Connection lost, will attempt reconnect
+   * - 'reconnect': Connection restored
+   * - 'error': Connection error occurred
+   * - 'staleConnection': Server hasn't responded to pings
+   */
   async function monitorConnection() {
     if (!nc.value) return
     
+    // Create abort controller for cleanup
+    statusMonitorAbort = new AbortController()
+    const connection = nc.value
+    
     try {
-      for await (const s of nc.value.status()) {
-        switch (s.type) {
-          case 'disconnect':
-            status.value = 'reconnecting'
-            break
-          case 'reconnect':
-            status.value = 'connected'
-            break
-          case 'error':
-            console.error('NATS Error:', s)
-            break
+      for await (const s of connection.status()) {
+        // Check if we should stop monitoring
+        if (statusMonitorAbort?.signal.aborted) {
+          console.log('[NATS] Status monitor aborted')
+          break
         }
+        
+        handleStatusEvent(s)
       }
     } catch (err) {
-      console.error('Connection monitor error:', err)
+      // Iterator closed, connection gone
+      if (!statusMonitorAbort?.signal.aborted) {
+        console.log('[NATS] Status monitor ended unexpectedly')
+        status.value = 'disconnected'
+      }
+    }
+  }
+
+  /**
+   * Handle individual status events
+   */
+  function handleStatusEvent(s: Status) {
+    console.log(`[NATS] Status event: ${s.type}`, s.data || '')
+    
+    switch (s.type) {
+      case 'disconnect':
+        status.value = 'reconnecting'
+        lastError.value = 'Connection lost, attempting to reconnect...'
+        // Emit event for subscription manager to pause
+        window.dispatchEvent(new CustomEvent('nats:disconnected'))
+        break
+        
+      case 'reconnect':
+        status.value = 'connected'
+        lastError.value = null
+        reconnectCount.value++
+        console.log(`[NATS] Reconnected (count: ${reconnectCount.value})`)
+        // Emit event for subscription manager to refresh
+        window.dispatchEvent(new CustomEvent('nats:reconnected'))
+        break
+        
+      case 'error':
+        console.error('[NATS] Connection error:', s.data)
+        // Don't change status - let disconnect/reconnect handle it
+        break
+        
+      case 'staleConnection':
+        console.warn('[NATS] Stale connection detected')
+        lastError.value = 'Connection stale - server not responding'
+        break
+        
+      case 'reconnecting':
+        status.value = 'reconnecting'
+        break
+
+      case 'pingTimer':
+        // Ignore ping timer events (noisy)
+        break
+        
+      default:
+        console.log(`[NATS] Unhandled status: ${s.type}`)
     }
   }
 
@@ -240,7 +319,10 @@ export const useNatsStore = defineStore('nats', () => {
       if (nc.value && !nc.value.isClosed()) {
         try {
           rtt.value = await nc.value.rtt()
-        } catch { }
+        } catch {
+          // Connection might be in bad state
+          rtt.value = null
+        }
       }
     }, 10000) as unknown as number
   }
@@ -257,24 +339,26 @@ export const useNatsStore = defineStore('nats', () => {
 
     const storedCreds = getStoredCreds()
     if (storedCreds) {
-      // If we found creds in storage (session or local), we assume the user wanted them remembered
-      // for the duration of that context
       try {
         await connect(undefined, { credsContent: storedCreds }, !!localStorage.getItem(STORAGE_KEYS.CREDS))
       } catch (err) {
-        console.error('Auto-connect failed:', err)
+        console.error('[NATS] Auto-connect failed:', err)
       }
     }
   }
 
   return {
+    // State
     nc,
     status,
     lastError,
     serverUrls,
     autoConnect,
     rtt,
+    reconnectCount,
     isConnected,
+    
+    // Actions
     loadSettings,
     saveSettings,
     addUrl,

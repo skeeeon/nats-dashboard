@@ -5,8 +5,16 @@ import { Kvm } from '@nats-io/kv'
 import { decodeBytes, encodeString } from '@/utils/encoding'
 
 /**
- * Switch State Configuration
+ * Switch State Composable
+ * 
+ * Manages stateful switch controls with:
+ * - KV mode: Direct read/write to NATS KV store
+ * - Core mode: Pub/sub with optional state subscription
+ * - Reconnection handling: Restarts watchers on reconnect
+ * 
+ * Grug say: Switch either talks to KV or pub/sub. Not both at same time.
  */
+
 export interface SwitchStateConfig {
   mode: 'kv' | 'core'
   kvBucket?: string
@@ -20,9 +28,6 @@ export interface SwitchStateConfig {
 
 export type SwitchStateValue = 'on' | 'off' | 'pending' | 'unknown'
 
-/**
- * Switch State Instance
- */
 export interface SwitchState {
   state: Ref<SwitchStateValue>
   error: Ref<string | null>
@@ -34,7 +39,8 @@ export interface SwitchState {
 }
 
 /**
- * Create Switch State Instance (Factory)
+ * Factory function to create a switch state instance
+ * Use this for programmatic control (e.g., map popup switches)
  */
 export function createSwitchState(config: SwitchStateConfig): SwitchState {
   const natsStore = useNatsStore()
@@ -47,6 +53,7 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
   let kvInstance: any = null
   let subscription: any = null
   let active = false
+  let reconnectHandler: (() => void) | null = null
   
   async function start(): Promise<void> {
     if (active) return
@@ -57,7 +64,10 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
     
     active = true
     error.value = null
-    isPending.value = true // Lock UI while initializing
+    isPending.value = true
+    
+    // Setup reconnect handler
+    setupReconnectHandler()
     
     try {
       if (config.mode === 'kv') {
@@ -73,14 +83,71 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
   
   function stop(): void {
     active = false
-    if (kvWatcher) { try { kvWatcher.stop() } catch {} kvWatcher = null }
+    
+    // Remove reconnect handler
+    if (reconnectHandler) {
+      window.removeEventListener('nats:reconnected', reconnectHandler)
+      reconnectHandler = null
+    }
+    
+    // Cleanup KV watcher
+    if (kvWatcher) { 
+      try { kvWatcher.stop() } catch {} 
+      kvWatcher = null 
+    }
     kvInstance = null
-    if (subscription) { try { subscription.unsubscribe() } catch {} subscription = null }
+    
+    // Cleanup Core subscription
+    if (subscription) { 
+      try { subscription.unsubscribe() } catch {} 
+      subscription = null 
+    }
+    
     isPending.value = false
   }
   
   function isActive(): boolean {
     return active
+  }
+  
+  /**
+   * Setup handler to restart watcher/subscription on reconnect
+   */
+  function setupReconnectHandler() {
+    if (reconnectHandler) return
+    
+    reconnectHandler = async () => {
+      if (!active) return
+      
+      console.log('[SwitchState] Reconnected, restarting watcher')
+      
+      // Cleanup existing
+      if (kvWatcher) { 
+        try { kvWatcher.stop() } catch {} 
+        kvWatcher = null 
+      }
+      kvInstance = null
+      
+      if (subscription) { 
+        try { subscription.unsubscribe() } catch {} 
+        subscription = null 
+      }
+      
+      // Restart
+      isPending.value = true
+      try {
+        if (config.mode === 'kv') {
+          await initializeKvMode()
+        } else {
+          await initializeCoreMode()
+        }
+      } catch (err: any) {
+        error.value = `Reconnect failed: ${err.message}`
+        isPending.value = false
+      }
+    }
+    
+    window.addEventListener('nats:reconnected', reconnectHandler)
   }
   
   async function initializeKvMode(): Promise<void> {
@@ -110,7 +177,6 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
         state.value = config.defaultState || 'off'
       }
       
-      // Initialization done, unlock UI
       isPending.value = false
       
       // Start watching for updates
@@ -132,8 +198,11 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
               }
             }
           }
-        } catch (err: any) {
-          // Ignore connection closed errors
+        } catch {
+          // Watcher ended (disconnect or stop)
+          if (active) {
+            console.log('[SwitchState] KV watcher ended')
+          }
         }
       })()
       
@@ -151,17 +220,24 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
     
     if (!stateSubject) throw new Error('No state subject configured')
     
-    // Core mode doesn't fetch initial state, so we unlock immediately
     isPending.value = false
     
     try {
       subscription = natsStore.nc!.subscribe(stateSubject)
+      
       ;(async () => {
-        for await (const msg of subscription) {
-          if (!active) break
-          const data = parseMessage(msg.data)
-          updateStateFromValue(data)
-          isPending.value = false
+        try {
+          for await (const msg of subscription) {
+            if (!active) break
+            const data = parseMessage(msg.data)
+            updateStateFromValue(data)
+            isPending.value = false
+          }
+        } catch {
+          // Subscription ended
+          if (active) {
+            console.log('[SwitchState] Core subscription ended')
+          }
         }
       })()
     } catch (err: any) {
@@ -182,6 +258,7 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
     } else if (matchesPayload(value, config.offPayload)) {
       state.value = 'off'
     }
+    // If neither match, keep current state
   }
   
   function matchesPayload(value: any, payload: any): boolean {
@@ -217,6 +294,7 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
         const key = config.kvKey!
         const data = encodeString(JSON.stringify(payload))
         await kvInstance.put(key, data)
+        // State will update via watcher
       } else {
         if (!natsStore.nc) throw new Error('Not connected to NATS')
         const subject = config.publishSubject
@@ -224,6 +302,7 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
         const data = serializePayload(payload)
         natsStore.nc.publish(subject, data)
         
+        // If no state subject, assume success
         if (!config.stateSubject) {
           state.value = targetState
           isPending.value = false
@@ -234,8 +313,7 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
       setTimeout(() => {
         if (isPending.value && state.value === 'pending') {
           isPending.value = false
-          // Don't revert state visually, just stop spinner. 
-          // If we revert, we might flicker if the ACK comes 1ms later.
+          // Keep pending state visible but allow interaction
         }
       }, 5000)
       
@@ -259,37 +337,37 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
 }
 
 /**
- * Composable wrapper that HANDLES LIFECYCLE
+ * Vue composable wrapper with lifecycle management
+ * Use this in Vue components
  */
 export function useSwitchState(configSource: Ref<SwitchStateConfig> | SwitchStateConfig) {
   const natsStore = useNatsStore()
   
-  // Create stable refs to return to the component
+  // Stable refs for component binding
   const state = ref<SwitchStateValue>('unknown')
   const error = ref<string | null>(null)
-  const isPending = ref(true) // Default to true so button is disabled until init
+  const isPending = ref(true)
   
   let instance: SwitchState | null = null
   let stateWatcherStop: (() => void) | null = null
 
-  // Function to tear down old instance and create new one
   function init() {
-    // 1. Cleanup old
+    // Cleanup old instance
     if (instance) {
       instance.stop()
       if (stateWatcherStop) stateWatcherStop()
     }
 
-    // 2. Create new
+    // Create new instance
     const cfg = isRef(configSource) ? configSource.value : configSource
     instance = createSwitchState(cfg)
 
-    // 3. Sync initial values
+    // Sync initial values
     state.value = instance.state.value
     error.value = instance.error.value
     isPending.value = instance.isPending.value
 
-    // 4. Watch internal instance state and update our proxy refs
+    // Watch internal state and sync to our refs
     stateWatcherStop = watch(
       [instance.state, instance.error, instance.isPending], 
       ([s, e, p]) => {
@@ -299,13 +377,12 @@ export function useSwitchState(configSource: Ref<SwitchStateConfig> | SwitchStat
       }
     )
 
-    // 5. Start if connected
+    // Start if connected
     if (natsStore.isConnected) {
       instance.start()
     }
   }
 
-  // Lifecycle Hooks
   onMounted(() => {
     init()
   })
@@ -315,18 +392,20 @@ export function useSwitchState(configSource: Ref<SwitchStateConfig> | SwitchStat
     if (stateWatcherStop) stateWatcherStop()
   })
 
-  // Watch for variable changes (config update)
+  // Reinitialize on config change
   if (isRef(configSource)) {
     watch(configSource, () => init(), { deep: true })
   }
 
-  // Watch for connection changes
+  // Handle connection changes
   watch(() => natsStore.isConnected, (connected) => {
-    if (connected && instance) instance.start()
-    else if (!connected && instance) instance.stop()
+    if (connected && instance) {
+      instance.start()
+    } else if (!connected && instance) {
+      instance.stop()
+    }
   })
 
-  // Proxy the toggle method
   const toggle = async (cb?: (c: () => void) => void) => {
     if (instance) await instance.toggle(cb)
   }

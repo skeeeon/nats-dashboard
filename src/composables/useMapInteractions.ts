@@ -11,6 +11,19 @@ import { JSONPath } from 'jsonpath-plus'
 import { jetstream, jetstreamManager } from '@nats-io/jetstream'
 import type { MapMarkerItem, MapMarker } from '@/types/dashboard'
 
+/**
+ * Map Interactions Composable
+ * 
+ * Handles all interactive elements inside map marker popups:
+ * - Publish buttons (fire & forget or request/reply)
+ * - Switch toggles (KV or Core mode)
+ * - Text displays (live subscription)
+ * - KV displays (watch values)
+ * 
+ * Subscriptions are scoped to popup lifecycle - start on open, stop on close.
+ * Handles reconnection by restarting active subscriptions.
+ */
+
 interface SwitchStateEntry {
   switchState: SwitchState
   stopWatch: () => void
@@ -18,13 +31,12 @@ interface SwitchStateEntry {
 
 interface SubscriptionEntry {
   stop: () => void
+  itemId: string
 }
 
 export function useMapInteractions(markersSource: () => MapMarker[]) {
   const natsStore = useNatsStore()
   const dashboardStore = useDashboardStore()
-  
-  // We need access to the DOM updaters from the map composable
   const { updateSwitchState, updateItemValue } = useLeafletMap()
 
   // UI State
@@ -40,11 +52,16 @@ export function useMapInteractions(markersSource: () => MapMarker[]) {
     latency: 0
   })
 
-  // Internal State Maps
+  // Active subscriptions/watchers
   const activeSwitchStates = new Map<string, SwitchStateEntry>()
   const activeSubscriptions = new Map<string, SubscriptionEntry>()
+  
+  // Reconnection handler reference
+  let reconnectHandler: (() => void) | null = null
 
-  // --- Helpers ---
+  // ============================================================================
+  // HELPERS
+  // ============================================================================
 
   function showFeedback(type: 'success' | 'error', message: string) {
     actionFeedback.value = { type, message }
@@ -75,7 +92,47 @@ export function useMapInteractions(markersSource: () => MapMarker[]) {
     return new Date(now - ms)
   }
 
-  // --- Handlers ---
+  // ============================================================================
+  // RECONNECTION HANDLING
+  // ============================================================================
+
+  function setupReconnectHandler() {
+    if (reconnectHandler) return
+    
+    reconnectHandler = async () => {
+      if (!openMarkerId.value) return
+      
+      console.log('[MapInteractions] Reconnected, refreshing popup subscriptions')
+      
+      const markers = markersSource()
+      const marker = markers.find(m => m.id === openMarkerId.value)
+      if (!marker) return
+      
+      // Restart all subscriptions for the open popup
+      for (const item of marker.items) {
+        if (item.type === 'switch') {
+          // Switch states handle their own reconnection via useSwitchState
+          // But we may need to restart if the instance was stopped
+          const entry = activeSwitchStates.get(item.id)
+          if (entry && !entry.switchState.isActive()) {
+            await entry.switchState.start()
+          }
+        } else if (item.type === 'text' && item.textConfig) {
+          stopSubscription(item.id)
+          await startTextSubscription(item)
+        } else if (item.type === 'kv' && item.kvConfig) {
+          stopSubscription(item.id)
+          await startKvWatcher(item)
+        }
+      }
+    }
+    
+    window.addEventListener('nats:reconnected', reconnectHandler)
+  }
+
+  // ============================================================================
+  // ACTION HANDLERS
+  // ============================================================================
 
   async function handlePublishItem(item: MapMarkerItem) {
     if (!natsStore.nc || !natsStore.isConnected) {
@@ -101,7 +158,7 @@ export function useMapInteractions(markersSource: () => MapMarker[]) {
       try {
         const msg = await natsStore.nc.request(subject, payload, { timeout })
         
-        actionFeedback.value = null // Clear toast
+        actionFeedback.value = null
         
         responseModal.value = {
           show: true,
@@ -147,6 +204,8 @@ export function useMapInteractions(markersSource: () => MapMarker[]) {
 
   function handlePopupOpen(markerId: string, _popupElement: HTMLElement) {
     openMarkerId.value = markerId
+    setupReconnectHandler()
+    
     const markers = markersSource()
     const marker = markers.find(m => m.id === markerId)
     if (!marker) return
@@ -164,6 +223,7 @@ export function useMapInteractions(markersSource: () => MapMarker[]) {
 
   function handlePopupClose(markerId: string) {
     openMarkerId.value = null
+    
     const markers = markersSource()
     const marker = markers.find(m => m.id === markerId)
     if (!marker) return
@@ -177,11 +237,14 @@ export function useMapInteractions(markersSource: () => MapMarker[]) {
     }
   }
 
-  // --- Subscription Logic ---
+  // ============================================================================
+  // SUBSCRIPTION MANAGEMENT
+  // ============================================================================
 
   async function startSwitchStateWatcher(item: MapMarkerItem) {
     if (!item.switchConfig) return
 
+    // Check if already active
     if (activeSwitchStates.has(item.id)) {
       const existing = activeSwitchStates.get(item.id)!
       if (existing.switchState.isActive()) return
@@ -232,7 +295,7 @@ export function useMapInteractions(markersSource: () => MapMarker[]) {
         let streamName: string
         try {
           streamName = await jsm.streams.find(subject)
-        } catch (e) {
+        } catch {
           updateItemValue(item.id, 'No Stream')
           return
         }
@@ -251,6 +314,7 @@ export function useMapInteractions(markersSource: () => MapMarker[]) {
         const messages = await consumer.consume()
 
         activeSubscriptions.set(item.id, {
+          itemId: item.id,
           stop: () => { try { messages.stop() } catch {} }
         })
 
@@ -260,12 +324,13 @@ export function useMapInteractions(markersSource: () => MapMarker[]) {
               msg.ack()
               processMessageData(item, msg.data)
             }
-          } catch (err) {}
+          } catch { /* Iterator ended */ }
         })()
 
       } else {
         const sub = natsStore.nc.subscribe(subject)
         activeSubscriptions.set(item.id, {
+          itemId: item.id,
           stop: () => { try { sub.unsubscribe() } catch {} }
         })
 
@@ -274,7 +339,7 @@ export function useMapInteractions(markersSource: () => MapMarker[]) {
             for await (const msg of sub) {
               processMessageData(item, msg.data)
             }
-          } catch (err) {}
+          } catch { /* Subscription ended */ }
         })()
       }
     } catch (err: any) {
@@ -286,13 +351,13 @@ export function useMapInteractions(markersSource: () => MapMarker[]) {
   function processMessageData(item: MapMarkerItem, rawData: Uint8Array) {
     const text = decodeBytes(rawData)
     let val: any = text
-    try { val = JSON.parse(text) } catch {}
+    try { val = JSON.parse(text) } catch { /* keep as string */ }
     
     if (item.textConfig?.jsonPath && typeof val === 'object') {
       try {
         const extracted = JSONPath({ path: item.textConfig.jsonPath, json: val, wrap: false })
         if (extracted !== undefined) val = extracted
-      } catch {}
+      } catch { /* keep original */ }
     }
     updateItemValue(item.id, String(val))
   }
@@ -309,6 +374,7 @@ export function useMapInteractions(markersSource: () => MapMarker[]) {
       const kvm = new Kvm(natsStore.nc)
       const kv = await kvm.open(bucket)
       
+      // Get initial value
       try {
         const entry = await kv.get(key)
         if (entry) processKvValue(item, entry.value)
@@ -317,6 +383,7 @@ export function useMapInteractions(markersSource: () => MapMarker[]) {
         updateItemValue(item.id, '<empty>')
       }
 
+      // Start watcher
       const iter = await kv.watch({ key })
       
       ;(async () => {
@@ -327,10 +394,11 @@ export function useMapInteractions(markersSource: () => MapMarker[]) {
               else if (e.operation === 'DEL' || e.operation === 'PURGE') updateItemValue(item.id, '<deleted>')
             }
           }
-        } catch (err) {}
+        } catch { /* Watcher ended */ }
       })()
 
       activeSubscriptions.set(item.id, {
+        itemId: item.id,
         stop: () => { try { iter.stop() } catch {} }
       })
 
@@ -343,15 +411,23 @@ export function useMapInteractions(markersSource: () => MapMarker[]) {
   function processKvValue(item: MapMarkerItem, data: Uint8Array) {
     const text = decodeBytes(data)
     let val: any = text
-    try { val = JSON.parse(text) } catch {}
+    try { val = JSON.parse(text) } catch { /* keep as string */ }
     
     if (item.kvConfig?.jsonPath && typeof val === 'object') {
       try {
         const extracted = JSONPath({ path: item.kvConfig.jsonPath, json: val, wrap: false })
         if (extracted !== undefined) val = extracted
-      } catch {}
+      } catch { /* keep original */ }
     }
     updateItemValue(item.id, String(val))
+  }
+
+  function stopSubscription(itemId: string) {
+    const entry = activeSubscriptions.get(itemId)
+    if (entry) {
+      entry.stop()
+      activeSubscriptions.delete(itemId)
+    }
   }
 
   function stopAll() {
@@ -367,57 +443,47 @@ export function useMapInteractions(markersSource: () => MapMarker[]) {
     activeSubscriptions.clear()
   }
 
-  // --- Watchers ---
+  // ============================================================================
+  // WATCHERS
+  // ============================================================================
 
-  // Re-subscribe if connection restores while popup is open
+  // Handle connection changes
   watch(() => natsStore.isConnected, (connected) => {
     if (connected && openMarkerId.value) {
-      const markers = markersSource()
-      const marker = markers.find(m => m.id === openMarkerId.value)
-      if (marker) {
-        marker.items.forEach(item => {
-          if (item.type === 'text' || item.type === 'kv') {
-            stopSubscription(item.id)
-            if (item.type === 'text' && item.textConfig) startTextSubscription(item)
-            else if (item.type === 'kv' && item.kvConfig) startKvWatcher(item)
-          }
-        })
-      }
+      // Reconnection handled by reconnectHandler
+    } else if (!connected) {
+      // Connection lost - subscriptions will fail gracefully
     }
   })
 
-  // Re-subscribe if variables change while popup is open
+  // Handle variable changes while popup is open
   watch(() => dashboardStore.currentVariableValues, () => {
     if (openMarkerId.value) {
       const markerId = openMarkerId.value
       const markers = markersSource()
       const marker = markers.find(m => m.id === markerId)
       if (marker) {
-        // Stop all for this marker
-        marker.items.forEach(a => {
-          if (a.type === 'switch') stopSwitchStateWatcher(a.id)
-          else if (a.type === 'text' || a.type === 'kv') stopSubscription(a.id)
+        // Restart all subscriptions with new variable values
+        marker.items.forEach(item => {
+          if (item.type === 'switch') stopSwitchStateWatcher(item.id)
+          else if (item.type === 'text' || item.type === 'kv') stopSubscription(item.id)
         })
-        // Restart all
-        marker.items.forEach(a => {
-          if (a.type === 'switch' && a.switchConfig) startSwitchStateWatcher(a)
-          else if (a.type === 'text' && a.textConfig) startTextSubscription(a)
-          else if (a.type === 'kv' && a.kvConfig) startKvWatcher(a)
+        marker.items.forEach(item => {
+          if (item.type === 'switch' && item.switchConfig) startSwitchStateWatcher(item)
+          else if (item.type === 'text' && item.textConfig) startTextSubscription(item)
+          else if (item.type === 'kv' && item.kvConfig) startKvWatcher(item)
         })
       }
     }
   }, { deep: true })
 
-  function stopSubscription(itemId: string) {
-    const entry = activeSubscriptions.get(itemId)
-    if (entry) {
-      entry.stop()
-      activeSubscriptions.delete(itemId)
-    }
-  }
-
+  // Cleanup on unmount
   onUnmounted(() => {
     stopAll()
+    if (reconnectHandler) {
+      window.removeEventListener('nats:reconnected', reconnectHandler)
+      reconnectHandler = null
+    }
   })
 
   return {

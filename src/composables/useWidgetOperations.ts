@@ -5,7 +5,18 @@ import { useNatsStore } from '@/stores/nats'
 import { getSubscriptionManager } from '@/composables/useSubscriptionManager'
 import { createDefaultWidget } from '@/types/dashboard'
 import { resolveTemplate } from '@/utils/variables'
-import type { WidgetType, WidgetConfig } from '@/types/dashboard'
+import type { WidgetType, WidgetConfig, DataSourceConfig } from '@/types/dashboard'
+
+/**
+ * Widget Operations Composable
+ * 
+ * Centralized widget lifecycle management:
+ * - Create/Delete/Duplicate widgets
+ * - Subscribe/Unsubscribe widget data sources
+ * - Handle configuration updates
+ * 
+ * Grug say: One place to do all widget things. Don't scatter logic.
+ */
 
 export function useWidgetOperations() {
   const dashboardStore = useDashboardStore()
@@ -13,125 +24,200 @@ export function useWidgetOperations() {
   const natsStore = useNatsStore()
   const subManager = getSubscriptionManager()
 
+  // ============================================================================
+  // SUBSCRIPTION MANAGEMENT
+  // ============================================================================
+
+  /**
+   * Subscribe a widget to its data source(s)
+   */
   function subscribeWidget(widgetId: string) {
     const widget = dashboardStore.getWidget(widgetId)
     if (!widget) return
     
+    // Initialize buffer
     dataStore.initializeBuffer(widgetId, widget.buffer.maxCount, widget.buffer.maxAge)
     
-    // 1. Standard Data Source Subscription
+    // Subscribe based on widget type
     if (widget.dataSource.type === 'subscription') {
-      const subjectsToSubscribe = (widget.dataSource.subjects && widget.dataSource.subjects.length > 0)
-        ? widget.dataSource.subjects
-        : (widget.dataSource.subject ? [widget.dataSource.subject] : [])
-
-      if (subjectsToSubscribe.length > 0) {
-        subjectsToSubscribe.forEach(rawSub => {
-          const subject = resolveTemplate(rawSub, dashboardStore.currentVariableValues)
-          const config = { 
-            ...widget.dataSource, 
-            subject 
-          }
-          subManager.subscribe(widgetId, config, widget.jsonPath)
-        })
-      }
+      subscribeToDataSource(widgetId, widget)
     }
 
-    // 2. Map Widget Dynamic Markers Subscription (NEW)
+    // Map widget dynamic markers
     if (widget.type === 'map' && widget.mapConfig?.markers) {
-      widget.mapConfig.markers.forEach(marker => {
-        const pos = marker.positionConfig
-        if (pos && pos.mode === 'dynamic' && pos.subject) {
-          const subject = resolveTemplate(pos.subject, dashboardStore.currentVariableValues)
-          if (subject) {
-            subManager.subscribe(widgetId, {
-              type: 'subscription',
-              subject: subject,
-              useJetStream: pos.useJetStream,
-              deliverPolicy: pos.deliverPolicy || 'last'
-            })
-          }
-        }
-      })
+      subscribeMapMarkers(widgetId, widget.mapConfig.markers)
     }
   }
 
+  /**
+   * Subscribe to standard data source (subject or subjects array)
+   */
+  function subscribeToDataSource(widgetId: string, widget: WidgetConfig) {
+    const subjects = getWidgetSubjects(widget)
+    
+    for (const rawSubject of subjects) {
+      const subject = resolveTemplate(rawSubject, dashboardStore.currentVariableValues)
+      if (!subject) continue
+      
+      const config: DataSourceConfig = { 
+        ...widget.dataSource, 
+        subject 
+      }
+      subManager.subscribe(widgetId, config, widget.jsonPath)
+    }
+  }
+
+  /**
+   * Subscribe to map marker dynamic position sources
+   */
+  function subscribeMapMarkers(widgetId: string, markers: any[]) {
+    for (const marker of markers) {
+      const pos = marker.positionConfig
+      if (pos?.mode === 'dynamic' && pos.subject) {
+        const subject = resolveTemplate(pos.subject, dashboardStore.currentVariableValues)
+        if (subject) {
+          subManager.subscribe(widgetId, {
+            type: 'subscription',
+            subject,
+            useJetStream: pos.useJetStream,
+            deliverPolicy: pos.deliverPolicy || 'last'
+          })
+        }
+      }
+    }
+  }
+
+  /**
+   * Get all subjects a widget subscribes to
+   */
+  function getWidgetSubjects(widget: WidgetConfig): string[] {
+    if (widget.dataSource.subjects && widget.dataSource.subjects.length > 0) {
+      return widget.dataSource.subjects
+    }
+    if (widget.dataSource.subject) {
+      return [widget.dataSource.subject]
+    }
+    return []
+  }
+
+  /**
+   * Unsubscribe a widget from all its data sources
+   */
   function unsubscribeWidget(widgetId: string, keepData: boolean = false) {
     const widget = dashboardStore.getWidget(widgetId)
     if (!widget) return
     
-    // 1. Unsubscribe Standard Data Source
+    // Unsubscribe standard data source
     if (widget.dataSource.type === 'subscription') {
-      const subjectsToUnsubscribe = (widget.dataSource.subjects && widget.dataSource.subjects.length > 0)
-        ? widget.dataSource.subjects
-        : (widget.dataSource.subject ? [widget.dataSource.subject] : [])
-
-      subjectsToUnsubscribe.forEach(rawSub => {
-        const subject = resolveTemplate(rawSub, dashboardStore.currentVariableValues)
-        const config = { ...widget.dataSource, subject }
+      const subjects = getWidgetSubjects(widget)
+      
+      for (const rawSubject of subjects) {
+        const subject = resolveTemplate(rawSubject, dashboardStore.currentVariableValues)
+        if (!subject) continue
+        
+        const config: DataSourceConfig = { ...widget.dataSource, subject }
         subManager.unsubscribe(widgetId, config)
-      })
+      }
     }
 
-    // 2. Unsubscribe Map Markers (NEW)
+    // Unsubscribe map markers
     if (widget.type === 'map' && widget.mapConfig?.markers) {
-      widget.mapConfig.markers.forEach(marker => {
+      for (const marker of widget.mapConfig.markers) {
         const pos = marker.positionConfig
-        if (pos && pos.mode === 'dynamic' && pos.subject) {
+        if (pos?.mode === 'dynamic' && pos.subject) {
           const subject = resolveTemplate(pos.subject, dashboardStore.currentVariableValues)
           if (subject) {
             subManager.unsubscribe(widgetId, {
               type: 'subscription',
-              subject: subject
+              subject
             })
           }
         }
-      })
+      }
     }
     
+    // Clear buffer unless keeping data
     if (!keepData) {
       dataStore.removeBuffer(widgetId)
     }
   }
 
+  /**
+   * Subscribe all widgets in the active dashboard
+   */
   function subscribeAllWidgets() {
-    dashboardStore.activeWidgets.forEach(widget => {
+    for (const widget of dashboardStore.activeWidgets) {
       if (needsSubscription(widget.type, widget)) {
         subscribeWidget(widget.id)
       }
-    })
+    }
   }
 
+  /**
+   * Unsubscribe all widgets
+   */
   function unsubscribeAllWidgets(keepData: boolean = false) {
-    dashboardStore.activeWidgets.forEach(widget => {
+    for (const widget of dashboardStore.activeWidgets) {
       if (needsSubscription(widget.type, widget)) {
         unsubscribeWidget(widget.id, keepData)
       }
-    })
+    }
   }
 
+  /**
+   * Check if a widget type needs subscription management
+   * 
+   * Some widgets manage their own subscriptions (KV, Switch, etc.)
+   */
   function needsSubscription(widgetType: WidgetType, config?: WidgetConfig): boolean {
-    // Map is now a hybrid. It manages its own subscriptions if it has dynamic markers.
-    // But we return true here so `subscribeWidget` gets called, which checks the markers.
+    // Map widgets need subscription for dynamic markers
     if (widgetType === 'map') return true
 
+    // These manage their own connections
     const selfManagedTypes: WidgetType[] = ['button', 'kv', 'switch', 'slider', 'publisher'] 
-    
     if (selfManagedTypes.includes(widgetType)) return false
     
+    // Status widget: only if using subscription (not KV)
     if (widgetType === 'status') {
       return config?.dataSource?.type !== 'kv'
+    }
+    
+    // Markdown: only if it has a subject configured
+    if (widgetType === 'markdown') {
+      return !!(config?.dataSource?.subject)
     }
     
     return true
   }
 
-  // ... createWidget, deleteWidget, duplicateWidget, updateWidgetConfiguration, resubscribeWidget (unchanged) ...
+  // ============================================================================
+  // WIDGET CRUD
+  // ============================================================================
+
+  /**
+   * Create a new widget
+   */
   function createWidget(type: WidgetType) {
     const position = { x: 0, y: 100 }
     const widget = createDefaultWidget(type, position)
     
-    // Set sensible defaults
+    // Set sensible defaults based on type
+    applyWidgetDefaults(widget, type)
+    
+    dashboardStore.addWidget(widget)
+    
+    // Subscribe if connected
+    if (natsStore.isConnected && needsSubscription(type, widget)) {
+      subscribeWidget(widget.id)
+    }
+    
+    return widget
+  }
+
+  /**
+   * Apply type-specific defaults to a new widget
+   */
+  function applyWidgetDefaults(widget: WidgetConfig, type: WidgetType) {
     switch (type) {
       case 'text':
         widget.title = 'Text Widget'
@@ -208,33 +294,32 @@ export function useWidgetOperations() {
         break
       case 'markdown':
         widget.title = ''
-        widget.dataSource = { type: 'subscription', subject: '' } // Default empty subject (Static mode)
+        widget.dataSource = { type: 'subscription', subject: '' }
         widget.markdownConfig = {
           content: '### Notes\n\nThis is a text block. You can use **markdown**.\n\nVariables: {{device_id}}'
         }
         break
     }
-    
-    dashboardStore.addWidget(widget)
-    
-    if (natsStore.isConnected && needsSubscription(type, widget)) {
-      subscribeWidget(widget.id)
-    }
-    
-    return widget
   }
 
+  /**
+   * Delete a widget
+   */
   function deleteWidget(widgetId: string) {
     unsubscribeWidget(widgetId, false)
     dashboardStore.removeWidget(widgetId)
   }
 
+  /**
+   * Duplicate a widget
+   */
   function duplicateWidget(widgetId: string) {
     const original = dashboardStore.getWidget(widgetId)
     if (!original) return null
     
     const copy = JSON.parse(JSON.stringify(original))
-    copy.id = `widget_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const now = Date.now()
+    copy.id = `widget_${now}_${Math.random().toString(36).substr(2, 9)}`
     copy.title = `${original.title} (Copy)`
     copy.y = original.y + original.h + 1
     copy.x = original.x
@@ -248,22 +333,35 @@ export function useWidgetOperations() {
     return copy
   }
 
+  /**
+   * Update widget configuration
+   * 
+   * Handles resubscription when data source changes
+   */
   function updateWidgetConfiguration(widgetId: string, updates: Partial<WidgetConfig>) {
     const widget = dashboardStore.getWidget(widgetId)
     if (!widget) return
 
+    // Unsubscribe from old config
     if (needsSubscription(widget.type, widget)) {
       unsubscribeWidget(widgetId, false) 
     }
 
+    // Apply updates
     dashboardStore.updateWidget(widgetId, updates)
 
+    // Resubscribe with new config
     const updatedWidget = dashboardStore.getWidget(widgetId)!
     if (natsStore.isConnected && needsSubscription(updatedWidget.type, updatedWidget)) {
       subscribeWidget(widgetId)
     }
   }
 
+  /**
+   * Force resubscribe a widget
+   * 
+   * Useful when variables change or connection is restored
+   */
   function resubscribeWidget(widgetId: string) {
     const widget = dashboardStore.getWidget(widgetId)
     if (!widget || !natsStore.isConnected) return
@@ -275,15 +373,18 @@ export function useWidgetOperations() {
   }
 
   return {
+    // Subscription management
     subscribeWidget,
     unsubscribeWidget,
     resubscribeWidget,
-    updateWidgetConfiguration,
     subscribeAllWidgets,
     unsubscribeAllWidgets,
+    needsSubscription,
+    
+    // CRUD
     createWidget,
     deleteWidget,
     duplicateWidget,
-    needsSubscription,
+    updateWidgetConfiguration,
   }
 }
