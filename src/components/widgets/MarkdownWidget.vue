@@ -1,6 +1,33 @@
 <template>
-  <div class="markdown-widget" :class="{ 'card-layout': layoutMode === 'card' }">
-    <div class="markdown-body" v-html="renderedContent"></div>
+  <div class="markdown-widget" :class="{ 'card-layout': layoutMode === 'card', 'is-editing': isEditing }">
+    
+    <!-- Edit Toggle (Only visible when Unlocked) -->
+    <div v-if="!dashboardStore.isLocked" class="md-toolbar">
+      <button 
+        class="mode-btn" 
+        @click="toggleEditMode"
+        :title="isEditing ? 'Save & Preview' : 'Edit Markdown'"
+      >
+        {{ isEditing ? '✓ Done' : '✎ Edit' }}
+      </button>
+    </div>
+
+    <!-- Edit Mode: Textarea -->
+    <div v-if="isEditing" class="editor-container">
+      <textarea 
+        v-model="localContent" 
+        class="markdown-editor" 
+        placeholder="# Type markdown here..."
+        @keydown.stop
+        @blur="saveChanges" 
+      ></textarea>
+      <div class="editor-hint">
+        Supports Markdown & Variables (e.g. <code v-pre>{{device_id}}</code>). Blur or click Done to save.
+      </div>
+    </div>
+
+    <!-- View Mode: Rendered HTML -->
+    <div v-else class="markdown-body" v-html="renderedContent"></div>
   </div>
 </template>
 
@@ -11,6 +38,7 @@ import { JSONPath } from 'jsonpath-plus'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useWidgetDataStore } from '@/stores/widgetData'
 import { useNatsStore } from '@/stores/nats'
+import { useWidgetOperations } from '@/composables/useWidgetOperations'
 import { Kvm } from '@nats-io/kv'
 import { resolveTemplate } from '@/utils/variables'
 import { decodeBytes } from '@/utils/encoding'
@@ -26,6 +54,11 @@ const props = withDefaults(defineProps<{
 const dashboardStore = useDashboardStore()
 const dataStore = useWidgetDataStore()
 const natsStore = useNatsStore()
+const { updateWidgetConfiguration } = useWidgetOperations()
+
+// State for In-Place Editing
+const isEditing = ref(false)
+const localContent = ref('')
 
 // KV State
 const kvData = ref<any>(null)
@@ -165,6 +198,7 @@ const variableContext = computed(() => {
 // --- Rendering ---
 
 const renderedContent = computed(() => {
+  // If editing, we still render what's in config, not localContent (until saved)
   const raw = props.config.markdownConfig?.content || ''
   
   // Resolve using merged context
@@ -176,6 +210,32 @@ const renderedContent = computed(() => {
   const resolved = resolveTemplate(raw, stringContext)
   return marked.parse(resolved)
 })
+
+// --- Edit Mode Logic ---
+
+function toggleEditMode() {
+  if (isEditing.value) {
+    // Save on exit
+    saveChanges()
+    isEditing.value = false
+  } else {
+    // Enter edit mode
+    // Initialize local content from props
+    localContent.value = props.config.markdownConfig?.content || ''
+    isEditing.value = true
+  }
+}
+
+function saveChanges() {
+  // Only save if changed
+  if (localContent.value !== props.config.markdownConfig?.content) {
+    updateWidgetConfiguration(props.config.id, {
+      markdownConfig: {
+        content: localContent.value
+      }
+    })
+  }
+}
 
 // Lifecycle
 watch(() => [props.config.dataSource, dashboardStore.currentVariableValues, natsStore.isConnected], () => {
@@ -197,16 +257,97 @@ onUnmounted(() => {
 .markdown-widget {
   height: 100%;
   width: 100%;
-  overflow-y: auto;
-  padding: 12px;
+  display: flex;
+  flex-direction: column;
   background: var(--widget-bg);
+  position: relative;
 }
 
 .markdown-widget.card-layout {
   padding: 8px;
 }
 
+/* Toolbar for Edit Button */
+.md-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+/* Show toolbar on hover OR if we are currently editing */
+.markdown-widget:hover .md-toolbar,
+.markdown-widget.is-editing .md-toolbar {
+  opacity: 1;
+}
+
+.mode-btn {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--color-accent);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  transition: all 0.2s;
+}
+
+.mode-btn:hover {
+  background: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
+}
+
+/* Editor Styles */
+.editor-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  min-height: 0;
+}
+
+.markdown-editor {
+  flex: 1;
+  width: 100%;
+  resize: none;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 12px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.markdown-editor:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.editor-hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+  text-align: right;
+}
+
+.editor-hint code {
+  background: rgba(255,255,255,0.1);
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+/* Viewer Styles */
 .markdown-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
   color: var(--text);
   font-size: 14px;
   line-height: 1.6;
