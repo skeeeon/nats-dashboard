@@ -15,6 +15,8 @@ import {
  * 
  * Key behaviors:
  * - Emits 'nats:reconnected' event when connection is restored
+ * - Emits 'nats:disconnected' event when connection is lost
+ * - Emits 'nats:closed' event when connection is permanently closed
  * - Uses drain() for graceful disconnect
  * - Tracks connection statistics
  */
@@ -236,11 +238,13 @@ export const useNatsStore = defineStore('nats', () => {
   /**
    * Monitor connection status and emit events on state changes
    * 
-   * Key events:
+   * Key events handled:
    * - 'disconnect': Connection lost, will attempt reconnect
    * - 'reconnect': Connection restored
+   * - 'reconnecting': Currently attempting to reconnect
    * - 'error': Connection error occurred
    * - 'staleConnection': Server hasn't responded to pings
+   * - 'close': Connection permanently closed
    */
   async function monitorConnection() {
     if (!nc.value) return
@@ -269,10 +273,13 @@ export const useNatsStore = defineStore('nats', () => {
   }
 
   /**
-   * Handle individual status events
+   * Handle individual status events with proper type narrowing
+   * 
+   * The Status type is a discriminated union - we must check the type
+   * before accessing type-specific properties.
    */
   function handleStatusEvent(s: Status) {
-    console.log(`[NATS] Status event: ${s.type}`, s.data || '')
+    console.log(`[NATS] Status event: ${s.type}`)
     
     switch (s.type) {
       case 'disconnect':
@@ -291,8 +298,18 @@ export const useNatsStore = defineStore('nats', () => {
         window.dispatchEvent(new CustomEvent('nats:reconnected'))
         break
         
+      case 'reconnecting':
+        status.value = 'reconnecting'
+        break
+        
       case 'error':
-        console.error('[NATS] Connection error:', s.data)
+        // ServerErrorStatus has a 'data' property with the error
+        if ('data' in s && s.data) {
+          console.error('[NATS] Connection error:', s.data)
+          lastError.value = String(s.data)
+        } else {
+          console.error('[NATS] Connection error (no details)')
+        }
         // Don't change status - let disconnect/reconnect handle it
         break
         
@@ -301,16 +318,44 @@ export const useNatsStore = defineStore('nats', () => {
         lastError.value = 'Connection stale - server not responding'
         break
         
-      case 'reconnecting':
-        status.value = 'reconnecting'
+      case 'close':
+        // Connection is permanently closed (won't reconnect)
+        console.log('[NATS] Connection closed permanently')
+        status.value = 'disconnected'
+        lastError.value = 'Connection closed'
+        window.dispatchEvent(new CustomEvent('nats:closed'))
+        break
+        
+      case 'ldm':
+        // Lame Duck Mode - server is shutting down gracefully
+        console.warn('[NATS] Server entering lame duck mode')
+        lastError.value = 'Server shutting down, will reconnect to another server'
+        break
+        
+      case 'update':
+        // Server info updated (e.g., cluster topology change)
+        console.log('[NATS] Server info updated')
         break
 
-      case 'pingTimer':
-        // Ignore ping timer events (noisy)
+      case 'ping':
+        // Ping/pong for keepalive - ignore to reduce noise
+        break
+        
+      case 'slowConsumer':
+        // We're not keeping up with messages
+        console.warn('[NATS] Slow consumer detected')
+        break
+        
+      case 'forceReconnect':
+        // Server requested we reconnect
+        console.log('[NATS] Force reconnect requested by server')
+        status.value = 'reconnecting'
         break
         
       default:
-        console.log(`[NATS] Unhandled status: ${s.type}`)
+        // TypeScript exhaustiveness check - if we get here, we missed a case
+        const _exhaustive: never = s
+        console.log(`[NATS] Unhandled status type: ${(_exhaustive as Status).type}`)
     }
   }
 

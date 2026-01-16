@@ -16,7 +16,7 @@ import type { DataSourceConfig } from '@/types/dashboard'
  * 
  * Manages NATS subscriptions with:
  * - Subject multiplexing (Core subs shared by subject)
- * - JetStream consumer lifecycle
+ * - JetStream consumer lifecycle with explicit inactive threshold
  * - Reconnection handling
  * - Message batching for performance
  * 
@@ -59,6 +59,9 @@ interface SubscriptionStats {
 
 const MAX_QUEUE_SIZE = 5000 
 
+// JetStream consumer settings
+const JETSTREAM_CONSUMER_INACTIVE_THRESHOLD_MS = 30000 // 30 seconds
+
 export function useSubscriptionManager() {
   const natsStore = useNatsStore()
   const dataStore = useWidgetDataStore()
@@ -74,6 +77,7 @@ export function useSubscriptionManager() {
   const messageQueue: QueuedMessage[] = []
   let flushPending = false
   let reconnectListenerAttached = false
+  let closeListenerAttached = false
   
   // ============================================================================
   // MESSAGE QUEUE & BATCHING
@@ -158,7 +162,7 @@ export function useSubscriptionManager() {
   }
 
   // ============================================================================
-  // RECONNECTION HANDLING
+  // EVENT LISTENER MANAGEMENT
   // ============================================================================
 
   /**
@@ -174,6 +178,17 @@ export function useSubscriptionManager() {
   }
 
   /**
+   * Setup close listener for permanent connection closure
+   */
+  function ensureCloseListener() {
+    if (closeListenerAttached) return
+    
+    window.addEventListener('nats:closed', handleClose)
+    closeListenerAttached = true
+    console.log('[SubMgr] Close listener attached')
+  }
+
+  /**
    * Handle disconnect - mark all subscriptions as inactive
    */
   function handleDisconnect() {
@@ -182,6 +197,18 @@ export function useSubscriptionManager() {
     for (const subRef of subscriptions.values()) {
       subRef.isActive = false
     }
+  }
+
+  /**
+   * Handle permanent connection close - cleanup all subscriptions
+   */
+  function handleClose() {
+    console.log('[SubMgr] Handling close - cleaning up all subscriptions')
+    
+    for (const subRef of subscriptions.values()) {
+      cleanupSubscription(subRef)
+    }
+    subscriptions.clear()
   }
 
   /**
@@ -239,8 +266,9 @@ export function useSubscriptionManager() {
     const subject = config.subject
     if (!subject) return
     
-    // Ensure reconnect handling is setup
+    // Ensure event handling is setup
     ensureReconnectListener()
+    ensureCloseListener()
     
     const key = getSubscriptionKey(widgetId, config)
     let subRef = subscriptions.get(key)
@@ -336,6 +364,9 @@ export function useSubscriptionManager() {
 
   /**
    * Create JetStream subscription with ephemeral consumer
+   * 
+   * Uses explicit inactive_threshold for predictable cleanup behavior.
+   * When a consumer is idle for this duration, the server will delete it.
    */
   async function createJetStreamSubscription(subRef: SubscriptionRef): Promise<void> {
     if (!natsStore.nc) throw new Error('Not connected')
@@ -361,12 +392,13 @@ export function useSubscriptionManager() {
 
     const js = jetstream(natsStore.nc)
     
-    // Build consumer options
+    // Build consumer options with explicit inactive threshold
     const consumerOpts: any = {
       filter_subjects: [subRef.subject],
       deliver_policy: config.deliverPolicy || 'last',
-      // Ephemeral consumer - server will clean up after inactive_threshold
-      // Default is 5 minutes, which is reasonable
+      // Explicit inactive threshold for predictable cleanup
+      // Server will delete this consumer after 30s of inactivity
+      inactive_threshold: JETSTREAM_CONSUMER_INACTIVE_THRESHOLD_MS * 1_000_000, // nanoseconds
     }
 
     if (config.deliverPolicy === 'by_start_time') {
@@ -380,7 +412,7 @@ export function useSubscriptionManager() {
     subRef.iterator = messages
     subRef.isActive = true
     
-    console.log(`[SubMgr] JetStream subscription created: ${subRef.subject} (stream: ${streamName})`)
+    console.log(`[SubMgr] JetStream subscription created: ${subRef.subject} (stream: ${streamName}, inactive_threshold: ${JETSTREAM_CONSUMER_INACTIVE_THRESHOLD_MS}ms)`)
     
     // Start message processing loop
     processJetStreamMessages(subRef)
@@ -484,6 +516,9 @@ export function useSubscriptionManager() {
 
   /**
    * Cleanup a single subscription
+   * 
+   * For Core subscriptions: unsubscribe immediately
+   * For JetStream: stop the iterator, let server GC the ephemeral consumer
    */
   function cleanupSubscription(subRef: SubscriptionRef) {
     subRef.isActive = false
@@ -498,10 +533,10 @@ export function useSubscriptionManager() {
     if (subRef.iterator) {
       try { 
         subRef.iterator.stop() 
-        // Note: We don't explicitly delete the consumer because:
-        // 1. It's ephemeral with server-side inactive_threshold (default 5min)
-        // 2. The server will clean it up automatically
-        // 3. Explicit delete can fail if consumer already gone
+        // Note: We don't explicitly delete the ephemeral consumer because:
+        // 1. It has an inactive_threshold set (30s by default)
+        // 2. The server will clean it up automatically after inactivity
+        // 3. Explicit delete can fail if consumer already gone or connection lost
       } catch { /* ignore */ }
       subRef.iterator = undefined
     }

@@ -11,6 +11,7 @@ import { decodeBytes, encodeString } from '@/utils/encoding'
  * - KV mode: Direct read/write to NATS KV store
  * - Core mode: Pub/sub with optional state subscription
  * - Reconnection handling: Restarts watchers on reconnect
+ * - Close handling: Cleans up on permanent connection close
  * 
  * Grug say: Switch either talks to KV or pub/sub. Not both at same time.
  */
@@ -54,6 +55,7 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
   let subscription: any = null
   let active = false
   let reconnectHandler: (() => void) | null = null
+  let closeHandler: (() => void) | null = null
   
   async function start(): Promise<void> {
     if (active) return
@@ -66,8 +68,8 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
     error.value = null
     isPending.value = true
     
-    // Setup reconnect handler
-    setupReconnectHandler()
+    // Setup event handlers
+    setupEventHandlers()
     
     try {
       if (config.mode === 'kv') {
@@ -84,10 +86,14 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
   function stop(): void {
     active = false
     
-    // Remove reconnect handler
+    // Remove event handlers
     if (reconnectHandler) {
       window.removeEventListener('nats:reconnected', reconnectHandler)
       reconnectHandler = null
+    }
+    if (closeHandler) {
+      window.removeEventListener('nats:closed', closeHandler)
+      closeHandler = null
     }
     
     // Cleanup KV watcher
@@ -111,9 +117,9 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
   }
   
   /**
-   * Setup handler to restart watcher/subscription on reconnect
+   * Setup handlers for reconnect and permanent close events
    */
-  function setupReconnectHandler() {
+  function setupEventHandlers() {
     if (reconnectHandler) return
     
     reconnectHandler = async () => {
@@ -122,16 +128,7 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
       console.log('[SwitchState] Reconnected, restarting watcher')
       
       // Cleanup existing
-      if (kvWatcher) { 
-        try { kvWatcher.stop() } catch {} 
-        kvWatcher = null 
-      }
-      kvInstance = null
-      
-      if (subscription) { 
-        try { subscription.unsubscribe() } catch {} 
-        subscription = null 
-      }
+      cleanupWatchers()
       
       // Restart
       isPending.value = true
@@ -147,7 +144,35 @@ export function createSwitchState(config: SwitchStateConfig): SwitchState {
       }
     }
     
+    closeHandler = () => {
+      if (!active) return
+      
+      console.log('[SwitchState] Connection closed, stopping')
+      // Don't call full stop() as that would remove handlers
+      // Just cleanup the watchers
+      cleanupWatchers()
+      state.value = 'unknown'
+      error.value = 'Connection closed'
+    }
+    
     window.addEventListener('nats:reconnected', reconnectHandler)
+    window.addEventListener('nats:closed', closeHandler)
+  }
+  
+  /**
+   * Cleanup watchers/subscriptions without removing event handlers
+   */
+  function cleanupWatchers() {
+    if (kvWatcher) { 
+      try { kvWatcher.stop() } catch {} 
+      kvWatcher = null 
+    }
+    kvInstance = null
+    
+    if (subscription) { 
+      try { subscription.unsubscribe() } catch {} 
+      subscription = null 
+    }
   }
   
   async function initializeKvMode(): Promise<void> {
