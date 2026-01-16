@@ -2,10 +2,22 @@
 import { ref, shallowRef } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import type { MapMarker, MapMarkerItem } from '@/types/dashboard'
+import type { MapMarker } from '@/types/dashboard'
 import { JSONPath } from 'jsonpath-plus'
 import { resolveTemplate } from '@/utils/variables'
 import type { BufferedMessage } from '@/stores/widgetData'
+
+/**
+ * Leaflet Map Composable (Simplified)
+ * 
+ * Manages Leaflet map lifecycle:
+ * - Map initialization and cleanup
+ * - Theme switching (light/dark tiles)
+ * - Marker rendering with selection state
+ * - Dynamic marker position updates
+ * 
+ * Grug say: Map show markers. Click marker, tell parent. No popup nonsense.
+ */
 
 // Tile providers
 const TILE_URLS = {
@@ -15,13 +27,7 @@ const TILE_URLS = {
 
 const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
 
-export interface PopupCallbacks {
-  onPublishItem: (item: MapMarkerItem) => void
-  onSwitchToggle: (item: MapMarkerItem) => void
-  onPopupOpen: (markerId: string, popupElement: HTMLElement) => void
-  onPopupClose: (markerId: string) => void
-}
-
+// Fix Leaflet default icon paths
 function fixLeafletIcons() {
   // @ts-ignore
   delete L.Icon.Default.prototype._getIconUrl
@@ -32,34 +38,58 @@ function fixLeafletIcons() {
   })
 }
 
+// Custom icon for selected markers
+function createSelectedIcon(): L.Icon {
+  return L.icon({
+    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    shadowSize: [41, 41],
+    className: 'marker-selected'
+  })
+}
+
 export function useLeafletMap() {
   const map = shallowRef<L.Map | null>(null)
   const markersLayer = shallowRef<L.LayerGroup | null>(null)
   const tileLayer = shallowRef<L.TileLayer | null>(null)
   const initialized = ref(false)
   
+  // Track marker instances for updates
   const markerInstances = new Map<string, L.Marker>()
+  
+  // Track selected marker
+  let selectedMarkerId: string | null = null
+  const defaultIcon = new L.Icon.Default()
+  const selectedIcon = createSelectedIcon()
 
+  /**
+   * Initialize the Leaflet map
+   */
   function initMap(
     containerId: string,
     center: { lat: number; lon: number },
     zoom: number,
     isDarkMode: boolean
   ) {
+    // Cleanup existing map
     if (map.value) {
       map.value.remove()
       map.value = null
     }
     markerInstances.clear()
+    selectedMarkerId = null
+    
     fixLeafletIcons()
 
     const container = document.getElementById(containerId)
-    if (container) {
-      if ((container as any)._leaflet_id) {
-        ;(container as any)._leaflet_id = null
-      }
-    } else {
-      return
+    if (!container) return
+    
+    // Clear any stale Leaflet state
+    if ((container as any)._leaflet_id) {
+      (container as any)._leaflet_id = null
     }
 
     const mapInstance = L.map(containerId, {
@@ -78,14 +108,21 @@ export function useLeafletMap() {
 
     initialized.value = true
 
+    // Ensure proper sizing after init
     setTimeout(() => {
       mapInstance.invalidateSize()
     }, 100)
   }
 
+  /**
+   * Switch between light and dark tile layers
+   */
   function updateTheme(isDarkMode: boolean) {
     if (!map.value) return
-    if (tileLayer.value) map.value.removeLayer(tileLayer.value)
+    
+    if (tileLayer.value) {
+      map.value.removeLayer(tileLayer.value)
+    }
 
     const url = isDarkMode ? TILE_URLS.dark : TILE_URLS.light
     const newTileLayer = L.tileLayer(url, {
@@ -96,35 +133,42 @@ export function useLeafletMap() {
     tileLayer.value = newTileLayer
   }
 
-  function renderMarkers(markers: MapMarker[], callbacks: PopupCallbacks) {
+  /**
+   * Render markers on the map
+   * 
+   * @param markers - Array of marker configurations
+   * @param onMarkerClick - Callback when marker is clicked
+   */
+  function renderMarkers(
+    markers: MapMarker[], 
+    onMarkerClick: (markerId: string) => void
+  ) {
     if (!map.value || !markersLayer.value) return
 
     markersLayer.value.clearLayers()
     markerInstances.clear()
 
     markers.forEach(markerConfig => {
-      const { id, lat, lon, label, items } = markerConfig
+      const { id, lat, lon, label } = markerConfig
       
-      // Use configured lat/lon as initial position
-      const marker = L.marker([lat, lon], { title: label })
-
-      const popupContent = createPopupContent(id, label, items, callbacks)
-      const popup = L.popup({
-        className: 'nats-map-popup',
-        minWidth: 180,
-        maxWidth: 300,
-        closeButton: true,
-      }).setContent(popupContent)
+      const isSelected = id === selectedMarkerId
+      const icon = isSelected ? selectedIcon : defaultIcon
       
-      marker.bindPopup(popup)
-
-      marker.on('popupopen', () => {
-        const popupEl = popup.getElement()
-        if (popupEl) callbacks.onPopupOpen(id, popupEl)
+      const marker = L.marker([lat, lon], { 
+        title: label,
+        icon: icon
       })
 
-      marker.on('popupclose', () => {
-        callbacks.onPopupClose(id)
+      // Simple click handler - just notify parent
+      marker.on('click', () => {
+        onMarkerClick(id)
+      })
+
+      // Add tooltip with label
+      marker.bindTooltip(label, {
+        permanent: false,
+        direction: 'top',
+        offset: [0, -40]
       })
 
       markerInstances.set(id, marker)
@@ -133,7 +177,36 @@ export function useLeafletMap() {
   }
 
   /**
-   * Update marker positions based on incoming messages
+   * Update selected marker visual state
+   */
+  function setSelectedMarker(markerId: string | null) {
+    // Deselect previous
+    if (selectedMarkerId && markerInstances.has(selectedMarkerId)) {
+      const prevMarker = markerInstances.get(selectedMarkerId)!
+      prevMarker.setIcon(defaultIcon)
+    }
+    
+    // Select new
+    selectedMarkerId = markerId
+    if (markerId && markerInstances.has(markerId)) {
+      const newMarker = markerInstances.get(markerId)!
+      newMarker.setIcon(selectedIcon)
+      
+      // Optionally pan to selected marker
+      const latlng = newMarker.getLatLng()
+      if (map.value) {
+        // Check if marker is in view, if not pan to it
+        const bounds = map.value.getBounds()
+        if (!bounds.contains(latlng)) {
+          map.value.panTo(latlng)
+        }
+      }
+    }
+  }
+
+  /**
+   * Update marker positions from incoming messages
+   * Used for dynamic markers that receive position updates via NATS
    */
   function updateMarkerPositions(
     markersConfig: MapMarker[], 
@@ -154,8 +227,7 @@ export function useLeafletMap() {
       const pos = marker.positionConfig!
       const resolvedSubject = resolveTemplate(pos.subject, variables)
       
-      // Find latest message matching this subject
-      // Iterate backwards for speed
+      // Find latest message matching this subject (iterate backwards)
       let match: BufferedMessage | undefined
       for (let i = messages.length - 1; i >= 0; i--) {
         if (messages[i].subject === resolvedSubject) {
@@ -165,7 +237,6 @@ export function useLeafletMap() {
       }
 
       if (match) {
-        // Extract Lat/Lon
         const lat = extractValue(match.value, pos.latJsonPath)
         const lon = extractValue(match.value, pos.lonJsonPath)
 
@@ -173,7 +244,7 @@ export function useLeafletMap() {
           const leafletMarker = markerInstances.get(marker.id)
           if (leafletMarker) {
             const current = leafletMarker.getLatLng()
-            // Only update if moved significantly (micro-optimization)
+            // Only update if moved significantly
             if (Math.abs(current.lat - lat) > 0.000001 || Math.abs(current.lng - lon) > 0.000001) {
               leafletMarker.setLatLng([lat, lon])
             }
@@ -183,10 +254,12 @@ export function useLeafletMap() {
     })
   }
 
+  /**
+   * Extract numeric value from data using JSONPath
+   */
   function extractValue(data: any, path?: string): number {
     if (!path) return NaN
     try {
-      // If data is object, query it. If string, try parse.
       let json = data
       if (typeof data === 'string') {
         try { json = JSON.parse(data) } catch { return NaN }
@@ -199,207 +272,66 @@ export function useLeafletMap() {
     }
   }
 
+  /**
+   * Check if a value is a valid coordinate
+   */
   function isValidCoord(val: number): boolean {
     return typeof val === 'number' && !isNaN(val)
   }
 
-  // ... createPopupContent and other helpers (unchanged) ...
-  function createPopupContent(
-    _markerId: string,
-    label: string,
-    items: MapMarkerItem[],
-    callbacks: PopupCallbacks
-  ): HTMLElement {
-    const container = document.createElement('div')
-    container.className = 'map-popup-content'
-
-    const header = document.createElement('div')
-    header.className = 'map-popup-header'
-    header.textContent = label
-    container.appendChild(header)
-
-    if (items.length > 0) {
-      const itemList = document.createElement('div')
-      itemList.className = 'map-popup-items'
-
-      items.forEach(item => {
-        if (item.type === 'publish') {
-          const btn = createPublishButton(item, callbacks.onPublishItem)
-          itemList.appendChild(btn)
-        } else if (item.type === 'switch') {
-          const toggle = createSwitchToggle(item, callbacks.onSwitchToggle)
-          itemList.appendChild(toggle)
-        } else if (item.type === 'text' || item.type === 'kv') {
-          const display = createValueDisplay(item)
-          itemList.appendChild(display)
-        }
-      })
-
-      container.appendChild(itemList)
-    } else {
-      const hint = document.createElement('div')
-      hint.className = 'map-popup-no-items'
-      hint.textContent = 'No items configured'
-      container.appendChild(hint)
-    }
-
-    return container
-  }
-
-  function createPublishButton(
-    item: MapMarkerItem,
-    onAction: (item: MapMarkerItem) => void
-  ): HTMLElement {
-    const btn = document.createElement('button')
-    btn.className = 'map-popup-item-btn publish'
-    btn.dataset.itemId = item.id
-    btn.textContent = item.label
-
-    btn.onclick = (e) => {
-      e.stopPropagation()
-      onAction(item)
-      
-      btn.classList.add('action-success')
-      const originalText = btn.textContent
-      btn.textContent = '✓ Sent!'
-      setTimeout(() => {
-        btn.classList.remove('action-success')
-        btn.textContent = originalText
-      }, 1500)
-    }
-
-    return btn
-  }
-
-  function createSwitchToggle(
-    item: MapMarkerItem,
-    onToggle: (item: MapMarkerItem) => void
-  ): HTMLElement {
-    const container = document.createElement('div')
-    container.className = 'map-popup-switch'
-    container.dataset.itemId = item.id
-
-    const label = document.createElement('span')
-    label.className = 'switch-label'
-    label.textContent = item.label
-
-    const track = document.createElement('button')
-    track.className = 'switch-track state-unknown'
-    track.dataset.state = 'unknown'
-
-    const thumb = document.createElement('span')
-    thumb.className = 'switch-thumb'
-    track.appendChild(thumb)
-
-    const stateText = document.createElement('span')
-    stateText.className = 'switch-state-text state-unknown'
-    stateText.textContent = '...'
-
-    track.onclick = (e) => {
-      e.stopPropagation()
-      onToggle(item)
-    }
-
-    container.appendChild(label)
-    container.appendChild(track)
-    container.appendChild(stateText)
-
-    return container
-  }
-
-  function createValueDisplay(item: MapMarkerItem): HTMLElement {
-    const container = document.createElement('div')
-    container.className = 'map-popup-value-display'
-    container.dataset.itemId = item.id
-
-    const label = document.createElement('span')
-    label.className = 'value-label'
-    label.textContent = item.label
-
-    const value = document.createElement('span')
-    value.className = 'value-text'
-    value.textContent = '...' 
-
-    const unit = document.createElement('span')
-    unit.className = 'value-unit'
-    if (item.type === 'text' && item.textConfig?.unit) {
-      unit.textContent = item.textConfig.unit
-    }
-
-    container.appendChild(label)
-    container.appendChild(value)
-    if (unit.textContent) container.appendChild(unit)
-
-    return container
-  }
-
-  function updateSwitchState(
-    itemId: string,
-    state: 'on' | 'off' | 'pending' | 'unknown',
-    labels?: { on?: string; off?: string }
-  ) {
-    const switchEl = document.querySelector(
-      `.map-popup-switch[data-item-id="${itemId}"]`
-    ) as HTMLElement | null
-
-    if (!switchEl) return
-
-    const track = switchEl.querySelector('.switch-track') as HTMLElement
-    const stateText = switchEl.querySelector('.switch-state-text') as HTMLElement
-
-    if (track) {
-      track.dataset.state = state
-      track.classList.remove('state-on', 'state-off', 'state-pending', 'state-unknown')
-      track.classList.add(`state-${state}`)
-    }
-
-    if (stateText) {
-      stateText.classList.remove('state-on', 'state-off', 'state-pending', 'state-unknown')
-      stateText.classList.add(`state-${state}`)
-      
-      switch (state) {
-        case 'on':
-          stateText.textContent = labels?.on || 'ON'
-          break
-        case 'off':
-          stateText.textContent = labels?.off || 'OFF'
-          break
-        case 'pending':
-          stateText.textContent = '...'
-          break
-        default:
-          stateText.textContent = '?'
-      }
-    }
-  }
-
-  function updateItemValue(itemId: string, value: string) {
-    const displayEl = document.querySelector(
-      `.map-popup-value-display[data-item-id="${itemId}"]`
-    ) as HTMLElement | null
-
-    if (!displayEl) return
-
-    const valueText = displayEl.querySelector('.value-text')
-    if (valueText) {
-      valueText.textContent = value
-    }
-  }
-
+  /**
+   * Pan and zoom to specific location
+   */
   function setView(lat: number, lon: number, zoom: number) {
     if (!map.value) return
     map.value.setView([lat, lon], zoom)
   }
 
+  /**
+   * Force map to recalculate its size
+   * Call after container resize
+   */
   function invalidateSize() {
     if (!map.value) return
     map.value.invalidateSize()
   }
 
+  /**
+   * Get a marker instance by ID
+   */
   function getMarker(markerId: string): L.Marker | undefined {
     return markerInstances.get(markerId)
   }
 
+  /**
+   * Pan map to show selected marker with offset for panel
+   * On mobile, offset upward for bottom sheet
+   * On desktop, offset left for side panel
+   */
+  function panToMarkerWithOffset(markerId: string, isMobile: boolean) {
+    const marker = markerInstances.get(markerId)
+    if (!marker || !map.value) return
+    
+    const latlng = marker.getLatLng()
+    const point = map.value.latLngToContainerPoint(latlng)
+    
+    if (isMobile) {
+      // Offset upward for bottom sheet (move point up by 25% of container height)
+      const container = map.value.getContainer()
+      const offsetY = container.clientHeight * 0.15
+      point.y -= offsetY
+    } else {
+      // Offset left for side panel (move point left by 140px, half panel width)
+      point.x -= 140
+    }
+    
+    const newLatLng = map.value.containerPointToLatLng(point)
+    map.value.panTo(newLatLng)
+  }
+
+  /**
+   * Cleanup map instance
+   */
   function cleanup() {
     if (map.value) {
       map.value.remove()
@@ -408,6 +340,7 @@ export function useLeafletMap() {
     markersLayer.value = null
     tileLayer.value = null
     markerInstances.clear()
+    selectedMarkerId = null
     initialized.value = false
   }
 
@@ -417,9 +350,9 @@ export function useLeafletMap() {
     initMap,
     updateTheme,
     renderMarkers,
-    updateMarkerPositions, // Exported
-    updateSwitchState,
-    updateItemValue,
+    setSelectedMarker,
+    updateMarkerPositions,
+    panToMarkerWithOffset,
     setView,
     invalidateSize,
     getMarker,
