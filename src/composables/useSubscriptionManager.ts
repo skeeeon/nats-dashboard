@@ -60,7 +60,7 @@ interface SubscriptionStats {
 const MAX_QUEUE_SIZE = 5000 
 
 // JetStream consumer settings
-const JETSTREAM_CONSUMER_INACTIVE_THRESHOLD_MS = 30000 // 30 seconds
+const JETSTREAM_CONSUMER_INACTIVE_THRESHOLD_MS = 120000 // 2 minutes
 
 export function useSubscriptionManager() {
   const natsStore = useNatsStore()
@@ -398,7 +398,7 @@ export function useSubscriptionManager() {
       deliver_policy: config.deliverPolicy || 'last',
       // Explicit inactive threshold for predictable cleanup
       // Server will delete this consumer after 30s of inactivity
-      inactive_threshold: JETSTREAM_CONSUMER_INACTIVE_THRESHOLD_MS * 1_000_000, // nanoseconds
+      inactive_threshold: JETSTREAM_CONSUMER_INACTIVE_THRESHOLD_MS
     }
 
     if (config.deliverPolicy === 'by_start_time') {
