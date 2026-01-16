@@ -74,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref } from 'vue'
 import MarkerItemPublish from './MarkerItemPublish.vue'
 import MarkerItemSwitch from './MarkerItemSwitch.vue'
 import MarkerItemText from './MarkerItemText.vue'
@@ -86,32 +86,18 @@ import type { MapMarker } from '@/types/dashboard'
  * Marker Detail Panel
  * 
  * Displays marker information and interactive items.
- * Positioned as right sidebar on desktop, bottom sheet on mobile.
+ * - Desktop: Right sidebar (280px wide)
+ * - Mobile: Full overlay covering the map
  */
 
 defineProps<{
   marker: MapMarker
+  isMobile: boolean
 }>()
 
 defineEmits<{
   close: []
 }>()
-
-// Mobile detection
-const isMobile = ref(false)
-
-function checkMobile() {
-  isMobile.value = window.innerWidth < 768
-}
-
-onMounted(() => {
-  checkMobile()
-  window.addEventListener('resize', checkMobile)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('resize', checkMobile)
-})
 
 // Response modal state
 const responseModal = ref({
@@ -134,6 +120,7 @@ function handleResponse(response: { success: boolean; data: string; latency: num
 </script>
 
 <style scoped>
+/* Desktop: Right sidebar */
 .marker-detail-panel {
   position: absolute;
   right: 0;
@@ -148,18 +135,16 @@ function handleResponse(response: { success: boolean; data: string; latency: num
   box-shadow: -4px 0 12px rgba(0, 0, 0, 0.2);
 }
 
-/* Mobile: Bottom sheet */
+/* Mobile: Full overlay */
 .marker-detail-panel.is-mobile {
   right: 0;
   left: 0;
-  top: auto;
+  top: 0;
   bottom: 0;
   width: 100%;
-  max-height: 45%;
   border-left: none;
-  border-top: 1px solid var(--border);
-  border-radius: 12px 12px 0 0;
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
+  border-radius: 0;
+  box-shadow: none;
 }
 
 /* Header */
@@ -220,7 +205,7 @@ function handleResponse(response: { success: boolean; data: string; latency: num
 .panel-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 12px;
 }
 
 .empty-items {
@@ -246,7 +231,7 @@ function handleResponse(response: { success: boolean; data: string; latency: num
 .items-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 /* Footer */
@@ -274,18 +259,5 @@ function handleResponse(response: { success: boolean; data: string; latency: num
 
 .footer-value.mono {
   font-family: var(--mono);
-}
-
-/* Mobile adjustments */
-.marker-detail-panel.is-mobile .panel-header {
-  padding: 12px 16px;
-}
-
-.marker-detail-panel.is-mobile .panel-body {
-  padding: 12px;
-}
-
-.marker-detail-panel.is-mobile .panel-footer {
-  padding: 10px 16px;
 }
 </style>

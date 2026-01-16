@@ -8,7 +8,7 @@ import { resolveTemplate } from '@/utils/variables'
 import type { BufferedMessage } from '@/stores/widgetData'
 
 /**
- * Leaflet Map Composable (Simplified)
+ * Leaflet Map Composable
  * 
  * Manages Leaflet map lifecycle:
  * - Map initialization and cleanup
@@ -16,7 +16,7 @@ import type { BufferedMessage } from '@/stores/widgetData'
  * - Marker rendering with selection state
  * - Dynamic marker position updates
  * 
- * Grug say: Map show markers. Click marker, tell parent. No popup nonsense.
+ * Grug say: Map show markers. Click marker, tell parent. Simple.
  */
 
 // Tile providers
@@ -38,19 +38,6 @@ function fixLeafletIcons() {
   })
 }
 
-// Custom icon for selected markers
-function createSelectedIcon(): L.Icon {
-  return L.icon({
-    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    shadowSize: [41, 41],
-    className: 'marker-selected'
-  })
-}
-
 export function useLeafletMap() {
   const map = shallowRef<L.Map | null>(null)
   const markersLayer = shallowRef<L.LayerGroup | null>(null)
@@ -60,10 +47,8 @@ export function useLeafletMap() {
   // Track marker instances for updates
   const markerInstances = new Map<string, L.Marker>()
   
-  // Track selected marker
+  // Track selected marker ID
   let selectedMarkerId: string | null = null
-  const defaultIcon = new L.Icon.Default()
-  const selectedIcon = createSelectedIcon()
 
   /**
    * Initialize the Leaflet map
@@ -151,15 +136,13 @@ export function useLeafletMap() {
     markers.forEach(markerConfig => {
       const { id, lat, lon, label } = markerConfig
       
-      const isSelected = id === selectedMarkerId
-      const icon = isSelected ? selectedIcon : defaultIcon
-      
+      // Create marker with default icon
+      // Selection styling is applied via CSS class
       const marker = L.marker([lat, lon], { 
-        title: label,
-        icon: icon
+        title: label
       })
 
-      // Simple click handler - just notify parent
+      // Click handler - notify parent
       marker.on('click', () => {
         onMarkerClick(id)
       })
@@ -174,34 +157,43 @@ export function useLeafletMap() {
       markerInstances.set(id, marker)
       markersLayer.value!.addLayer(marker)
     })
+    
+    // Re-apply selection if there was one
+    if (selectedMarkerId) {
+      applySelectionClass(selectedMarkerId)
+    }
+  }
+
+  /**
+   * Apply selection CSS class to a marker's icon element
+   */
+  function applySelectionClass(markerId: string | null) {
+    // Remove class from all markers first
+    markerInstances.forEach((marker) => {
+      const iconEl = marker.getElement()
+      if (iconEl) {
+        iconEl.classList.remove('marker-selected')
+      }
+    })
+    
+    // Add class to selected marker
+    if (markerId) {
+      const marker = markerInstances.get(markerId)
+      if (marker) {
+        const iconEl = marker.getElement()
+        if (iconEl) {
+          iconEl.classList.add('marker-selected')
+        }
+      }
+    }
   }
 
   /**
    * Update selected marker visual state
    */
   function setSelectedMarker(markerId: string | null) {
-    // Deselect previous
-    if (selectedMarkerId && markerInstances.has(selectedMarkerId)) {
-      const prevMarker = markerInstances.get(selectedMarkerId)!
-      prevMarker.setIcon(defaultIcon)
-    }
-    
-    // Select new
     selectedMarkerId = markerId
-    if (markerId && markerInstances.has(markerId)) {
-      const newMarker = markerInstances.get(markerId)!
-      newMarker.setIcon(selectedIcon)
-      
-      // Optionally pan to selected marker
-      const latlng = newMarker.getLatLng()
-      if (map.value) {
-        // Check if marker is in view, if not pan to it
-        const bounds = map.value.getBounds()
-        if (!bounds.contains(latlng)) {
-          map.value.panTo(latlng)
-        }
-      }
-    }
+    applySelectionClass(markerId)
   }
 
   /**
@@ -304,32 +296,6 @@ export function useLeafletMap() {
   }
 
   /**
-   * Pan map to show selected marker with offset for panel
-   * On mobile, offset upward for bottom sheet
-   * On desktop, offset left for side panel
-   */
-  function panToMarkerWithOffset(markerId: string, isMobile: boolean) {
-    const marker = markerInstances.get(markerId)
-    if (!marker || !map.value) return
-    
-    const latlng = marker.getLatLng()
-    const point = map.value.latLngToContainerPoint(latlng)
-    
-    if (isMobile) {
-      // Offset upward for bottom sheet (move point up by 25% of container height)
-      const container = map.value.getContainer()
-      const offsetY = container.clientHeight * 0.15
-      point.y -= offsetY
-    } else {
-      // Offset left for side panel (move point left by 140px, half panel width)
-      point.x -= 140
-    }
-    
-    const newLatLng = map.value.containerPointToLatLng(point)
-    map.value.panTo(newLatLng)
-  }
-
-  /**
    * Cleanup map instance
    */
   function cleanup() {
@@ -352,7 +318,6 @@ export function useLeafletMap() {
     renderMarkers,
     setSelectedMarker,
     updateMarkerPositions,
-    panToMarkerWithOffset,
     setView,
     invalidateSize,
     getMarker,

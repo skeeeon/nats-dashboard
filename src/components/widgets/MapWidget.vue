@@ -4,7 +4,6 @@
     <div 
       :id="mapContainerId" 
       class="map-container"
-      :class="{ 'has-panel': selectedMarkerId }"
     />
     
     <!-- Loading overlay -->
@@ -23,6 +22,7 @@
     <MarkerDetailPanel
       v-if="selectedMarker"
       :marker="selectedMarker"
+      :is-mobile="isMobile"
       @close="closePanel"
     />
   </div>
@@ -41,12 +41,9 @@ import type { WidgetConfig } from '@/types/dashboard'
  * Map Widget
  * 
  * Displays an interactive Leaflet map with configurable markers.
- * Clicking a marker opens a detail panel (sidebar on desktop, bottom sheet on mobile).
- * 
- * Supports:
- * - Static markers (fixed coordinates)
- * - Dynamic markers (position updates via NATS subscription)
- * - Interactive items in markers (publish, switch, text, kv)
+ * Clicking a marker opens a detail panel:
+ * - Desktop: Side panel (280px wide)
+ * - Mobile: Full overlay panel
  */
 
 const props = withDefaults(defineProps<{
@@ -66,7 +63,6 @@ const {
   renderMarkers, 
   setSelectedMarker,
   updateMarkerPositions, 
-  panToMarkerWithOffset,
   invalidateSize, 
   cleanup 
 } = useLeafletMap()
@@ -152,13 +148,12 @@ function handleMarkerClick(markerId: string) {
   selectedMarkerId.value = markerId
   setSelectedMarker(markerId)
   
-  // Pan to show marker with panel offset
-  panToMarkerWithOffset(markerId, isMobile.value)
-  
-  // Invalidate size since panel affects available space
-  nextTick(() => {
-    invalidateSize()
-  })
+  // Invalidate size since panel affects available space (desktop only)
+  if (!isMobile.value) {
+    nextTick(() => {
+      invalidateSize()
+    })
+  }
 }
 
 /**
@@ -168,9 +163,11 @@ function closePanel() {
   selectedMarkerId.value = null
   setSelectedMarker(null)
   
-  nextTick(() => {
-    invalidateSize()
-  })
+  if (!isMobile.value) {
+    nextTick(() => {
+      invalidateSize()
+    })
+  }
 }
 
 /**
@@ -276,14 +273,6 @@ watch(() => dashboardStore.currentVariableValues, () => {
   position: absolute;
   inset: 0;
   z-index: 0;
-  transition: right 0.2s ease;
-}
-
-/* Adjust map when panel is open (desktop only) */
-@media (min-width: 768px) {
-  .map-container.has-panel {
-    right: 280px;
-  }
 }
 
 /* Leaflet z-index overrides */
@@ -297,21 +286,12 @@ watch(() => dashboardStore.currentVariableValues, () => {
   z-index: 1 !important;
 }
 
-/* Selected marker styling */
+/* 
+ * Selected marker styling - static glow effect
+ * Using box-shadow instead of transform to avoid conflicting with Leaflet's positioning
+ */
 .map-container :deep(.marker-selected) {
-  filter: hue-rotate(180deg) saturate(1.5);
-  animation: marker-pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes marker-pulse {
-  0%, 100% { 
-    transform: scale(1);
-    filter: hue-rotate(180deg) saturate(1.5);
-  }
-  50% { 
-    transform: scale(1.1);
-    filter: hue-rotate(180deg) saturate(2);
-  }
+  filter: hue-rotate(180deg) saturate(1.5) drop-shadow(0 0 8px rgba(116, 128, 255, 0.8));
 }
 
 /* Loading overlay */

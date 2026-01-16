@@ -1,7 +1,7 @@
 <template>
   <div class="marker-item-text">
     <span class="text-label">{{ item.label }}</span>
-    <div class="text-value-container">
+    <div class="text-value-row">
       <span class="text-value" :class="{ 'is-stale': isStale }">
         {{ displayValue }}
       </span>
@@ -242,33 +242,37 @@ watch(() => dashboardStore.currentVariableValues, () => {
 <style scoped>
 .marker-item-text {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
   background: rgba(0, 0, 0, 0.1);
-  border-radius: 6px;
+  border-radius: 4px;
 }
 
 .text-label {
   font-size: 12px;
   font-weight: 500;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  flex-shrink: 0;
 }
 
-.text-value-container {
+.text-value-row {
   display: flex;
   align-items: baseline;
-  gap: 4px;
+  gap: 3px;
+  min-width: 0;
 }
 
 .text-value {
-  font-size: 20px;
+  font-size: 14px;
   font-weight: 600;
   font-family: var(--mono);
   color: var(--text);
   transition: opacity 0.3s;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .text-value.is-stale {
@@ -276,15 +280,16 @@ watch(() => dashboardStore.currentVariableValues, () => {
 }
 
 .text-unit {
-  font-size: 14px;
+  font-size: 11px;
   color: var(--muted);
+  flex-shrink: 0;
 }
 
 .text-error {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--color-error);
-  padding: 4px 8px;
+  padding: 2px 6px;
   background: var(--color-error-bg);
-  border-radius: 4px;
+  border-radius: 3px;
 }
 </style>

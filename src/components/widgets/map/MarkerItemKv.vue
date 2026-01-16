@@ -1,7 +1,7 @@
 <template>
   <div class="marker-item-kv">
     <span class="kv-label">{{ item.label }}</span>
-    <div class="kv-value-container">
+    <div class="kv-value-row">
       <span class="kv-value" :class="{ 'is-empty': isEmpty }">
         {{ displayValue }}
       </span>
@@ -193,45 +193,49 @@ watch(() => dashboardStore.currentVariableValues, () => {
 <style scoped>
 .marker-item-kv {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
   background: rgba(0, 0, 0, 0.1);
-  border-radius: 6px;
+  border-radius: 4px;
 }
 
 .kv-label {
   font-size: 12px;
   font-weight: 500;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  flex-shrink: 0;
 }
 
-.kv-value-container {
+.kv-value-row {
   display: flex;
   align-items: baseline;
-  gap: 4px;
+  gap: 3px;
+  min-width: 0;
 }
 
 .kv-value {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   font-family: var(--mono);
   color: var(--text);
-  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .kv-value.is-empty {
   color: var(--muted);
   font-style: italic;
+  font-size: 12px;
 }
 
 .kv-error {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--color-error);
-  padding: 4px 8px;
+  padding: 2px 6px;
   background: var(--color-error-bg);
-  border-radius: 4px;
+  border-radius: 3px;
 }
 </style>

@@ -106,36 +106,42 @@ function handleToggle() {
 <style scoped>
 .marker-item-switch {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  padding: 12px;
+  padding: 8px 10px;
   background: rgba(0, 0, 0, 0.1);
-  border-radius: 6px;
+  border-radius: 4px;
 }
 
 .switch-label {
   font-size: 13px;
   font-weight: 500;
   color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .switch-control {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .switch-track {
-  width: 44px;
-  height: 24px;
+  width: 36px;
+  height: 20px;
   background: var(--muted);
-  border-radius: 12px;
+  border-radius: 10px;
   position: relative;
   border: none;
   cursor: pointer;
   transition: background 0.3s;
   padding: 0;
-  flex-shrink: 0;
 }
 
 .switch-track:hover:not(:disabled) {
@@ -157,27 +163,28 @@ function handleToggle() {
 }
 
 .switch-thumb {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   background: white;
   border-radius: 50%;
   position: absolute;
   top: 2px;
   left: 2px;
   transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .switch-track.state-on .switch-thumb {
-  transform: translateX(20px);
+  transform: translateX(16px);
 }
 
 .switch-state-text {
-  font-size: 12px;
+  font-size: 11px;
   font-family: var(--mono);
   font-weight: 600;
   color: var(--muted);
-  min-width: 32px;
+  min-width: 24px;
+  text-align: right;
 }
 
 .switch-state-text.state-on {
@@ -189,10 +196,12 @@ function handleToggle() {
 }
 
 .switch-error {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--color-error);
-  padding: 4px 8px;
+  padding: 2px 6px;
   background: var(--color-error-bg);
-  border-radius: 4px;
+  border-radius: 3px;
+  margin-top: 4px;
+  width: 100%;
 }
 </style>
