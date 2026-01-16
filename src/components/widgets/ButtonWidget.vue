@@ -327,7 +327,6 @@ function adjustColorOpacity(hex: string, opacity: number) {
 
 .widget-button:hover:not(:disabled):not(.success-state):not(.loading-state) {
   background-color: var(--hover-bg) !important;
-  transform: translateY(-1px);
 }
 
 .widget-button:active:not(:disabled) {

@@ -154,10 +154,6 @@ onErrorCaptured((err) => {
   background: var(--widget-bg);
 }
 
-.widget-container.is-locked:not(.is-mobile):hover {
-  transform: translateY(-2px);
-}
-
 .widget-container.is-offline {
   border-color: var(--color-warning);
 }
