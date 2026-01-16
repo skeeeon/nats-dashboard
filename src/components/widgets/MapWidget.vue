@@ -4,6 +4,7 @@
     <div 
       :id="mapContainerId" 
       class="map-container"
+      @click="handleMapClick"
     />
     
     <!-- Loading overlay -->
@@ -16,6 +17,17 @@
     <div v-if="mapReady && markers.length === 0" class="no-markers-hint">
       <span class="hint-icon">📍</span>
       <span class="hint-text">No markers configured</span>
+    </div>
+    
+    <!-- Map Controls -->
+    <div v-if="mapReady && markers.length > 1" class="map-controls">
+      <button 
+        class="map-control-btn" 
+        @click="handleFitAll"
+        title="Fit all markers"
+      >
+        ⊡
+      </button>
     </div>
     
     <!-- Marker Detail Panel -->
@@ -62,7 +74,8 @@ const {
   updateTheme, 
   renderMarkers, 
   setSelectedMarker,
-  updateMarkerPositions, 
+  updateMarkerPositions,
+  fitAllMarkers,
   invalidateSize, 
   cleanup 
 } = useLeafletMap()
@@ -154,6 +167,35 @@ function handleMarkerClick(markerId: string) {
       invalidateSize()
     })
   }
+}
+
+/**
+ * Handle click on the map container (not on a marker)
+ * Closes the panel on desktop when clicking outside
+ */
+function handleMapClick(event: MouseEvent) {
+  // Only on desktop - mobile uses full overlay with explicit close button
+  if (isMobile.value) return
+  
+  // Only if panel is open
+  if (!selectedMarkerId.value) return
+  
+  // Check if click was on the map container itself (not on panel or marker)
+  const target = event.target as HTMLElement
+  const isMapClick = target.closest('.leaflet-container') && 
+                     !target.closest('.leaflet-marker-icon') &&
+                     !target.closest('.marker-detail-panel')
+  
+  if (isMapClick) {
+    closePanel()
+  }
+}
+
+/**
+ * Fit all markers in view
+ */
+function handleFitAll() {
+  fitAllMarkers()
 }
 
 /**
@@ -343,5 +385,41 @@ watch(() => dashboardStore.currentVariableValues, () => {
 
 .hint-icon {
   font-size: 14px;
+}
+
+/* Map Controls */
+.map-controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.map-control-btn {
+  width: 32px;
+  height: 32px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.map-control-btn:hover {
+  background: var(--color-info-bg);
+  border-color: var(--color-info-border);
+}
+
+.map-control-btn:active {
+  transform: scale(0.95);
 }
 </style>

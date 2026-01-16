@@ -280,6 +280,27 @@ export function useLeafletMap() {
   }
 
   /**
+   * Fit map view to show all markers
+   * Returns false if no markers to fit
+   */
+  function fitAllMarkers(padding: number = 50): boolean {
+    if (!map.value || markerInstances.size === 0) return false
+    
+    const bounds = L.latLngBounds([])
+    
+    markerInstances.forEach((marker) => {
+      bounds.extend(marker.getLatLng())
+    })
+    
+    if (bounds.isValid()) {
+      map.value.fitBounds(bounds, { padding: [padding, padding] })
+      return true
+    }
+    
+    return false
+  }
+
+  /**
    * Force map to recalculate its size
    * Call after container resize
    */
@@ -319,6 +340,7 @@ export function useLeafletMap() {
     setSelectedMarker,
     updateMarkerPositions,
     setView,
+    fitAllMarkers,
     invalidateSize,
     getMarker,
     cleanup,

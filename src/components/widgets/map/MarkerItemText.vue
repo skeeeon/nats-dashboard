@@ -9,7 +9,6 @@
         {{ item.textConfig.unit }}
       </span>
     </div>
-    <div v-if="error" class="text-error">{{ error }}</div>
   </div>
 </template>
 
@@ -17,17 +16,16 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useNatsStore } from '@/stores/nats'
 import { useDashboardStore } from '@/stores/dashboard'
-import { decodeBytes } from '@/utils/encoding'
+import { useWidgetDataStore } from '@/stores/widgetData'
+import { getSubscriptionManager } from '@/composables/useSubscriptionManager'
 import { resolveTemplate } from '@/utils/variables'
-import { JSONPath } from 'jsonpath-plus'
-import { jetstream, jetstreamManager } from '@nats-io/jetstream'
-import type { MapMarkerItem } from '@/types/dashboard'
+import type { MapMarkerItem, DataSourceConfig } from '@/types/dashboard'
 
 /**
  * Marker Item: Text Display
  * 
- * Subscribes to a NATS subject and displays the extracted value.
- * Supports Core and JetStream subscriptions.
+ * Subscribes to a NATS subject via the central subscription manager
+ * and displays the extracted value from the widget data store.
  */
 
 const props = defineProps<{
@@ -36,163 +34,78 @@ const props = defineProps<{
 
 const natsStore = useNatsStore()
 const dashboardStore = useDashboardStore()
+const dataStore = useWidgetDataStore()
+const subManager = getSubscriptionManager()
 
-const value = ref<any>(null)
-const error = ref<string | null>(null)
+// Use item.id as the unique identifier for subscriptions
+const subscriptionId = computed(() => `marker-text-${props.item.id}`)
+
+// Track staleness
 const lastUpdate = ref<number>(0)
 const isStale = ref(false)
-
-let subscription: any = null
 let staleCheckInterval: number | null = null
 
-const displayValue = computed(() => {
-  if (error.value) return '—'
-  if (value.value === null) return '...'
-  return String(value.value)
+// Get the latest value from the data store buffer
+const latestMessage = computed(() => {
+  const buffer = dataStore.getBuffer(subscriptionId.value)
+  if (buffer.length === 0) return null
+  return buffer[buffer.length - 1]
 })
 
-// Calculate start time for JetStream time window
-function calculateStartTime(windowStr: string | undefined): Date {
-  const now = Date.now()
-  if (!windowStr) return new Date(now - 10 * 60 * 1000)
-  
-  const match = windowStr.match(/^(\d+)([smhd])$/)
-  if (!match) return new Date(now - 10 * 60 * 1000)
-  
-  const val = parseInt(match[1])
-  const unit = match[2]
-  let ms = 0
-  
-  switch (unit) {
-    case 's': ms = val * 1000; break
-    case 'm': ms = val * 60 * 1000; break
-    case 'h': ms = val * 60 * 60 * 1000; break
-    case 'd': ms = val * 24 * 60 * 60 * 1000; break
-  }
-  return new Date(now - ms)
-}
+const displayValue = computed(() => {
+  if (!latestMessage.value) return '...'
+  const val = latestMessage.value.value
+  if (val === null || val === undefined) return '—'
+  return String(val)
+})
 
-async function subscribe() {
-  if (!natsStore.nc || !natsStore.isConnected || !props.item.textConfig) return
-  
+// Build the data source config for the subscription manager
+function buildDataSourceConfig(): DataSourceConfig | null {
   const cfg = props.item.textConfig
+  if (!cfg?.subject) return null
+  
   const subject = resolveTemplate(cfg.subject, dashboardStore.currentVariableValues)
-  if (!subject) return
+  if (!subject) return null
   
-  error.value = null
-  
-  try {
-    if (cfg.useJetStream) {
-      // JetStream subscription
-      const jsm = await jetstreamManager(natsStore.nc)
-      let streamName: string
-      
-      try {
-        streamName = await jsm.streams.find(subject)
-      } catch {
-        error.value = 'No Stream'
-        return
-      }
-      
-      const js = jetstream(natsStore.nc)
-      const consumerOpts: any = {
-        filter_subjects: [subject],
-        deliver_policy: cfg.deliverPolicy || 'last',
-        inactive_threshold: 30000 * 1_000_000 // 30s in nanoseconds
-      }
-      
-      if (cfg.deliverPolicy === 'by_start_time') {
-        consumerOpts.opt_start_time = calculateStartTime(cfg.timeWindow).toISOString()
-      }
-      
-      const consumer = await js.consumers.get(streamName, consumerOpts)
-      const messages = await consumer.consume()
-      subscription = messages
-      
-      ;(async () => {
-        try {
-          for await (const msg of messages) {
-            msg.ack()
-            processMessage(msg.data)
-          }
-        } catch {
-          // Iterator ended
-        }
-      })()
-      
-    } else {
-      // Core NATS subscription
-      const sub = natsStore.nc.subscribe(subject)
-      subscription = sub
-      
-      ;(async () => {
-        try {
-          for await (const msg of sub) {
-            processMessage(msg.data)
-          }
-        } catch {
-          // Subscription ended
-        }
-      })()
-    }
-  } catch (err: any) {
-    console.error('[MarkerItemText] Subscribe error:', err)
-    error.value = err.message || 'Subscribe failed'
+  return {
+    type: 'subscription',
+    subject,
+    useJetStream: cfg.useJetStream || false,
+    deliverPolicy: cfg.deliverPolicy || 'last',
+    timeWindow: cfg.timeWindow
   }
 }
 
-function processMessage(rawData: Uint8Array) {
-  try {
-    const text = decodeBytes(rawData)
-    let parsed: any = text
-    
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      // Keep as string
-    }
-    
-    // Apply JSONPath if configured
-    if (props.item.textConfig?.jsonPath && typeof parsed === 'object') {
-      try {
-        const extracted = JSONPath({ 
-          path: props.item.textConfig.jsonPath, 
-          json: parsed, 
-          wrap: false 
-        })
-        if (extracted !== undefined) {
-          parsed = extracted
-        }
-      } catch {
-        // Keep original
-      }
-    }
-    
-    value.value = parsed
-    lastUpdate.value = Date.now()
-    isStale.value = false
-  } catch (err) {
-    console.error('[MarkerItemText] Process error:', err)
-  }
+function subscribe() {
+  if (!natsStore.isConnected) return
+  
+  const config = buildDataSourceConfig()
+  if (!config) return
+  
+  // Initialize buffer for this item
+  dataStore.initializeBuffer(subscriptionId.value, 10) // Small buffer, we only need latest
+  
+  // Subscribe via central manager
+  subManager.subscribe(subscriptionId.value, config, props.item.textConfig?.jsonPath)
 }
 
 function unsubscribe() {
-  if (subscription) {
-    try {
-      if (typeof subscription.stop === 'function') {
-        subscription.stop()
-      } else if (typeof subscription.unsubscribe === 'function') {
-        subscription.unsubscribe()
-      }
-    } catch {
-      // Ignore cleanup errors
-    }
-    subscription = null
-  }
+  const config = buildDataSourceConfig()
+  if (!config) return
+  
+  subManager.unsubscribe(subscriptionId.value, config)
+  dataStore.removeBuffer(subscriptionId.value)
 }
 
+// Watch for new messages to track staleness
+watch(latestMessage, (msg) => {
+  if (msg) {
+    lastUpdate.value = msg.timestamp
+    isStale.value = false
+  }
+})
+
 function startStaleCheck() {
-  // Check every 10 seconds if data is stale (no update in 30s)
   staleCheckInterval = window.setInterval(() => {
     if (lastUpdate.value > 0 && Date.now() - lastUpdate.value > 30000) {
       isStale.value = true
@@ -223,14 +136,13 @@ onUnmounted(() => {
 // Reconnection handling
 watch(() => natsStore.isConnected, (connected) => {
   if (connected) {
-    unsubscribe()
     subscribe()
   } else {
-    unsubscribe()
+    // Don't unsubscribe on disconnect - manager handles reconnection
   }
 })
 
-// Variable changes - resubscribe
+// Variable changes - resubscribe with new resolved values
 watch(() => dashboardStore.currentVariableValues, () => {
   if (natsStore.isConnected) {
     unsubscribe()
@@ -283,13 +195,5 @@ watch(() => dashboardStore.currentVariableValues, () => {
   font-size: 11px;
   color: var(--muted);
   flex-shrink: 0;
-}
-
-.text-error {
-  font-size: 10px;
-  color: var(--color-error);
-  padding: 2px 6px;
-  background: var(--color-error-bg);
-  border-radius: 3px;
 }
 </style>
