@@ -82,6 +82,16 @@
             </select>
           </div>
 
+          <!-- Refresh Button (New) -->
+          <button 
+            class="btn-icon" 
+            @click="handleRefreshDashboard"
+            title="Refresh Data (R)"
+            :disabled="!natsStore.isConnected"
+          >
+            🔄
+          </button>
+
           <!-- Variable Toggle -->
           <button 
             v-if="hasVariables || !dashboardStore.isLocked"
@@ -159,7 +169,7 @@
       </div>
     </div>
     
-    <!-- Modals (Unchanged) -->
+    <!-- Modals -->
     <AddWidgetModal v-model="showAddWidget" @select="handleCreateWidget" />
     <ConfigureWidgetModal v-model="showConfigWidget" :widget-id="configWidgetId" @saved="handleWidgetConfigSaved" />
     <KeyboardShortcutsModal v-model="showShortcutsModal" :shortcuts="shortcuts" />
@@ -174,48 +184,7 @@
         </div>
         <div class="fullscreen-body">
           <component
-            v-if="fullScreenWidget.type === 'text'"
-            :is="TextWidget"
-            :config="fullScreenWidget"
-          />
-          <component
-            v-else-if="fullScreenWidget.type === 'chart'"
-            :is="ChartWidget"
-            :config="fullScreenWidget"
-          />
-          <component
-            v-else-if="fullScreenWidget.type === 'button'"
-            :is="ButtonWidget"
-            :config="fullScreenWidget"
-          />
-          <component
-            v-else-if="fullScreenWidget.type === 'kv'"
-            :is="KvWidget"
-            :config="fullScreenWidget"
-          />
-          <component
-            v-else-if="fullScreenWidget.type === 'switch'"
-            :is="SwitchWidget"
-            :config="fullScreenWidget"
-          />
-          <component
-            v-else-if="fullScreenWidget.type === 'slider'"
-            :is="SliderWidget"
-            :config="fullScreenWidget"
-          />
-          <component
-            v-else-if="fullScreenWidget.type === 'stat'"
-            :is="StatCardWidget"
-            :config="fullScreenWidget"
-          />
-          <component
-            v-else-if="fullScreenWidget.type === 'gauge'"
-            :is="GaugeWidget"
-            :config="fullScreenWidget"
-          />
-          <component
-            v-else-if="fullScreenWidget.type === 'map'"
-            :is="MapWidget"
+            :is="getWidgetComponent(fullScreenWidget.type)"
             :config="fullScreenWidget"
             :is-fullscreen="true"
           />
@@ -256,6 +225,8 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import DebugPanel from '@/components/common/DebugPanel.vue'
 import VariableBar from '@/components/dashboard/VariableBar.vue'
 import VariableEditorModal from '@/components/dashboard/VariableEditorModal.vue'
+
+// Widget Components for Fullscreen
 import TextWidget from '@/components/widgets/TextWidget.vue'
 import ChartWidget from '@/components/widgets/ChartWidget.vue'
 import ButtonWidget from '@/components/widgets/ButtonWidget.vue'
@@ -330,6 +301,8 @@ function handleGlobalConfirm() {
 
 provide('requestConfirm', requestConfirm)
 
+// --- Actions ---
+
 function toggleSidebar() {
   if (sidebarRef.value) {
     sidebarRef.value.toggleSidebar()
@@ -377,6 +350,16 @@ function handleSave() {
   }
 }
 
+/**
+ * Grug Refresh: Wipe data and restart subscriptions
+ */
+function handleRefreshDashboard() {
+  unsubscribeAllWidgets(false) // false = wipe buffer
+  nextTick(() => {
+    subscribeAllWidgets()
+  })
+}
+
 function handleReloadRemote() {
   if (dashboardStore.isDirty) {
     requestConfirm(
@@ -404,14 +387,32 @@ function handleGridChange(event: Event) {
   }
 }
 
+function getWidgetComponent(type: WidgetType) {
+  switch (type) {
+    case 'text': return TextWidget
+    case 'chart': return ChartWidget
+    case 'button': return ButtonWidget
+    case 'kv': return KvWidget
+    case 'switch': return SwitchWidget
+    case 'slider': return SliderWidget
+    case 'stat': return StatCardWidget
+    case 'gauge': return GaugeWidget
+    case 'map': return MapWidget
+    default: return null
+  }
+}
+
+// --- Keyboard Shortcuts ---
 const { shortcuts } = useKeyboardShortcuts([
   { 
     key: 's', 
     description: 'Save Dashboard', 
-    handler: () => {
-      handleSave()
-      console.log('Dashboard saved via shortcut')
-    } 
+    handler: handleSave 
+  },
+  { 
+    key: 'r', 
+    description: 'Refresh Dashboard Data', 
+    handler: handleRefreshDashboard 
   },
   { 
     key: 'n', 
@@ -478,6 +479,8 @@ const { shortcuts } = useKeyboardShortcuts([
   }
 ])
 
+// --- Lifecycle ---
+
 onMounted(() => {
   dashboardStore.loadFromStorage()
   window.addEventListener('show-shortcuts-help', handleShowShortcuts)
@@ -493,11 +496,13 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  unsubscribeAllWidgets(false)
+  // Warm Navigation: Keep data in memory so charts don't reset to zero 
+  // when user goes to Settings and back.
+  unsubscribeAllWidgets(true) 
   window.removeEventListener('show-shortcuts-help', handleShowShortcuts)
 })
 
-// Watchers (Unchanged)
+// Watchers
 watch(() => natsStore.isConnected, (connected) => {
   if (connected) {
     subscribeAllWidgets()
@@ -505,7 +510,8 @@ watch(() => natsStore.isConnected, (connected) => {
 })
 
 watch(() => dashboardStore.activeDashboardId, async () => {
-  unsubscribeAllWidgets(false)
+  // Keep data warm when switching dashboards if they share subjects
+  unsubscribeAllWidgets(true)
   await nextTick()
   if (natsStore.isConnected) {
     subscribeAllWidgets()
@@ -515,7 +521,7 @@ watch(() => dashboardStore.activeDashboardId, async () => {
 watch(() => dashboardStore.currentVariableValues, () => {
   if (natsStore.isConnected) {
     console.log('[Dashboard] Variables changed, resubscribing...')
-    unsubscribeAllWidgets(false)
+    unsubscribeAllWidgets(true)
     subscribeAllWidgets()
   }
 }, { deep: true })
@@ -529,7 +535,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
 </script>
 
 <style scoped>
-/* Keeping existing styles with additions for grid selector */
 .dashboard-view {
   height: 100vh;
   display: flex;
@@ -757,7 +762,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   background: rgba(255, 255, 255, 0.15);
 }
 
-/* Grid Select Styling */
 .grid-controls {
   display: flex;
   align-items: center;
@@ -829,7 +833,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
   font-size: 14px;
 }
 
-/* Fullscreen modal styles (unchanged) */
 .fullscreen-modal {
   position: fixed;
   top: 0;
@@ -975,7 +978,6 @@ watch(() => dashboardStore.activeWidgets.length, (newCount, oldCount) => {
     justify-content: center;
   }
 
-  /* Grid select styling for mobile toolbar */
   .grid-controls {
     grid-column: span 1;
   }

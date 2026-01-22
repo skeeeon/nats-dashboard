@@ -1,42 +1,16 @@
 <template>
   <div class="map-widget">
-    <!-- Map container -->
-    <div 
-      :id="mapContainerId" 
-      class="map-container"
-      @click="handleMapClick"
-    />
-    
-    <!-- Loading overlay -->
+    <div :id="mapContainerId" class="map-container" @click="handleMapClick" />
     <div v-if="!mapReady" class="map-loading">
       <div class="loading-spinner"></div>
       <span>Loading map...</span>
     </div>
-    
-    <!-- No markers hint -->
-    <div v-if="mapReady && markers.length === 0" class="no-markers-hint">
-      <span class="hint-icon">📍</span>
-      <span class="hint-text">No markers configured</span>
-    </div>
-    
-    <!-- Map Controls -->
+    <div v-if="mapReady && markers.length === 0" class="no-markers-hint">No markers configured</div>
     <div v-if="mapReady && markers.length > 1" class="map-controls">
-      <button 
-        class="map-control-btn" 
-        @click="handleFitAll"
-        title="Fit all markers"
-      >
-        ⊡
-      </button>
+      <!-- Wrap in arrow function to prevent PointerEvent being passed as padding -->
+      <button class="map-control-btn" @click="() => fitAllMarkers()">⊡</button>
     </div>
-    
-    <!-- Marker Detail Panel -->
-    <MarkerDetailPanel
-      v-if="selectedMarker"
-      :marker="selectedMarker"
-      :is-mobile="isMobile"
-      @close="closePanel"
-    />
+    <MarkerDetailPanel v-if="selectedMarker" :marker="selectedMarker" :is-mobile="isMobile" @close="closePanel" />
   </div>
 </template>
 
@@ -49,377 +23,68 @@ import { useDashboardStore } from '@/stores/dashboard'
 import MarkerDetailPanel from './map/MarkerDetailPanel.vue'
 import type { WidgetConfig } from '@/types/dashboard'
 
-/**
- * Map Widget
- * 
- * Displays an interactive Leaflet map with configurable markers.
- * Clicking a marker opens a detail panel:
- * - Desktop: Side panel (280px wide)
- * - Mobile: Full overlay panel
- */
-
-const props = withDefaults(defineProps<{
-  config: WidgetConfig
-  isFullscreen?: boolean
-}>(), {
-  isFullscreen: false
-})
-
+const props = defineProps<{ config: WidgetConfig; isFullscreen?: boolean }>()
 const { theme } = useTheme()
 const dataStore = useWidgetDataStore()
 const dashboardStore = useDashboardStore()
+const { initMap, updateTheme, renderMarkers, setSelectedMarker, updateMarkerPositions, fitAllMarkers, invalidateSize, cleanup } = useLeafletMap()
 
-const { 
-  initMap, 
-  updateTheme, 
-  renderMarkers, 
-  setSelectedMarker,
-  updateMarkerPositions,
-  fitAllMarkers,
-  invalidateSize, 
-  cleanup 
-} = useLeafletMap()
-
-// Unique container ID (different for fullscreen to allow both instances)
-const mapContainerId = computed(() => {
-  const suffix = props.isFullscreen ? '-fullscreen' : ''
-  return `map-${props.config.id}${suffix}`
-})
-
-// Map state
+const mapContainerId = computed(() => `map-${props.config.id}${props.isFullscreen ? '-fs' : ''}`)
 const mapReady = ref(false)
 const selectedMarkerId = ref<string | null>(null)
-const isMobile = ref(false)
+const isMobile = ref(window.innerWidth < 768)
 
-// Config computed values
 const markers = computed(() => props.config.mapConfig?.markers || [])
-const mapCenter = computed(() => props.config.mapConfig?.center || { lat: 39.8283, lon: -98.5795 })
-const mapZoom = computed(() => props.config.mapConfig?.zoom || 4)
-
-// Data buffer for dynamic marker positions
 const buffer = computed(() => dataStore.getBuffer(props.config.id))
+const selectedMarker = computed(() => markers.value.find(m => m.id === selectedMarkerId.value) || null)
 
-// Selected marker object
-const selectedMarker = computed(() => {
-  if (!selectedMarkerId.value) return null
-  return markers.value.find(m => m.id === selectedMarkerId.value) || null
-})
-
-// Initialization tracking
-let initTimeout: number | null = null
-
-/**
- * Check if we're on mobile viewport
- */
-function checkMobile() {
-  isMobile.value = window.innerWidth < 768
-}
-
-/**
- * Initialize the map
- */
-async function initializeMap() {
-  if (initTimeout) {
-    clearTimeout(initTimeout)
-    initTimeout = null
-  }
-
-  await nextTick()
-  
-  initTimeout = window.setTimeout(() => {
-    const container = document.getElementById(mapContainerId.value)
-    if (!container) return
-
-    initMap(
-      mapContainerId.value,
-      mapCenter.value,
-      mapZoom.value,
-      theme.value === 'dark'
-    )
-    
-    renderMarkers(markers.value, handleMarkerClick)
-    mapReady.value = true
-    initTimeout = null
-    
-    // Initial position update if we have buffered data
-    if (buffer.value.length > 0) {
-      updateMarkerPositions(markers.value, buffer.value, dashboardStore.currentVariableValues)
-    }
-  }, 50)
-}
-
-/**
- * Handle marker click - open detail panel
- */
-function handleMarkerClick(markerId: string) {
-  // If clicking the same marker, close panel
-  if (selectedMarkerId.value === markerId) {
-    closePanel()
-    return
-  }
-  
-  selectedMarkerId.value = markerId
-  setSelectedMarker(markerId)
-  
-  // Invalidate size since panel affects available space (desktop only)
-  if (!isMobile.value) {
-    nextTick(() => {
-      invalidateSize()
-    })
-  }
-}
-
-/**
- * Handle click on the map container (not on a marker)
- * Closes the panel on desktop when clicking outside
- */
-function handleMapClick(event: MouseEvent) {
-  // Only on desktop - mobile uses full overlay with explicit close button
-  if (isMobile.value) return
-  
-  // Only if panel is open
-  if (!selectedMarkerId.value) return
-  
-  // Check if click was on the map container itself (not on panel or marker)
-  const target = event.target as HTMLElement
-  const isMapClick = target.closest('.leaflet-container') && 
-                     !target.closest('.leaflet-marker-icon') &&
-                     !target.closest('.marker-detail-panel')
-  
-  if (isMapClick) {
-    closePanel()
-  }
-}
-
-/**
- * Fit all markers in view
- */
-function handleFitAll() {
-  fitAllMarkers()
-}
-
-/**
- * Close the detail panel
- */
-function closePanel() {
-  selectedMarkerId.value = null
-  setSelectedMarker(null)
-  
-  if (!isMobile.value) {
-    nextTick(() => {
-      invalidateSize()
-    })
-  }
-}
-
-/**
- * Re-render markers (called when config changes)
- */
-function updateMarkers() {
-  if (!mapReady.value) return
-  
-  renderMarkers(markers.value, handleMarkerClick)
-  
-  // Re-apply selection if still valid
-  if (selectedMarkerId.value) {
-    const stillExists = markers.value.some(m => m.id === selectedMarkerId.value)
-    if (stillExists) {
-      setSelectedMarker(selectedMarkerId.value)
-    } else {
-      closePanel()
-    }
-  }
-  
-  // Re-apply positions
-  if (buffer.value.length > 0) {
+function syncMarkerPositions() {
+  if (mapReady.value && buffer.value.length > 0) {
     updateMarkerPositions(markers.value, buffer.value, dashboardStore.currentVariableValues)
   }
 }
 
-// ResizeObserver for container size changes
-let resizeObserver: ResizeObserver | null = null
-let resizeObserverTimeout: number | null = null
+watch(mapReady, (ready) => { if (ready) syncMarkerPositions() })
+watch(buffer, () => syncMarkerPositions(), { deep: true })
+watch(() => dashboardStore.currentVariableValues, () => syncMarkerPositions(), { deep: true })
+watch(theme, (t) => updateTheme(t === 'dark'))
 
-onMounted(() => {
-  checkMobile()
-  window.addEventListener('resize', checkMobile)
-  
-  initializeMap()
-  
-  // Setup resize observer
+let resizeObserver: ResizeObserver | null = null
+
+onMounted(async () => {
+  await nextTick()
+  initMap(mapContainerId.value, props.config.mapConfig!.center, props.config.mapConfig!.zoom, theme.value === 'dark')
+  renderMarkers(markers.value, (id) => {
+    selectedMarkerId.value = id
+    setSelectedMarker(id)
+  })
+  mapReady.value = true
+
   resizeObserver = new ResizeObserver(() => {
     if (mapReady.value) invalidateSize()
   })
   
-  resizeObserverTimeout = window.setTimeout(() => {
-    const container = document.getElementById(mapContainerId.value)
-    if (container?.parentElement && resizeObserver) {
-      resizeObserver.observe(container.parentElement)
-    }
-  }, 100)
+  const container = document.getElementById(mapContainerId.value)
+  if (container?.parentElement) resizeObserver.observe(container.parentElement)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', checkMobile)
-  
-  if (initTimeout) clearTimeout(initTimeout)
-  if (resizeObserverTimeout !== null) clearTimeout(resizeObserverTimeout)
   if (resizeObserver) resizeObserver.disconnect()
-  
   cleanup()
 })
 
-// Watch for theme changes
-watch(theme, (newTheme) => {
-  updateTheme(newTheme === 'dark')
-})
-
-// Watch for marker config changes
-watch(markers, updateMarkers, { deep: true })
-
-// Watch for center/zoom changes - reinitialize map
-watch([mapCenter, mapZoom], () => {
-  if (initTimeout) clearTimeout(initTimeout)
-  cleanup()
-  mapReady.value = false
-  selectedMarkerId.value = null
-  initializeMap()
-}, { deep: true })
-
-// Watch buffer for dynamic position updates
-watch(buffer, (newMessages) => {
-  if (mapReady.value && newMessages.length > 0) {
-    updateMarkerPositions(markers.value, newMessages, dashboardStore.currentVariableValues)
-  }
-}, { deep: true })
-
-// Watch for variable changes
-watch(() => dashboardStore.currentVariableValues, () => {
-  if (mapReady.value && buffer.value.length > 0) {
-    updateMarkerPositions(markers.value, buffer.value, dashboardStore.currentVariableValues)
-  }
-}, { deep: true })
+function closePanel() { selectedMarkerId.value = null; setSelectedMarker(null) }
+function handleMapClick(e: MouseEvent) {
+  if (!(e.target as HTMLElement).closest('.leaflet-marker-icon')) closePanel()
+}
 </script>
 
 <style scoped>
-.map-widget {
-  height: 100%;
-  width: 100%;
-  position: relative;
-  background: var(--widget-bg);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.map-container {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-}
-
-/* Leaflet z-index overrides */
-.map-container :deep(.leaflet-pane),
-.map-container :deep(.leaflet-control-container) {
-  z-index: 0 !important;
-}
-
-.map-container :deep(.leaflet-top),
-.map-container :deep(.leaflet-bottom) {
-  z-index: 1 !important;
-}
-
-/* 
- * Selected marker styling - static glow effect
- * Using box-shadow instead of transform to avoid conflicting with Leaflet's positioning
- */
-.map-container :deep(.marker-selected) {
-  filter: hue-rotate(180deg) saturate(1.5) drop-shadow(0 0 8px rgba(116, 128, 255, 0.8));
-}
-
-/* Loading overlay */
-.map-loading {
-  position: absolute;
-  inset: 0;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  background: var(--widget-bg);
-  color: var(--muted);
-  font-size: 14px;
-}
-
-.loading-spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid var(--border);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* No markers hint */
-.no-markers-hint {
-  position: absolute;
-  bottom: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--muted);
-  pointer-events: none;
-}
-
-.hint-icon {
-  font-size: 14px;
-}
-
-/* Map Controls */
-.map-controls {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 5;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.map-control-btn {
-  width: 32px;
-  height: 32px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  font-size: 16px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-}
-
-.map-control-btn:hover {
-  background: var(--color-info-bg);
-  border-color: var(--color-info-border);
-}
-
-.map-control-btn:active {
-  transform: scale(0.95);
-}
+.map-widget { height: 100%; width: 100%; position: relative; background: var(--widget-bg); border-radius: 4px; overflow: hidden; }
+.map-container { position: absolute; inset: 0; }
+.map-loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--widget-bg); }
+.loading-spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--color-accent); border-radius: 50%; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.map-controls { position: absolute; top: 10px; right: 10px; z-index: 1000; }
+.map-control-btn { width: 32px; height: 32px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; color: var(--text); display: flex; align-items: center; justify-content: center; }
 </style>

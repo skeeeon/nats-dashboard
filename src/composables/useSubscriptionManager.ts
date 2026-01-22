@@ -11,18 +11,6 @@ import {
 import { decodeBytes } from '@/utils/encoding'
 import type { DataSourceConfig } from '@/types/dashboard'
 
-/**
- * Subscription Manager
- * 
- * Manages NATS subscriptions with:
- * - Subject multiplexing (Core subs shared by subject)
- * - JetStream consumer lifecycle with explicit inactive threshold
- * - Reconnection handling
- * - Message batching for performance
- * 
- * Grug say: One place to manage all subscriptions. No duplicate subs.
- */
-
 interface WidgetListener {
   widgetId: string
   jsonPath?: string
@@ -36,7 +24,7 @@ interface SubscriptionRef {
   listeners: Map<string, WidgetListener>
   isActive: boolean
   isJetStream: boolean
-  config: DataSourceConfig // Store config for resubscription
+  config: DataSourceConfig
   initPromise?: Promise<void>
   lastError?: string
 }
@@ -49,40 +37,24 @@ interface QueuedMessage {
   timestamp: number
 }
 
-// Stats tracking
-interface SubscriptionStats {
-  messagesReceived: number
-  messagesDropped: number
-  lastDropTime: number | null
-  subscriptionErrors: number
-}
-
 const MAX_QUEUE_SIZE = 5000 
-
-// JetStream consumer settings
-const JETSTREAM_CONSUMER_INACTIVE_THRESHOLD_MS = 120000 // 2 minutes
 
 export function useSubscriptionManager() {
   const natsStore = useNatsStore()
   const dataStore = useWidgetDataStore()
   
   const subscriptions = new Map<string, SubscriptionRef>()
-  const stats: SubscriptionStats = {
-    messagesReceived: 0,
-    messagesDropped: 0,
-    lastDropTime: null,
-    subscriptionErrors: 0
-  }
-  
   const messageQueue: QueuedMessage[] = []
   let flushPending = false
   let reconnectListenerAttached = false
-  let closeListenerAttached = false
   
-  // ============================================================================
-  // MESSAGE QUEUE & BATCHING
-  // ============================================================================
-  
+  const stats = {
+    messagesReceived: 0,
+    messagesDropped: 0,
+    lastDropTime: null as number | null,
+    subscriptionErrors: 0
+  }
+
   function flushQueue() {
     if (messageQueue.length === 0) {
       flushPending = false
@@ -96,545 +68,187 @@ export function useSubscriptionManager() {
   
   function queueMessage(widgetId: string, value: any, raw: any, subject?: string) {
     stats.messagesReceived++
-    
     if (messageQueue.length >= MAX_QUEUE_SIZE) {
       const dropCount = 1000
       messageQueue.splice(0, dropCount)
       stats.messagesDropped += dropCount
       stats.lastDropTime = Date.now()
-      
-      // Log occasionally, not every time
-      if (stats.messagesDropped % 5000 === 0) {
-        console.warn(`[SubMgr] High throughput! Total dropped: ${stats.messagesDropped}`)
-      }
     }
-    
-    messageQueue.push({
-      widgetId,
-      value,
-      raw,
-      subject,
-      timestamp: Date.now()
-    })
-    
+    messageQueue.push({ widgetId, value, raw, subject, timestamp: Date.now() })
     if (!flushPending) {
       flushPending = true
       requestAnimationFrame(flushQueue)
     }
   }
 
-  // ============================================================================
-  // HELPERS
-  // ============================================================================
-
-  function calculateStartTime(windowStr: string | undefined): Date {
+  function calculateStartTime(windowStr: string | undefined): string {
     const now = Date.now()
-    if (!windowStr) return new Date(now - 10 * 60 * 1000)
-    
-    const match = windowStr.match(/^(\d+)([smhd])$/)
-    if (!match) return new Date(now - 10 * 60 * 1000)
-    
-    const val = parseInt(match[1])
-    const unit = match[2]
-    let ms = 0
-    
-    switch (unit) {
-      case 's': ms = val * 1000; break
-      case 'm': ms = val * 60 * 1000; break
-      case 'h': ms = val * 60 * 60 * 1000; break
-      case 'd': ms = val * 24 * 60 * 60 * 1000; break
+    let ms = 5 * 60 * 1000 
+    if (windowStr) {
+      const match = windowStr.match(/^(\d+)([smhd])$/)
+      if (match) {
+        const val = parseInt(match[1])
+        const unit = match[2]
+        switch (unit) {
+          case 's': ms = val * 1000; break
+          case 'm': ms = val * 60 * 1000; break
+          case 'h': ms = val * 60 * 60 * 1000; break
+          case 'd': ms = val * 24 * 60 * 60 * 1000; break
+        }
+      }
     }
-    
-    return new Date(now - ms)
+    return new Date(now - ms).toISOString()
   }
 
-  /**
-   * Generate unique key for subscription map
-   * 
-   * Core: Shared by subject (multiple widgets can share one sub)
-   * JetStream: Unique per widget+subject (each needs own consumer)
-   */
   function getSubscriptionKey(widgetId: string, config: DataSourceConfig): string {
-    if (config.useJetStream) {
-      return `js:${widgetId}:${config.subject}`
-    }
+    if (config.useJetStream) return `js:${widgetId}:${config.subject}`
     return `core:${config.subject}`
   }
 
-  // ============================================================================
-  // EVENT LISTENER MANAGEMENT
-  // ============================================================================
-
-  /**
-   * Setup reconnection listener (called once)
-   */
-  function ensureReconnectListener() {
-    if (reconnectListenerAttached) return
-    
-    window.addEventListener('nats:reconnected', handleReconnect)
-    window.addEventListener('nats:disconnected', handleDisconnect)
-    reconnectListenerAttached = true
-    console.log('[SubMgr] Reconnect listeners attached')
-  }
-
-  /**
-   * Setup close listener for permanent connection closure
-   */
-  function ensureCloseListener() {
-    if (closeListenerAttached) return
-    
-    window.addEventListener('nats:closed', handleClose)
-    closeListenerAttached = true
-    console.log('[SubMgr] Close listener attached')
-  }
-
-  /**
-   * Handle disconnect - mark all subscriptions as inactive
-   */
-  function handleDisconnect() {
-    console.log('[SubMgr] Handling disconnect - pausing subscriptions')
-    
-    for (const subRef of subscriptions.values()) {
-      subRef.isActive = false
-    }
-  }
-
-  /**
-   * Handle permanent connection close - cleanup all subscriptions
-   */
-  function handleClose() {
-    console.log('[SubMgr] Handling close - cleaning up all subscriptions')
-    
-    for (const subRef of subscriptions.values()) {
-      cleanupSubscription(subRef)
-    }
-    subscriptions.clear()
-  }
-
-  /**
-   * Handle reconnection - refresh all subscriptions
-   * 
-   * Core subs: NATS client auto-resubscribes, but our iterators may be stale
-   * JetStream: Consumers may have been garbage collected, need fresh ones
-   */
   async function handleReconnect() {
-    console.log('[SubMgr] Handling reconnect - refreshing subscriptions')
-    
-    const subsToRefresh = Array.from(subscriptions.entries())
-    
-    for (const [key, subRef] of subsToRefresh) {
-      // Skip if no listeners (orphaned subscription)
+    for (const [key, subRef] of subscriptions.entries()) {
       if (subRef.listeners.size === 0) {
         subscriptions.delete(key)
         continue
       }
-      
-      // Cleanup old subscription
       cleanupSubscription(subRef)
-      
-      // Get first listener's info for resubscription
-      const firstListener = subRef.listeners.values().next().value
-      if (!firstListener) continue
-      
-      // Resubscribe with stored config
       try {
-        console.log(`[SubMgr] Refreshing subscription: ${subRef.subject}`)
-        await createSubscription(subRef, firstListener.jsonPath)
+        await createSubscription(subRef)
       } catch (err) {
-        console.error(`[SubMgr] Failed to refresh ${subRef.subject}:`, err)
         subRef.lastError = String(err)
         stats.subscriptionErrors++
       }
     }
-    
-    console.log(`[SubMgr] Refresh complete. Active: ${subscriptions.size}`)
   }
 
-  // ============================================================================
-  // SUBSCRIPTION LIFECYCLE
-  // ============================================================================
-
-  /**
-   * Subscribe a widget to a subject
-   */
   async function subscribe(widgetId: string, config: DataSourceConfig, jsonPath?: string) {
-    if (!natsStore.nc) {
-      console.error('[SubMgr] Cannot subscribe: Not connected')
-      return
-    }
-
+    if (!natsStore.nc) return
     const subject = config.subject
     if (!subject) return
     
-    // Ensure event handling is setup
-    ensureReconnectListener()
-    ensureCloseListener()
-    
+    if (!reconnectListenerAttached) {
+      window.addEventListener('nats:reconnected', handleReconnect)
+      reconnectListenerAttached = true
+    }
+
     const key = getSubscriptionKey(widgetId, config)
     let subRef = subscriptions.get(key)
     
-    // If subscription exists or is initializing, add listener to it
     if (subRef) {
-      // Wait for initialization if in progress
-      if (subRef.initPromise) {
-        try {
-          await subRef.initPromise
-        } catch {
-          // Init failed, will be cleaned up
-          subscriptions.delete(key)
-          subRef = undefined
-        }
-      }
-      
-      // Re-fetch after await (might have been deleted)
-      subRef = subscriptions.get(key)
-      if (subRef) {
-        // Check if subscription is still alive
-        const isDead = !subRef.isActive || 
-          (!subRef.isJetStream && subRef.natsSubscription?.isClosed())
-        
-        if (isDead) {
-          console.log(`[SubMgr] Subscription ${key} is dead, recreating`)
-          cleanupSubscription(subRef)
-          subscriptions.delete(key)
-        } else {
-          // Add listener to existing subscription
-          subRef.listeners.set(widgetId, { widgetId, jsonPath })
-          console.log(`[SubMgr] Added listener to existing sub: ${subject} (${subRef.listeners.size} listeners)`)
-          return
-        }
-      }
+      subRef.listeners.set(widgetId, { widgetId, jsonPath })
+      return
     }
     
-    // Create new subscription
     const newSubRef: SubscriptionRef = {
-      key,
-      subject,
+      key, subject,
       listeners: new Map([[widgetId, { widgetId, jsonPath }]]),
       isActive: true,
       isJetStream: !!config.useJetStream,
-      config: { ...config }, // Store for resubscription
+      config: { ...config },
     }
     
     subscriptions.set(key, newSubRef)
-    
-    // Initialize asynchronously
-    newSubRef.initPromise = createSubscription(newSubRef, jsonPath)
-    
-    try {
-      await newSubRef.initPromise
-    } catch (err) {
-      console.error(`[SubMgr] Subscription failed: ${subject}`, err)
-      // Keep the subRef so we can retry on reconnect
-      newSubRef.lastError = String(err)
-      stats.subscriptionErrors++
-    } finally {
-      newSubRef.initPromise = undefined
-    }
+    newSubRef.initPromise = createSubscription(newSubRef)
+    await newSubRef.initPromise
   }
 
-  /**
-   * Create the actual NATS subscription
-   */
-  async function createSubscription(subRef: SubscriptionRef, _jsonPath?: string): Promise<void> {
-    const config = subRef.config
-    
-    if (config.useJetStream) {
-      await createJetStreamSubscription(subRef)
-    } else {
-      await createCoreSubscription(subRef)
-    }
-  }
-
-  /**
-   * Create Core NATS subscription
-   */
-  async function createCoreSubscription(subRef: SubscriptionRef): Promise<void> {
-    if (!natsStore.nc) throw new Error('Not connected')
-    
-    const natsSub = natsStore.nc.subscribe(subRef.subject)
-    subRef.natsSubscription = natsSub
-    subRef.isActive = true
-    
-    console.log(`[SubMgr] Core subscription created: ${subRef.subject}`)
-    
-    // Start message processing loop
-    processCoreMessages(subRef)
-  }
-
-  /**
-   * Create JetStream subscription with ephemeral consumer
-   * 
-   * Uses explicit inactive_threshold for predictable cleanup behavior.
-   * When a consumer is idle for this duration, the server will delete it.
-   */
-  async function createJetStreamSubscription(subRef: SubscriptionRef): Promise<void> {
-    if (!natsStore.nc) throw new Error('Not connected')
-    
-    const config = subRef.config
-    const jsm = await jetstreamManager(natsStore.nc)
-    
-    // Find stream for subject
-    let streamName: string
-    try {
-      streamName = await jsm.streams.find(subRef.subject)
-    } catch {
-      const errorMsg = `No stream found for subject: ${subRef.subject}`
-      console.error(`[SubMgr] ${errorMsg}`)
-      subRef.lastError = errorMsg
+  async function createSubscription(subRef: SubscriptionRef): Promise<void> {
+    if (subRef.config.useJetStream) {
+      const js = jetstream(natsStore.nc!)
+      const jsm = await jetstreamManager(natsStore.nc!)
+      const streamName = await jsm.streams.find(subRef.subject)
       
-      // Push error to all listeners so widgets can display it
-      for (const listener of subRef.listeners.values()) {
-        queueMessage(listener.widgetId, null, { error: errorMsg }, subRef.subject)
+      const consumerOpts: any = { filter_subjects: [subRef.subject] }
+      const policy = subRef.config.deliverPolicy || 'last'
+      consumerOpts.deliver_policy = policy
+      
+      if (policy === 'by_start_time') {
+        consumerOpts.opt_start_time = calculateStartTime(subRef.config.timeWindow)
       }
-      throw new Error(errorMsg)
-    }
 
-    const js = jetstream(natsStore.nc)
-    
-    // Build consumer options with explicit inactive threshold
-    const consumerOpts: any = {
-      filter_subjects: [subRef.subject],
-      deliver_policy: config.deliverPolicy || 'last',
-      // Explicit inactive threshold for predictable cleanup
-      // Server will delete this consumer after 30s of inactivity
-      inactive_threshold: JETSTREAM_CONSUMER_INACTIVE_THRESHOLD_MS
+      const consumer = await js.consumers.get(streamName, consumerOpts)
+      subRef.iterator = await consumer.consume()
+      processMessages(subRef, true)
+    } else {
+      subRef.natsSubscription = natsStore.nc!.subscribe(subRef.subject)
+      processMessages(subRef, false)
     }
-
-    if (config.deliverPolicy === 'by_start_time') {
-      consumerOpts.opt_start_time = calculateStartTime(config.timeWindow).toISOString()
-    }
-
-    // Create ephemeral consumer
-    const consumer = await js.consumers.get(streamName, consumerOpts)
-    const messages = await consumer.consume()
-    
-    subRef.iterator = messages
-    subRef.isActive = true
-    
-    console.log(`[SubMgr] JetStream subscription created: ${subRef.subject} (stream: ${streamName}, inactive_threshold: ${JETSTREAM_CONSUMER_INACTIVE_THRESHOLD_MS}ms)`)
-    
-    // Start message processing loop
-    processJetStreamMessages(subRef)
   }
 
-  /**
-   * Unsubscribe a widget from a subject
-   */
-  function unsubscribe(widgetId: string, config: DataSourceConfig) {
-    if (!config.subject) return
+  async function processMessages(subRef: SubscriptionRef, isJS: boolean) {
+    const source = isJS ? subRef.iterator : subRef.natsSubscription
+    if (!source) return
+    try {
+      for await (const msg of (source as any)) {
+        if (!subRef.isActive) break
+        let data: any
+        try {
+          const text = decodeBytes(msg.data)
+          try { data = JSON.parse(text) } catch { data = text }
+        } catch { continue }
+        
+        for (const listener of subRef.listeners.values()) {
+          let value = data
+          if (listener.jsonPath) value = extractJsonPath(data, listener.jsonPath)
+          queueMessage(listener.widgetId, value, data, msg.subject)
+        }
+      }
+    } catch (err) {
+      subRef.isActive = false
+    }
+  }
 
+  function unsubscribe(widgetId: string, config: DataSourceConfig) {
     const key = getSubscriptionKey(widgetId, config)
     const subRef = subscriptions.get(key)
     if (!subRef) return
-    
-    // Remove this widget's listener
     subRef.listeners.delete(widgetId)
-    console.log(`[SubMgr] Removed listener: ${widgetId} from ${config.subject} (${subRef.listeners.size} remaining)`)
-    
-    // If no more listeners, cleanup the subscription
     if (subRef.listeners.size === 0) {
-      console.log(`[SubMgr] No listeners left, cleaning up: ${config.subject}`)
       cleanupSubscription(subRef)
       subscriptions.delete(key)
     }
   }
 
-  // ============================================================================
-  // MESSAGE PROCESSING
-  // ============================================================================
-  
-  async function processCoreMessages(subRef: SubscriptionRef) {
-    if (!subRef.natsSubscription) return
-    
-    try {
-      for await (const msg of subRef.natsSubscription) {
-        if (!subRef.isActive) {
-          console.log(`[SubMgr] Core sub inactive, stopping: ${subRef.subject}`)
-          break
-        }
-        dispatchMessage(subRef, msg.data, msg.subject)
-      }
-    } catch (err) {
-      // Subscription closed or connection lost
-      if (subRef.isActive) {
-        console.log(`[SubMgr] Core subscription ended: ${subRef.subject}`)
-        subRef.isActive = false
-      }
-    }
-  }
-
-  async function processJetStreamMessages(subRef: SubscriptionRef) {
-    if (!subRef.iterator) return
-    
-    try {
-      for await (const msg of subRef.iterator) {
-        if (!subRef.isActive) {
-          console.log(`[SubMgr] JS sub inactive, stopping: ${subRef.subject}`)
-          break
-        }
-        msg.ack()
-        dispatchMessage(subRef, msg.data, msg.subject)
-      }
-    } catch (err) {
-      // Iterator ended or connection lost
-      if (subRef.isActive) {
-        console.log(`[SubMgr] JetStream subscription ended: ${subRef.subject}`)
-        subRef.isActive = false
-      }
-    }
-  }
-
-  /**
-   * Dispatch message to all listeners
-   */
-  function dispatchMessage(subRef: SubscriptionRef, rawData: Uint8Array, subject: string) {
-    let data: any
-    try {
-      const text = decodeBytes(rawData)
-      try { data = JSON.parse(text) } catch { data = text }
-    } catch {
-      return // Can't decode, skip
-    }
-    
-    for (const listener of subRef.listeners.values()) {
-      try {
-        let value = data
-        if (listener.jsonPath) {
-          value = extractJsonPath(data, listener.jsonPath)
-        }
-        queueMessage(listener.widgetId, value, data, subject)
-      } catch {
-        // Ignore processing errors for individual listeners
-      }
-    }
-  }
-
-  // ============================================================================
-  // CLEANUP
-  // ============================================================================
-
-  /**
-   * Cleanup a single subscription
-   * 
-   * For Core subscriptions: unsubscribe immediately
-   * For JetStream: stop the iterator, let server GC the ephemeral consumer
-   */
   function cleanupSubscription(subRef: SubscriptionRef) {
     subRef.isActive = false
-    
-    if (subRef.natsSubscription) {
-      try { 
-        subRef.natsSubscription.unsubscribe() 
-      } catch { /* ignore */ }
-      subRef.natsSubscription = undefined
-    }
-    
-    if (subRef.iterator) {
-      try { 
-        subRef.iterator.stop() 
-        // Note: We don't explicitly delete the ephemeral consumer because:
-        // 1. It has an inactive_threshold set (30s by default)
-        // 2. The server will clean it up automatically after inactivity
-        // 3. Explicit delete can fail if consumer already gone or connection lost
-      } catch { /* ignore */ }
-      subRef.iterator = undefined
-    }
-  }
-  
-  /**
-   * Cleanup all subscriptions
-   */
-  function cleanupAll() {
-    console.log(`[SubMgr] Cleaning up all subscriptions (${subscriptions.size})`)
-    
-    for (const subRef of subscriptions.values()) {
-      cleanupSubscription(subRef)
-    }
-    subscriptions.clear()
-    messageQueue.length = 0
-    
-    // Reset stats
-    stats.messagesReceived = 0
-    stats.messagesDropped = 0
-    stats.lastDropTime = null
-    stats.subscriptionErrors = 0
+    if (subRef.natsSubscription) subRef.natsSubscription.unsubscribe()
+    if (subRef.iterator) subRef.iterator.stop()
   }
 
-  // ============================================================================
-  // UTILITIES
-  // ============================================================================
-  
   function extractJsonPath(data: any, path: string): any {
     if (!path || path === '$') return data
-    try {
-      return JSONPath({ path, json: data, wrap: false })
-    } catch {
-      return null
-    }
+    try { return JSONPath({ path, json: data, wrap: false }) } catch { return null }
   }
-  
+
   function getStats() {
     const subscriptionList: any[] = []
-    
     for (const [key, subRef] of subscriptions.entries()) {
       subscriptionList.push({
         key,
         subject: subRef.subject,
         listenerCount: subRef.listeners.size,
         isActive: subRef.isActive,
-        type: subRef.isJetStream ? 'JetStream' : 'Core',
+        type: subRef.isJetStream ? 'JetStream (Ordered)' : 'Core',
         error: subRef.lastError || null
       })
     }
-    
     return {
       subscriptionCount: subscriptions.size,
-      queueSize: messageQueue.length,
-      maxQueueSize: MAX_QUEUE_SIZE,
       messagesReceived: stats.messagesReceived,
       messagesDropped: stats.messagesDropped,
       lastDropTime: stats.lastDropTime,
       subscriptionErrors: stats.subscriptionErrors,
-      subscriptions: subscriptionList,
+      queueSize: messageQueue.length,
+      maxQueueSize: MAX_QUEUE_SIZE,
+      subscriptions: subscriptionList
     }
   }
-  
-  function isSubscribed(widgetId: string, config: DataSourceConfig): boolean {
-    const key = getSubscriptionKey(widgetId, config)
-    const subRef = subscriptions.get(key)
-    return !!subRef && subRef.listeners.has(widgetId)
-  }
-  
-  return {
-    subscribe,
-    unsubscribe,
-    cleanupAll,
-    extractJsonPath,
-    getStats,
-    isSubscribed,
-  }
-}
 
-// ============================================================================
-// SINGLETON INSTANCE
-// ============================================================================
+  return { subscribe, unsubscribe, getStats, extractJsonPath }
+}
 
 let managerInstance: ReturnType<typeof useSubscriptionManager> | null = null
-
-export function getSubscriptionManager(): ReturnType<typeof useSubscriptionManager> {
-  if (!managerInstance) {
-    managerInstance = useSubscriptionManager()
-  }
+export function getSubscriptionManager() {
+  if (!managerInstance) managerInstance = useSubscriptionManager()
   return managerInstance
-}
-
-/**
- * Reset the singleton (useful for testing or full app reset)
- */
-export function resetSubscriptionManager(): void {
-  if (managerInstance) {
-    managerInstance.cleanupAll()
-    managerInstance = null
-  }
 }
